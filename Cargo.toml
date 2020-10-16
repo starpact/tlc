@@ -1,0 +1,10 @@
+[package]
+name = "videos"
+version = "0.1.0"
+authors = ["starpact"]
+edition = "2018"
+
+
+[dependencies]
+ffmpeg-next = "4.3.7"
+"ndarray" = "0.13.1"
