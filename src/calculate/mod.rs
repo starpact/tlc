@@ -104,7 +104,7 @@ pub fn detect_peak(g2d: Array2<u8>) -> Array1<usize> {
 
 /// *read temperature data from excel*
 /// ### Argument:
-/// temperature record(start line number, total frame number, column numbers that records the temperatures, excel_path)
+/// temperature record(start line number, total frame number, column numbers that record the temperatures, excel_path)
 /// ### Return:
 /// 2D matrix of temperature data
 pub fn read_excel_temp(temp_record: (usize, usize, &Vec<usize>, &String)) -> Result<Array2<f64>, Error> {
