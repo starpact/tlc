@@ -5,6 +5,7 @@ use ffmpeg::software::scaling::{context::Context, flag::Flags};
 use ffmpeg::util::frame::video::Video;
 use ffmpeg_next as ffmpeg;
 
+use calamine::{open_workbook, DataType, Error, Reader, Xlsx};
 use ndarray::parallel::prelude::*;
 use ndarray::prelude::*;
 
@@ -59,7 +60,11 @@ pub fn read_video(
     let mut g2d = Array2::zeros((frame_num, pix_num));
     let real_w = decoder.width() as usize * 3;
 
-    for (frame_index, (_, packet)) in (0..frame_num).zip(ictx.packets().skip(start_frame)) {
+    for ((_, packet), mut row) in ictx
+        .packets()
+        .skip(start_frame)
+        .zip(g2d.axis_iter_mut(Axis(0)))
+    {
         decoder.send_packet(&packet)?;
         let (mut raw_frame, mut rgb_frame) = (Video::empty(), Video::empty());
         decoder.receive_frame(&mut raw_frame)?;
@@ -67,7 +72,6 @@ pub fn read_video(
         // the data of each frame stores in one 1D array: rgb|rbg|rgb|...|rgb, and row_0|row_1|...|row_n
         let rgb = rgb_frame.data(0);
 
-        let mut row = g2d.row_mut(frame_index);
         let mut iter = row.iter_mut();
         for i in (0..).step_by(real_w).skip(ul_y).take(cal_h) {
             for j in (i..).skip(1).step_by(3).skip(ul_x).take(cal_w) {
@@ -93,4 +97,34 @@ pub fn detect_peak(g2d: Array2<u8>) -> Array1<usize> {
         .collect_into_vec(&mut peak_frames);
 
     Array1::from(peak_frames)
+}
+
+/// *read temperature data from excel*
+/// ### Argument:
+/// temperature record(start line number, total frame number, column numbers that records the temperatures, excel_path)
+/// ### Return:
+/// 2D matrix of temperature data
+pub fn read_excel(temp_record: (usize, usize, &Vec<usize>, &String)) -> Result<Array2<f64>, Error> {
+    let (start_line, frame_num, columns, temp_path) = temp_record;
+    let mut excel: Xlsx<_> = open_workbook(temp_path).unwrap();
+    let sheet = excel.worksheet_range_at(0).expect("no sheet exsits")?;
+
+    let mut temps = Array2::zeros((frame_num, columns.len()));
+
+    for (excel_row, mut temp_row) in sheet
+        .rows()
+        .skip(start_line)
+        .take(frame_num)
+        .zip(temps.axis_iter_mut(Axis(0)))
+    {
+        for (&index, temp) in columns.iter().zip(temp_row.iter_mut()) {
+            if let DataType::Float(t) = excel_row[index] {
+                *temp = t;
+            } else {
+                return Err(Error::Msg("temperature data should store as float numbers"));
+            }
+        }
+    }
+
+    Ok(temps)
 }
