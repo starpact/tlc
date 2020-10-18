@@ -38,9 +38,9 @@ fn test_detect_peak() {
 
 #[test]
 fn test_read_excel() {
-    let temp_path = &"E:\\research\\CFD\\cfd_result.xlsx".to_owned();
-    let temp_record = (1, 5, &vec![2, 3, 4, 5, 6, 7, 8], temp_path);
-    let res = read_excel(temp_record).unwrap();
+    let excel_path = &"E:\\research\\CFD\\cfd_result.xlsx".to_owned();
+    let temp_record = (1, 5, &vec![2, 3, 4, 5, 6, 7, 8], excel_path);
+    let res = read_excel_temp(temp_record).unwrap();
 
     println!("{}", res);
 }

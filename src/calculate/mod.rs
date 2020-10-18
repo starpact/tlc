@@ -1,9 +1,10 @@
 mod test;
 
+use ffmpeg_next as ffmpeg;
+
 use ffmpeg::format::{input, Pixel};
 use ffmpeg::software::scaling::{context::Context, flag::Flags};
 use ffmpeg::util::frame::video::Video;
-use ffmpeg_next as ffmpeg;
 
 use calamine::{open_workbook, DataType, Error, Reader, Xlsx};
 use ndarray::parallel::prelude::*;
@@ -69,7 +70,9 @@ pub fn read_video(
         let (mut raw_frame, mut rgb_frame) = (Video::empty(), Video::empty());
         decoder.receive_frame(&mut raw_frame)?;
         scaler.run(&raw_frame, &mut rgb_frame)?;
-        // the data of each frame stores in one 1D array: rgb|rbg|rgb|...|rgb, and row_0|row_1|...|row_n
+        // the data of each frame stores in one 1D array: 
+        // ||rgbrgbrgb...rgb|rgbrgbrgb...rgb|......|rgbrgbrgb...rgb||
+        // ||.....row_0.....|.....row_1.....|......|.....row_n.....||
         let rgb = rgb_frame.data(0);
 
         let mut iter = row.iter_mut();
@@ -104,7 +107,7 @@ pub fn detect_peak(g2d: Array2<u8>) -> Array1<usize> {
 /// temperature record(start line number, total frame number, column numbers that records the temperatures, excel_path)
 /// ### Return:
 /// 2D matrix of temperature data
-pub fn read_excel(temp_record: (usize, usize, &Vec<usize>, &String)) -> Result<Array2<f64>, Error> {
+pub fn read_excel_temp(temp_record: (usize, usize, &Vec<usize>, &String)) -> Result<Array2<f64>, Error> {
     let (start_line, frame_num, columns, temp_path) = temp_record;
     let mut excel: Xlsx<_> = open_workbook(temp_path).unwrap();
     let sheet = excel.worksheet_range_at(0).expect("no sheet exsits")?;
