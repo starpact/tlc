@@ -2,12 +2,13 @@
 
 mod io {
     use ffmpeg_next as ffmpeg;
+    use ndarray::prelude::*;
 
     use tlc::calculate::io;
 
     const VIDEO_PATH: &str = "./resource/ed2_50000_1.avi";
     const EXCEL_PATH: &str = "./resource/ed2_50000_1.xlsx";
-    const START_FRAME: usize = 0;
+    const START_FRAME: usize = 80;
     const FRAME_NUM: usize = 1486;
     const UPPER_LEFT_COORD: (usize, usize) = (38, 34);
     const REGION_SHAPE: (usize, usize) = (500, 700);
@@ -19,7 +20,7 @@ mod io {
 
         let t0 = std::time::Instant::now();
 
-        let (green_history, frame_rate) = match io::read_video(video_record, region_record) {
+        let (g2d, frame_rate) = match io::read_video(video_record, region_record) {
             Ok(res) => res,
             Err(ffmpeg::Error::InvalidData) => panic!("please check your frame settings"),
             Err(err) => panic!("{}", err),
@@ -27,7 +28,7 @@ mod io {
 
         println!("{:?}", std::time::Instant::now().duration_since(t0));
         println!("{}", frame_rate);
-        println!("{}", green_history.row(0));
+        println!("{}", g2d.row(0));
     }
 
     #[test]
@@ -44,6 +45,7 @@ mod io {
         let res = io::read_temp_excel(temp_record).unwrap();
 
         println!("{:?}", std::time::Instant::now().duration_since(t0));
-        println!("{}", res);
+        println!("{}", res.slice(s![60..70, ..]));
+        println!("{}", res.sum_axis(Axis(0)));
     }
 }

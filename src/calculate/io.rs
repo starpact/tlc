@@ -88,7 +88,7 @@ pub fn read_video(
 /// ### Argument:
 /// temperature record(start line number, total frame number, column numbers that record the temperatures, excel_path)
 /// ### Return:
-/// 2D matrix of temperature data
+/// 2D matrix of the delta temperatures between adjacent frames
 pub fn read_temp_excel(
     temp_record: (usize, usize, &Vec<usize>, &String),
 ) -> Result<Array2<f64>, calamine::Error> {
@@ -98,19 +98,21 @@ pub fn read_temp_excel(
 
     let mut temps = Array2::zeros((frame_num, columns.len()));
 
-    for (excel_row, mut temp_row) in sheet
+    for ((excel_row0, excel_row1), mut temp_row) in sheet
         .rows()
         .skip(start_line)
         .take(frame_num)
-        .zip(temps.axis_iter_mut(Axis(0)))
+        .zip(sheet.rows().skip(start_line + 1).take(frame_num - 1))
+        .zip(temps.axis_iter_mut(Axis(0)).skip(1))
     {
-        for (&index, temp) in columns.iter().zip(temp_row.iter_mut()) {
-            if let DataType::Float(t) = excel_row[index] {
-                *temp = t;
-            } else {
-                return Err(calamine::Error::Msg(
-                    "temperature data should store as float numbers",
-                ));
+        for (&index, t) in columns.iter().zip(temp_row.iter_mut()) {
+            match (&excel_row0[index], &excel_row1[index]) {
+                (&DataType::Float(t0), &DataType::Float(t1)) => *t = t1 - t0,
+                _ => {
+                    return Err(calamine::Error::Msg(
+                        "temperature data should be stored as floats",
+                    ));
+                }
             }
         }
     }
