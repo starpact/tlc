@@ -1,5 +1,3 @@
-mod test;
-
 use ffmpeg_next as ffmpeg;
 
 use ffmpeg::format::{input, Pixel};
