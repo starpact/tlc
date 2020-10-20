@@ -92,8 +92,9 @@ pub mod calculate {
                     if j == segs[curr].1 && curr + 1 < segs.len() {
                         curr += 1;
                     }
-                    *(iter.next().unwrap()) = (row0[curr] * (segs[curr].1 - j) as f64 + row0[curr + 1] * (j - segs[curr].0) as f64)
-                                    / (segs[curr].1 - segs[curr].0) as f64;
+                    *(iter.next().unwrap()) = (row0[curr] * (segs[curr].1 - j) as f64
+                        + row0[curr + 1] * (j - segs[curr].0) as f64)
+                        / (segs[curr].1 - segs[curr].0) as f64;
                 }
             }
         });
