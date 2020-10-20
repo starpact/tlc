@@ -90,7 +90,7 @@ pub fn read_video(
 /// ### Return:
 /// 2D matrix of the delta temperatures between adjacent frames
 pub fn read_temp_excel(
-    temp_record: (usize, usize, &Vec<usize>, &String),
+    temp_record: (usize, usize, &[usize], &String),
 ) -> Result<Array2<f64>, calamine::Error> {
     let (start_line, frame_num, columns, temp_path) = temp_record;
     let mut excel: Xlsx<_> = open_workbook(temp_path).unwrap();
