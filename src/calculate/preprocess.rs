@@ -16,3 +16,9 @@ pub fn detect_peak(g2d: Array2<u8>) -> Array1<usize> {
 
     Array1::from(peak_frames)
 }
+
+// pub fn filter_g2d(g2d: Array2<u8>) {}
+
+// pub fn interp1d(t2d: Array2<f64>, thermal_couple_x: &[usize]) -> Array2<f64> {
+
+// }
