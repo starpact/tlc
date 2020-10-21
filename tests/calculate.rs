@@ -81,7 +81,7 @@ pub mod calculate {
         println!("{}", t2d.sum_axis(Axis(0)));
         println!("{}", interp_x_t2d.sum_axis(Axis(0)));
     }
-
+    
     #[test]
     fn test_solve() {
         let t0 = std::time::Instant::now();
