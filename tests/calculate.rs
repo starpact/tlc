@@ -84,6 +84,7 @@ pub mod calculate {
 
     #[test]
     fn test_solve() {
+        let t0 = std::time::Instant::now();
         let (g2d, frame_rate) = example_g2d();
         let dt = 1. / frame_rate as f64;
 
@@ -101,7 +102,6 @@ pub mod calculate {
         );
 
         println!("start calculating");
-        let t0 = std::time::Instant::now();
         let hs = solve::solve(const_vals, peak_frames, delta_temps_2d, H0, MAX_ITER_NUM);
         println!("{:?}", std::time::Instant::now().duration_since(t0));
         println!("{}", hs);
