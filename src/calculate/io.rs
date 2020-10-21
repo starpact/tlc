@@ -88,7 +88,9 @@ pub fn read_video(
 /// ### Argument:
 /// temperature record(start line number, total frame number, column numbers that record the temperatures, excel_path)
 /// ### Return:
-/// 2D matrix of the delta temperatures between adjacent frames
+/// 2D matrix of the **delta** temperatures between adjacent frames
+///
+/// the first row of t2d stores the initial temperature
 pub fn read_temp_excel(
     temp_record: (usize, usize, &[usize], &String),
 ) -> Result<Array2<f64>, calamine::Error> {

@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+/// there is no erfc() in std, so use erfc() from libc
 mod cmath {
     use libc::c_double;
     extern "C" {
@@ -15,6 +16,17 @@ use ndarray::prelude::*;
 use ndarray::Zip;
 use std::f64::consts::PI;
 
+/// *semi-infinite plate heat transfer equation*
+/// ### Argument:
+/// (conductivity, diffusivity, time_step, the peak temperature(wall temp at peak frame))
+///
+/// the frame that reaches the max green value
+/// 
+/// delta temperature history of this pixel
+///
+/// heat transfer coefficient(a certain value when iterating)
+/// ### Return:
+/// equation and its derivative
 fn thermal_equation(
     const_vals: (f64, f64, f64, f64),
     peak_frame: usize,
@@ -81,7 +93,7 @@ pub fn solve(
     let mut iter = xs.iter_mut();
     for _ in 0..cal_h {
         for i in 0..cal_w {
-            *iter.next().unwrap() = i;
+            *iter.next().unwrap() = i; // will never panic
         }
     }
 
