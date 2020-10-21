@@ -15,7 +15,6 @@ use ndarray::prelude::*;
 use ndarray::Zip;
 use std::f64::consts::PI;
 
-#[inline(always)]
 fn thermal_equation(
     const_vals: (f64, f64, f64, f64),
     peak_frame: usize,
@@ -45,7 +44,6 @@ fn thermal_equation(
     (tw - t0 - res.0, res.1)
 }
 
-#[inline(always)]
 fn newtow_tangent(
     const_vals: (f64, f64, f64, f64),
     peak_frame: usize,
