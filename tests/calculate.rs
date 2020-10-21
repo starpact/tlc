@@ -13,6 +13,11 @@ pub mod calculate {
     const REGION_SHAPE: (usize, usize) = (500, 700);
     const TEMP_COLUMNS: &[usize] = &[1, 3, 4, 6, 7, 9];
     const THERMOCOUPLE_X: &[usize] = &[100, 200, 300, 400, 500, 600];
+    const PEAK_TEMPERATURE: f64 = 35.18;
+    const SOLID_THERMAL_CONDUCTIVITY: f64 = 0.19;
+    const SOLID_THERMAL_DIFFUSIVITY: f64 = 1.091e-7;
+    const H0: f64 = 100.;
+    const MAX_ITER_NUM: usize = 5;
 
     fn example_g2d() -> (Array2<u8>, usize) {
         let video_record = (START_FRAME, FRAME_NUM, &VIDEO_PATH.to_string());
@@ -75,5 +80,30 @@ pub mod calculate {
 
         println!("{}", t2d.sum_axis(Axis(0)));
         println!("{}", interp_x_t2d.sum_axis(Axis(0)));
+    }
+
+    #[test]
+    fn test_solve() {
+        let (g2d, frame_rate) = example_g2d();
+        let dt = 1. / frame_rate as f64;
+
+        let t2d = example_t2d();
+        let peak_frames = preprocess::detect_peak(g2d);
+
+        let tc_x: Vec<i32> = THERMOCOUPLE_X.iter().map(|&x| (x - UPPER_LEFT_COORD.1) as i32).collect();
+        let delta_temps_2d = preprocess::interp_x(&t2d, &tc_x, REGION_SHAPE.1);
+
+        let const_vals = (
+            SOLID_THERMAL_CONDUCTIVITY,
+            SOLID_THERMAL_DIFFUSIVITY,
+            dt,
+            PEAK_TEMPERATURE,
+        );
+
+        println!("start calculating");
+        let t0 = std::time::Instant::now();
+        let hs = solve::solve(const_vals, peak_frames, delta_temps_2d, H0, MAX_ITER_NUM);
+        println!("{:?}", std::time::Instant::now().duration_since(t0));
+        println!("{}", hs);
     }
 }

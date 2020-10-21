@@ -76,7 +76,7 @@ pub fn read_video(
         let mut iter = row.iter_mut();
         for i in (0..).step_by(real_w).skip(ul_y).take(cal_h) {
             for j in (i..).skip(1).step_by(3).skip(ul_x).take(cal_w) {
-                *(iter.next().unwrap()) = rgb[j];
+                *iter.next().unwrap() = rgb[j];
             }
         }
     }
