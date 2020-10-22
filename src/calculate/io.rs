@@ -88,9 +88,7 @@ pub fn read_video(
 /// ### Argument:
 /// temperature record(start line number, total frame number, column numbers that record the temperatures, excel_path)
 /// ### Return:
-/// 2D matrix of the **delta** temperatures between adjacent frames
-///
-/// the first row of t2d stores the initial temperature
+/// 2D matrix of the temperatures from thermocouples
 pub fn read_temp_excel(
     temp_record: (usize, usize, &[usize], &String),
 ) -> Result<Array2<f64>, calamine::Error> {
@@ -99,24 +97,21 @@ pub fn read_temp_excel(
     let sheet = excel.worksheet_range_at(0).expect("no sheet exsits")?;
 
     let mut t2d = Array2::zeros((frame_num, columns.len()));
-    let mut fst = true;
 
-    for ((excel_row0, excel_row1), mut temp_row) in sheet
+    for (excel_row, mut temp_row) in sheet
         .rows()
         .skip(start_line)
         .take(frame_num)
-        .zip(sheet.rows().skip(start_line + 1).take(frame_num))
         .zip(t2d.axis_iter_mut(Axis(0)))
     {
         for (&index, t) in columns.iter().zip(temp_row.iter_mut()) {
-            match (&excel_row0[index], &excel_row1[index]) {
-                (&DataType::Float(t0), &DataType::Float(t1)) => *t = if fst { t0 } else { t1 - t0 },
+            match excel_row[index] {
+                DataType::Float(t0) => *t = t0,
                 _ => {
                     return Err(calamine::Error::Msg("temperatures not as floats"));
                 }
             }
         }
-        fst = false;
     }
 
     Ok(t2d)

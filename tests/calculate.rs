@@ -16,7 +16,7 @@ pub mod calculate {
     const PEAK_TEMPERATURE: f64 = 35.18;
     const SOLID_THERMAL_CONDUCTIVITY: f64 = 0.19;
     const SOLID_THERMAL_DIFFUSIVITY: f64 = 1.091e-7;
-    const H0: f64 = 100.;
+    const H0: f64 = 50.;
     const MAX_ITER_NUM: usize = 5;
 
     fn example_g2d() -> (Array2<u8>, usize) {
@@ -51,8 +51,8 @@ pub mod calculate {
         let res = example_t2d();
         println!("{:?}", std::time::Instant::now().duration_since(t0));
 
-        println!("{}", res.slice(s![..10, ..]));
-        println!("{}", res.sum_axis(Axis(0)));
+        println!("{}", res.slice(s![..3, ..]));
+        println!("{}", res.row(FRAME_NUM - 1));
     }
 
     #[test]
@@ -76,12 +76,20 @@ pub mod calculate {
         let interp_x_t2d = preprocess::interp_x(&t2d, &tc_x, REGION_SHAPE.1);
         println!("{:?}", std::time::Instant::now().duration_since(t0));
 
-        std::thread::sleep(std::time::Duration::from_secs(10));
-
-        println!("{}", t2d.sum_axis(Axis(0)));
-        println!("{}", interp_x_t2d.sum_axis(Axis(0)));
+        println!("{}", t2d.slice(s![..3, ..]));
+        println!("=================");
+        println!("{}", interp_x_t2d.slice(s![..3, ..]));
     }
-    
+
+    #[test]
+    fn test_cal_delta_temps() {
+        let t2d = example_t2d();
+        let delta_temps = solve::cal_delta_temps(t2d);
+
+        println!("{}", delta_temps.slice(s![..3, ..]));
+        println!("{}", delta_temps.sum_axis(Axis(0)));
+    }
+
     #[test]
     fn test_solve() {
         let t0 = std::time::Instant::now();
@@ -91,8 +99,11 @@ pub mod calculate {
         let t2d = example_t2d();
         let peak_frames = preprocess::detect_peak(g2d);
 
-        let tc_x: Vec<i32> = THERMOCOUPLE_X.iter().map(|&x| (x - UPPER_LEFT_COORD.1) as i32).collect();
-        let delta_temps_2d = preprocess::interp_x(&t2d, &tc_x, REGION_SHAPE.1);
+        let tc_x: Vec<i32> = THERMOCOUPLE_X
+            .iter()
+            .map(|&x| (x - UPPER_LEFT_COORD.1) as i32)
+            .collect();
+        let interp_x_t2d = preprocess::interp_x(&t2d, &tc_x, REGION_SHAPE.1);
 
         let const_vals = (
             SOLID_THERMAL_CONDUCTIVITY,
@@ -101,9 +112,16 @@ pub mod calculate {
             PEAK_TEMPERATURE,
         );
 
-        println!("start calculating");
-        let hs = solve::solve(const_vals, peak_frames, delta_temps_2d, H0, MAX_ITER_NUM);
+        println!("start calculating...");
+        let hs = solve::solve(
+            const_vals,
+            peak_frames,
+            interp_x_t2d,
+            solve::InterpMethod::Horizontal,
+            H0,
+            MAX_ITER_NUM,
+        );
         println!("{:?}", std::time::Instant::now().duration_since(t0));
-        println!("{}", hs);
+        println!("{}", hs.into_shape(REGION_SHAPE).unwrap());
     }
 }

@@ -17,9 +17,7 @@ pub fn detect_peak(g2d: Array2<u8>) -> Array1<usize> {
     Array1::from(peak_frames)
 }
 
-// pub fn filter_g2d(g2d: &mut Array2<u8>) {}
-
-/// *linearly interpolate the temperature along axis x*
+/// *linearly interpolate the temperature along axis **X***
 /// ### Argument:
 /// 2D matrix of the delta temperatures between adjacent frames
 ///
@@ -27,7 +25,7 @@ pub fn detect_peak(g2d: Array2<u8>) -> Array1<usize> {
 ///
 /// width of calculation region
 /// ### Return:
-/// 2D matrix of the interpolated **delta** temperatures
+/// 2D matrix of the interpolated temperatures
 pub fn interp_x(t2d: &Array2<f64>, tc_x: &Vec<i32>, cal_w: usize) -> Array2<f64> {
     let mut interp_x_t2d = Array2::<f64>::zeros((t2d.nrows(), cal_w));
 
