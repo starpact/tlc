@@ -22,15 +22,15 @@ pub enum InterpMethod {
     TwoDimension,
 }
 
-/// *semi-infinite plate heat transfer equation*
+/// *semi-infinite plate heat transfer equation of each pixel*
 /// ### Argument:
 /// (conductivity, diffusivity, time_step, the peak temperature(wall temp at peak frame))
 ///
 /// the frame that reaches the max green value
 ///
-/// delta temperature history of this pixel
+/// delta temperature history of this pixel(initial values in the first row)
 ///
-/// heat transfer coefficient(a certain value when iterating)
+/// heat transfer coefficient(a certain value during iterating)
 /// ### Return:
 /// equation and its derivative
 fn thermal_equation(
@@ -85,6 +85,10 @@ fn newtow_tangent(
     h
 }
 
+/// *calculate the delta temperature of adjacent frames for the convenientce of calculating*
+/// *thermal equation, and store the initial value in first row, like:*
+///
+/// `t0, t1 - t0, t2 - t1, ... tn - tn_1`
 pub fn cal_delta_temps(mut t2d: Array2<f64>) -> Array2<f64> {
     for mut col in t2d.axis_iter_mut(Axis(1)) {
         col.iter_mut().fold(0., |prev, curr| {
