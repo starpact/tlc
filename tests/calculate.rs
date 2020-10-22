@@ -16,7 +16,7 @@ pub mod calculate {
     const PEAK_TEMPERATURE: f64 = 35.18;
     const SOLID_THERMAL_CONDUCTIVITY: f64 = 0.19;
     const SOLID_THERMAL_DIFFUSIVITY: f64 = 1.091e-7;
-    const H0: f64 = 100.;
+    const H0: f64 = 50.;
     const MAX_ITER_NUM: usize = 5;
 
     fn example_g2d() -> (Array2<u8>, usize) {
@@ -76,10 +76,9 @@ pub mod calculate {
         let interp_x_t2d = preprocess::interp_x(&t2d, &tc_x, REGION_SHAPE.1);
         println!("{:?}", std::time::Instant::now().duration_since(t0));
 
-        std::thread::sleep(std::time::Duration::from_secs(10));
-
-        println!("{}", t2d.sum_axis(Axis(0)));
-        println!("{}", interp_x_t2d.sum_axis(Axis(0)));
+        println!("{}", t2d.slice(s![..2, ..]));
+        println!("=================");
+        println!("{}", interp_x_t2d.slice(s![..2, ..]));
     }
     
     #[test]
@@ -104,6 +103,6 @@ pub mod calculate {
         println!("start calculating");
         let hs = solve::solve(const_vals, peak_frames, delta_temps_2d, H0, MAX_ITER_NUM);
         println!("{:?}", std::time::Instant::now().duration_since(t0));
-        println!("{}", hs);
+        println!("{}", hs.into_shape(REGION_SHAPE).unwrap());
     }
 }
