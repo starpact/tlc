@@ -100,7 +100,7 @@ pub fn read_temp_excel(
 
     for (excel_row, mut temp_row) in sheet
         .rows()
-        .skip(start_line - 1)
+        .skip(start_line)
         .take(frame_num)
         .zip(t2d.axis_iter_mut(Axis(0)))
     {
