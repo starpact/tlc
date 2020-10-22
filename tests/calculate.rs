@@ -51,8 +51,8 @@ pub mod calculate {
         let res = example_t2d();
         println!("{:?}", std::time::Instant::now().duration_since(t0));
 
-        println!("{}", res.slice(s![..10, ..]));
-        println!("{}", res.sum_axis(Axis(0)));
+        println!("{}", res.slice(s![..3, ..]));
+        println!("{}", res.row(FRAME_NUM - 1));
     }
 
     #[test]
@@ -73,14 +73,23 @@ pub mod calculate {
         let tc_x: Vec<i32> = THERMOCOUPLE_X.iter().map(|&x| (x - ul_x) as i32).collect();
 
         let t0 = std::time::Instant::now();
-        let interp_x_t2d = preprocess::interp_x(&t2d, &tc_x, REGION_SHAPE.1);
+        let interp_x_t2d = preprocess::interp_x(t2d.view(), &tc_x, REGION_SHAPE.1);
         println!("{:?}", std::time::Instant::now().duration_since(t0));
 
-        println!("{}", t2d.slice(s![..2, ..]));
+        println!("{}", t2d.slice(s![..3, ..]));
         println!("=================");
-        println!("{}", interp_x_t2d.slice(s![..2, ..]));
+        println!("{}", interp_x_t2d.slice(s![..3, ..]));
     }
-    
+
+    #[test]
+    fn test_cal_delta_temps() {
+        let t2d = example_t2d();
+        let delta_temps = solve::cal_delta_temps(t2d);
+
+        println!("{}", delta_temps.slice(s![..3, ..]));
+        println!("{}", delta_temps.sum_axis(Axis(0)));
+    }
+
     #[test]
     fn test_solve() {
         let t0 = std::time::Instant::now();
@@ -90,8 +99,11 @@ pub mod calculate {
         let t2d = example_t2d();
         let peak_frames = preprocess::detect_peak(g2d);
 
-        let tc_x: Vec<i32> = THERMOCOUPLE_X.iter().map(|&x| (x - UPPER_LEFT_COORD.1) as i32).collect();
-        let delta_temps_2d = preprocess::interp_x(&t2d, &tc_x, REGION_SHAPE.1);
+        let tc_x: Vec<i32> = THERMOCOUPLE_X
+            .iter()
+            .map(|&x| (x - UPPER_LEFT_COORD.1) as i32)
+            .collect();
+        let interp_x_t2d = preprocess::interp_x(t2d.view(), &tc_x, REGION_SHAPE.1);
 
         let const_vals = (
             SOLID_THERMAL_CONDUCTIVITY,
@@ -100,8 +112,15 @@ pub mod calculate {
             PEAK_TEMPERATURE,
         );
 
-        println!("start calculating");
-        let hs = solve::solve(const_vals, peak_frames, delta_temps_2d, H0, MAX_ITER_NUM);
+        println!("start calculating...");
+        let hs = solve::solve(
+            const_vals,
+            peak_frames,
+            interp_x_t2d,
+            solve::InterpMethod::Horizontal,
+            H0,
+            MAX_ITER_NUM,
+        );
         println!("{:?}", std::time::Instant::now().duration_since(t0));
         println!("{}", hs.into_shape(REGION_SHAPE).unwrap());
     }
