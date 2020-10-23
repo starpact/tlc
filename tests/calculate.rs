@@ -5,33 +5,34 @@ pub mod calculate {
 
     use tlc::calculate::*;
 
-    const VIDEO_PATH: &str = "./resource/ed2_50000_1.avi";
-    const EXCEL_PATH: &str = "./resource/ed2_50000_1.xlsx";
-    const START_FRAME: usize = 80;
-    const FRAME_NUM: usize = 1486;
-    const UPPER_LEFT_COORD: (usize, usize) = (38, 34);
-    const REGION_SHAPE: (usize, usize) = (500, 700);
-    const TEMP_COLUMNS: &[usize] = &[1, 3, 4, 6, 7, 9];
-    const THERMOCOUPLE_X: &[usize] = &[100, 200, 300, 400, 500, 600];
-    const PEAK_TEMPERATURE: f64 = 35.18;
-    const SOLID_THERMAL_CONDUCTIVITY: f64 = 0.19;
-    const SOLID_THERMAL_DIFFUSIVITY: f64 = 1.091e-7;
-    const H0: f64 = 50.;
-    const MAX_ITER_NUM: usize = 5;
+    const CONFIG_PATH: &str = "./config/config.json";
 
     fn example_g2d() -> (Array2<u8>, usize) {
-        let video_record = (START_FRAME, FRAME_NUM, &VIDEO_PATH.to_string());
-        let region_record = (UPPER_LEFT_COORD, REGION_SHAPE);
+        let config_paras = io::read_config(CONFIG_PATH).unwrap();
+        let io::ConfigParas {
+            start_frame,
+            frame_num,
+            video_path,
+            upper_left_pos,
+            region_shape,
+            ..
+        } = config_paras;
+
+        let video_record = (start_frame, frame_num, &video_path.to_string());
+        let region_record = (upper_left_pos, region_shape);
         io::read_video(video_record, region_record).unwrap()
     }
 
     fn example_t2d() -> Array2<f64> {
-        let temp_record = (
-            START_FRAME,
-            FRAME_NUM,
-            TEMP_COLUMNS,
-            &EXCEL_PATH.to_string(),
-        );
+        let config_paras = io::read_config(CONFIG_PATH).unwrap();
+        let io::ConfigParas {
+            start_frame,
+            frame_num,
+            temp_colunm_num,
+            excel_path,
+            ..
+        } = config_paras;
+        let temp_record = (start_frame, frame_num, temp_colunm_num, &excel_path);
         io::read_temp_excel(temp_record).unwrap()
     }
 
@@ -47,12 +48,13 @@ pub mod calculate {
 
     #[test]
     fn test_read_temp_excel() {
+        let frame_num = io::read_config(CONFIG_PATH).unwrap().frame_num;
         let t0 = std::time::Instant::now();
         let res = example_t2d();
         println!("{:?}", std::time::Instant::now().duration_since(t0));
 
         println!("{}", res.slice(s![..3, ..]));
-        println!("{}", res.row(FRAME_NUM - 1));
+        println!("{}", res.row(frame_num - 1));
     }
 
     #[test]
@@ -68,12 +70,17 @@ pub mod calculate {
 
     #[test]
     fn test_interp_x() {
+        let config_paras = io::read_config(CONFIG_PATH).unwrap();
         let t2d = example_t2d();
-        let ul_x = UPPER_LEFT_COORD.0;
-        let tc_x: Vec<i32> = THERMOCOUPLE_X.iter().map(|&x| (x - ul_x) as i32).collect();
+        let tc_x: Vec<i32> = config_paras
+            .thermocouple_pos
+            .iter()
+            .map(|&xy| (xy.0 - config_paras.upper_left_pos.0) as i32)
+            .collect();
+        let region_shape = config_paras.region_shape;
 
         let t0 = std::time::Instant::now();
-        let interp_x_t2d = preprocess::interp_x(t2d.view(), &tc_x, REGION_SHAPE.1);
+        let interp_x_t2d = preprocess::interp_x(t2d.view(), &tc_x, region_shape.1);
         println!("{:?}", std::time::Instant::now().duration_since(t0));
 
         println!("{}", t2d.slice(s![..3, ..]));
@@ -92,6 +99,26 @@ pub mod calculate {
 
     #[test]
     fn test_solve() {
+        let config_paras = io::read_config(CONFIG_PATH).unwrap();
+        let io::ConfigParas {
+            upper_left_pos,
+            h0,
+            interp_method,
+            max_iter_num,
+            thermocouple_pos,
+            region_shape,
+            solid_thermal_conductivity,
+            solid_thermal_diffusivity,
+            peak_temp,
+            ..
+        } = config_paras;
+
+        let interp_method = match interp_method.as_str() {
+            "horizontal" => solve::InterpMethod::Horizontal,
+            "vertical" => solve::InterpMethod::Vertical,
+            "2d" => solve::InterpMethod::TwoDimension,
+            _ => panic!("wrong interpl method, please choose among horizontal/vertical/2d")
+        };
         let t0 = std::time::Instant::now();
         let (g2d, frame_rate) = example_g2d();
         let dt = 1. / frame_rate as f64;
@@ -99,17 +126,17 @@ pub mod calculate {
         let t2d = example_t2d();
         let peak_frames = preprocess::detect_peak(g2d);
 
-        let tc_x: Vec<i32> = THERMOCOUPLE_X
+        let tc_x: Vec<i32> = thermocouple_pos
             .iter()
-            .map(|&x| (x - UPPER_LEFT_COORD.1) as i32)
+            .map(|&xy| (xy.0 - upper_left_pos.0) as i32)
             .collect();
-        let interp_x_t2d = preprocess::interp_x(t2d.view(), &tc_x, REGION_SHAPE.1);
+        let interp_x_t2d = preprocess::interp_x(t2d.view(), &tc_x, region_shape.1);
 
         let const_vals = (
-            SOLID_THERMAL_CONDUCTIVITY,
-            SOLID_THERMAL_DIFFUSIVITY,
+            solid_thermal_conductivity,
+            solid_thermal_diffusivity,
             dt,
-            PEAK_TEMPERATURE,
+            peak_temp,
         );
 
         println!("start calculating...");
@@ -117,9 +144,9 @@ pub mod calculate {
             const_vals,
             peak_frames,
             interp_x_t2d,
-            solve::InterpMethod::Horizontal,
-            H0,
-            MAX_ITER_NUM,
+            interp_method,
+            h0,
+            max_iter_num,
         );
         println!("{:?}", std::time::Instant::now().duration_since(t0));
         println!("{}", hs.slice(s![..7]));
@@ -131,5 +158,11 @@ pub mod calculate {
             }
         });
         println!("{}", res.1 / res.0 as f64);
+    }
+
+    #[test]
+    fn test_read_config() {
+        let c = io::read_config("./config/config.json").unwrap();
+        println!("{:#?}", c);
     }
 }

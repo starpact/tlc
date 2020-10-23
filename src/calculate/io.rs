@@ -90,7 +90,7 @@ pub fn read_video(
 /// ### Return:
 /// 2D matrix of the temperatures from thermocouples
 pub fn read_temp_excel(
-    temp_record: (usize, usize, &[usize], &String),
+    temp_record: (usize, usize, Vec<usize>, &String),
 ) -> Result<Array2<f64>, calamine::Error> {
     let (start_line, frame_num, columns, temp_path) = temp_record;
     let mut excel: Xlsx<_> = open_workbook(temp_path).unwrap();
@@ -115,4 +115,36 @@ pub fn read_temp_excel(
     }
 
     Ok(t2d)
+}
+
+use serde::Deserialize;
+use serde_json;
+
+use std::error::Error;
+use std::fs::File;
+use std::io::BufReader;
+use std::path::Path;
+#[derive(Deserialize, Debug)]
+pub struct ConfigParas {
+    pub video_path: String,
+    pub excel_path: String,
+    pub start_frame: usize,
+    pub frame_num: usize,
+    pub upper_left_pos: (usize, usize),
+    pub region_shape: (usize, usize),
+    pub temp_colunm_num: Vec<usize>,
+    pub thermocouple_pos: Vec<(usize, usize)>,
+    pub interp_method: String,
+    pub peak_temp: f64,
+    pub solid_thermal_conductivity: f64,
+    pub solid_thermal_diffusivity: f64,
+    pub h0: f64,
+    pub max_iter_num: usize,
+}
+
+pub fn read_config<P: AsRef<Path>>(config_path: P) -> Result<ConfigParas, Box<dyn Error>> {
+    let file = File::open(config_path)?;
+    let reader = BufReader::new(file);
+    let c = serde_json::from_reader(reader)?;
+    Ok(c)
 }
