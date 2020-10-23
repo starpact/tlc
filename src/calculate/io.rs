@@ -1,13 +1,11 @@
-use ffmpeg_next as ffmpeg;
+use ndarray::prelude::*;
+
+use std::path::Path;
 
 use ffmpeg::format::{input, Pixel};
 use ffmpeg::software::scaling::{context::Context, flag::Flags};
 use ffmpeg::util::frame::video::Video;
-
-use calamine::{open_workbook, DataType, Reader, Xlsx};
-
-use ndarray::prelude::*;
-
+use ffmpeg_next as ffmpeg;
 /// *read the video and collect all green values spatially and temporally*
 /// ### Argument:
 /// video record(start frame, frame num, video path)
@@ -19,14 +17,14 @@ use ndarray::prelude::*;
 /// * pixels in rows, frames in columns, shape: (total_pix_num, frame_num)
 /// ### Paincs
 /// ffmpeg errors
-pub fn read_video(
-    video_record: (usize, usize, &String),
+pub fn read_video<P: AsRef<Path>>(
+    video_record: (usize, usize, P),
     region_record: ((usize, usize), (usize, usize)),
 ) -> Result<(Array2<u8>, usize), ffmpeg::Error> {
     ffmpeg::init().expect("ffmpeg failed to initialize");
 
     let (start_frame, frame_num, video_path) = video_record;
-    let mut ictx = input(video_path)?;
+    let mut ictx = input(&video_path)?;
     let mut decoder = ictx.stream(0).unwrap().codec().decoder().video()?;
 
     let rational = decoder.frame_rate().unwrap();
@@ -84,13 +82,14 @@ pub fn read_video(
     Ok((g2d, frame_rate))
 }
 
+use calamine::{open_workbook, DataType, Reader, Xlsx};
 /// *read temperature data from excel*
 /// ### Argument:
 /// temperature record(start line number, total frame number, column numbers that record the temperatures, excel_path)
 /// ### Return:
 /// 2D matrix of the temperatures from thermocouples
-pub fn read_temp_excel(
-    temp_record: (usize, usize, Vec<usize>, &String),
+pub fn read_temp_excel<P: AsRef<Path>>(
+    temp_record: (usize, usize, Vec<usize>, P),
 ) -> Result<Array2<f64>, calamine::Error> {
     let (start_line, frame_num, columns, temp_path) = temp_record;
     let mut excel: Xlsx<_> = open_workbook(temp_path).unwrap();
@@ -123,7 +122,7 @@ use serde_json;
 use std::error::Error;
 use std::fs::File;
 use std::io::BufReader;
-use std::path::Path;
+
 #[derive(Deserialize, Debug)]
 pub struct ConfigParas {
     pub video_path: String,
