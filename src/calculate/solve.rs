@@ -88,9 +88,12 @@ fn newtow_tangent(
 /// *calculate the delta temperature of adjacent frames for the convenientce of calculating*
 /// *thermal equation, and store the initial value in first row, like:*
 ///
-/// `t0, t1 - t0, t2 - t1, ... tn - tn_1`
+/// `t0(average), t1 - t0, t2 - t1, ... tn - tn_1`
 pub fn cal_delta_temps(mut t2d: Array2<f64>) -> Array2<f64> {
     for mut col in t2d.axis_iter_mut(Axis(1)) {
+        if let Some(t0) = col.slice(s![..4]).mean() {
+            col[0] = t0;
+        }
         col.iter_mut().fold(0., |prev, curr| {
             let tmp = *curr;
             *curr -= prev;

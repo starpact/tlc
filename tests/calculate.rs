@@ -122,6 +122,14 @@ pub mod calculate {
             MAX_ITER_NUM,
         );
         println!("{:?}", std::time::Instant::now().duration_since(t0));
-        println!("{}", hs.into_shape(REGION_SHAPE).unwrap());
+        println!("{}", hs.slice(s![..7]));
+        let res = hs.iter().fold((0, 0.), |(count, sum), &h| {
+            if h.is_finite() {
+                (count + 1, sum + h)
+            } else {
+                (count, sum)
+            }
+        });
+        println!("{}", res.1 / res.0 as f64);
     }
 }
