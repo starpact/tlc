@@ -18,12 +18,12 @@
     ],
     "thermocouple_pos": [
         [
-            -100,
-            0
+            0,
+            -100
         ],
         [
-            1380,
-            0
+            0,
+            1380
         ]
     ],
     "interp_method": "horizontal",

@@ -75,7 +75,7 @@ pub mod calculate {
         let tc_x: Vec<i32> = config_paras
             .thermocouple_pos
             .iter()
-            .map(|&pos| pos.0 as i32 - config_paras.upper_left_pos.0 as i32)
+            .map(|&pos| pos.1 as i32 - config_paras.upper_left_pos.1 as i32)
             .collect();
         let region_shape = config_paras.region_shape;
 
@@ -128,7 +128,7 @@ pub mod calculate {
 
         let tc_x: Vec<i32> = thermocouple_pos
             .iter()
-            .map(|&pos| pos.0 as i32 - upper_left_pos.0 as i32)
+            .map(|&pos| pos.1 as i32 - upper_left_pos.1 as i32)
             .collect();
         let interp_x_t2d = preprocess::interp_x(t2d.view(), &tc_x, region_shape.1);
 
