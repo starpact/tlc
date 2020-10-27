@@ -19,18 +19,18 @@ use ndarray::prelude::*;
 /// * pixels in rows, frames in columns, shape: (total_pix_num, frame_num)
 /// ### Paincs
 /// ffmpeg errors
-pub fn read_video(
-    video_record: (usize, usize, &String),
+pub fn read_video<P: AsRef<Path>>(
+    video_record: (usize, usize, P),
     region_record: ((usize, usize), (usize, usize)),
 ) -> Result<(Array2<u8>, usize), ffmpeg::Error> {
     ffmpeg::init().expect("ffmpeg failed to initialize");
 
     let (start_frame, frame_num, video_path) = video_record;
-    let mut ictx = input(video_path)?;
+    let mut ictx = input(&video_path)?;
     let mut decoder = ictx.stream(0).unwrap().codec().decoder().video()?;
 
     let rational = decoder.frame_rate().unwrap();
-    let frame_rate = (rational.numerator() / rational.denominator()) as usize;
+    let frame_rate = (rational.numerator() as f64 / rational.denominator() as f64).round() as usize;
     let total_frame = ictx.duration() as usize * frame_rate / 1_000_000;
 
     if start_frame + frame_num >= total_frame {
@@ -89,8 +89,8 @@ pub fn read_video(
 /// temperature record(start line number, total frame number, column numbers that record the temperatures, excel_path)
 /// ### Return:
 /// 2D matrix of the temperatures from thermocouples
-pub fn read_temp_excel(
-    temp_record: (usize, usize, Vec<usize>, &String),
+pub fn read_temp_excel<P: AsRef<Path>>(
+    temp_record: (usize, usize, Vec<usize>, P),
 ) -> Result<Array2<f64>, calamine::Error> {
     let (start_line, frame_num, columns, temp_path) = temp_record;
     let mut excel: Xlsx<_> = open_workbook(temp_path).unwrap();
@@ -129,11 +129,12 @@ pub struct ConfigParas {
     pub video_path: String,
     pub excel_path: String,
     pub start_frame: usize,
+    pub start_line: usize,
     pub frame_num: usize,
     pub upper_left_pos: (usize, usize),
     pub region_shape: (usize, usize),
     pub temp_colunm_num: Vec<usize>,
-    pub thermocouple_pos: Vec<(usize, usize)>,
+    pub thermocouple_pos: Vec<(i32, i32)>,
     pub interp_method: String,
     pub peak_temp: f64,
     pub solid_thermal_conductivity: f64,

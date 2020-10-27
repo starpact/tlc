@@ -26,13 +26,13 @@ pub mod calculate {
     fn example_t2d() -> Array2<f64> {
         let config_paras = io::read_config(CONFIG_PATH).unwrap();
         let io::ConfigParas {
-            start_frame,
+            start_line,
             frame_num,
             temp_colunm_num,
             excel_path,
             ..
         } = config_paras;
-        let temp_record = (start_frame, frame_num, temp_colunm_num, &excel_path);
+        let temp_record = (start_line, frame_num, temp_colunm_num, &excel_path);
         io::read_temp_excel(temp_record).unwrap()
     }
 
@@ -75,7 +75,7 @@ pub mod calculate {
         let tc_x: Vec<i32> = config_paras
             .thermocouple_pos
             .iter()
-            .map(|&xy| (xy.0 - config_paras.upper_left_pos.0) as i32)
+            .map(|&pos| pos.0 as i32 - config_paras.upper_left_pos.0 as i32)
             .collect();
         let region_shape = config_paras.region_shape;
 
@@ -128,7 +128,7 @@ pub mod calculate {
 
         let tc_x: Vec<i32> = thermocouple_pos
             .iter()
-            .map(|&xy| (xy.0 - upper_left_pos.0) as i32)
+            .map(|&pos| pos.0 as i32 - upper_left_pos.0 as i32)
             .collect();
         let interp_x_t2d = preprocess::interp_x(t2d.view(), &tc_x, region_shape.1);
 
