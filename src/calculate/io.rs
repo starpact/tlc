@@ -1,11 +1,11 @@
 use ndarray::prelude::*;
-
 use std::path::Path;
+
+use ffmpeg_next as ffmpeg;
 
 use ffmpeg::format::{input, Pixel};
 use ffmpeg::software::scaling::{context::Context, flag::Flags};
 use ffmpeg::util::frame::video::Video;
-use ffmpeg_next as ffmpeg;
 /// *read the video and collect all green values spatially and temporally*
 /// ### Argument:
 /// video record(start frame, frame num, video path)
