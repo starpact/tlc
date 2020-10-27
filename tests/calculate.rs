@@ -5,7 +5,7 @@ pub mod calculate {
 
     use tlc::calculate::*;
 
-    const CONFIG_PATH: &str = "./config/config.json";
+    const CONFIG_PATH: &str = "./config/config_large.json";
 
     fn example_g2d() -> (Array2<u8>, usize) {
         let config_paras = io::read_config(CONFIG_PATH).unwrap();
@@ -120,16 +120,20 @@ pub mod calculate {
             _ => panic!("wrong interpl method, please choose among horizontal/vertical/2d")
         };
         let t0 = std::time::Instant::now();
+        println!("read video...");
         let (g2d, frame_rate) = example_g2d();
         let dt = 1. / frame_rate as f64;
 
+        println!("read excel...");
         let t2d = example_t2d();
+        println!("detect peak...");
         let peak_frames = preprocess::detect_peak(g2d);
 
         let tc_x: Vec<i32> = thermocouple_pos
             .iter()
             .map(|&pos| pos.1 as i32 - upper_left_pos.1 as i32)
             .collect();
+        println!("interpolate...");
         let interp_x_t2d = preprocess::interp_x(t2d.view(), &tc_x, region_shape.1);
 
         let const_vals = (
