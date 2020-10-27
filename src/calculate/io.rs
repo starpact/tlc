@@ -1,13 +1,11 @@
-use ffmpeg_next as ffmpeg;
+use ndarray::prelude::*;
+
+use std::path::Path;
 
 use ffmpeg::format::{input, Pixel};
 use ffmpeg::software::scaling::{context::Context, flag::Flags};
 use ffmpeg::util::frame::video::Video;
-
-use calamine::{open_workbook, DataType, Reader, Xlsx};
-
-use ndarray::prelude::*;
-
+use ffmpeg_next as ffmpeg;
 /// *read the video and collect all green values spatially and temporally*
 /// ### Argument:
 /// video record(start frame, frame num, video path)
@@ -84,6 +82,7 @@ pub fn read_video<P: AsRef<Path>>(
     Ok((g2d, frame_rate))
 }
 
+use calamine::{open_workbook, DataType, Reader, Xlsx};
 /// *read temperature data from excel*
 /// ### Argument:
 /// temperature record(start line number, total frame number, column numbers that record the temperatures, excel_path)
@@ -123,7 +122,7 @@ use serde_json;
 use std::error::Error;
 use std::fs::File;
 use std::io::BufReader;
-use std::path::Path;
+
 #[derive(Deserialize, Debug)]
 pub struct ConfigParas {
     pub video_path: String,
