@@ -9,8 +9,8 @@
         0
     ],
     "region_shape": [
-        1024,
-        1280
+        1000,
+        1270
     ],
     "temp_colunm_num": [
         10,
@@ -18,12 +18,12 @@
     ],
     "thermocouple_pos": [
         [
-            -100,
-            0
+            0,
+            -100
         ],
         [
-            1380,
-            0
+            0,
+            1380
         ]
     ],
     "interp_method": "horizontal",

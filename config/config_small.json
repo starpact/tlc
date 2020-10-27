@@ -2,6 +2,7 @@
     "video_path": "./resource/ed2_50000_1.avi",
     "excel_path": "./resource/ed2_50000_1.xlsx",
     "start_frame": 80,
+    "start_line": 80,
     "frame_num": 1486,
     "upper_left_pos": [
         38,
@@ -21,28 +22,28 @@
     ],
     "thermocouple_pos": [
         [
-            100,
-            0
+            0,
+            100
         ],
         [
-            200,
-            0
+            0,
+            200
         ],
         [
-            300,
-            0
+            0,
+            300
         ],
         [
-            400,
-            0
+            0,
+            400
         ],
         [
-            500,
-            0
+            0,
+            500
         ],
         [
-            600,
-            0
+            0,
+            600
         ]
     ],
     "interp_method": "horizontal",
