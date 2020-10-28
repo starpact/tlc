@@ -11,7 +11,11 @@ pub fn detect_peak(g2d: Array2<u8>) -> Array1<usize> {
 
     g2d.axis_iter(Axis(1))
         .into_par_iter()
-        .map(|column| column.iter().enumerate().max_by_key(|x| x.1).unwrap().0)
+        // .map(|column| column.iter().enumerate().max_by_key(|x| x.1).unwrap().0)
+        .map(|column| column.iter().enumerate().fold((0, 0, 0), |(mi_l, mi_r, mg), (i, &g)| {
+            if g > mg { (i, i, g) } else if g == mg { (mi_l, i, g) } else { (mi_l, mi_r, mg) }
+        }))
+        .map(|x| (x.0 + x.1) >> 1)
         .collect_into_vec(&mut peak_frames);
 
     Array1::from(peak_frames)

@@ -47,7 +47,7 @@ fn thermal_equation(
             .iter()
             .skip(1)
             .take(peak_frame - 1)
-            .fold((0., 0., 0.), |tmp, &delta_temp| {
+            .fold((0., 0., (peak_frame - 1) as f64 * dt), |tmp, &delta_temp| {
                 let (f, df, t) = tmp;
                 let at = a * t;
                 let er = erfc(h * at.sqrt() / k);
@@ -56,7 +56,7 @@ fn thermal_equation(
                     * (2. * at.sqrt() / k / PI.sqrt()
                         - (2. * at * h * f64::exp(at * h.powf(2.) / k.powf(2.)) * er) / k.powf(2.));
 
-                (f + iter, df + d_iter, t + dt)
+                (f + iter, df + d_iter, t - dt)
             });
 
     (tw - t0 - res.0, res.1)
