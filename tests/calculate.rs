@@ -153,7 +153,7 @@ pub mod calculate {
             max_iter_num,
         );
         println!("{:?}", std::time::Instant::now().duration_since(t0));
-        println!("{}", hs.slice(s![..7]));
+        println!("{}", hs.slice(s![..10]));
         let res = hs.iter().fold((0, 0.), |(count, sum), &h| {
             if h.is_finite() {
                 (count + 1, sum + h)
@@ -161,12 +161,12 @@ pub mod calculate {
                 (count, sum)
             }
         });
-        println!("{}", res.1 / res.0 as f64);
+        println!("{}", res.1 / res.0 as f64 * 0.03429 / 0.0276);
     }
 
     #[test]
     fn test_read_config() {
-        let c = io::read_config("./config/config.json").unwrap();
+        let c = io::read_config("./config/config_small.json").unwrap();
         println!("{:#?}", c);
     }
 }
