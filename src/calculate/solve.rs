@@ -16,12 +16,6 @@ use ndarray::prelude::*;
 use ndarray::Zip;
 use std::f64::consts::PI;
 
-pub enum InterpMethod {
-    Horizontal,
-    Vertical,
-    TwoDimension,
-}
-
 /// *semi-infinite plate heat transfer equation of each pixel*
 /// ### Argument:
 /// (conductivity, diffusivity, time_step, the peak temperature(wall temp at peak frame))
@@ -42,22 +36,20 @@ fn thermal_equation(
     let (k, a, dt, tw) = const_vals;
     let t0 = delta_temps[0];
 
-    let res =
-        delta_temps
-            .iter()
-            .skip(1)
-            .take(peak_frame - 1)
-            .fold((0., 0., (peak_frame - 1) as f64 * dt), |tmp, &delta_temp| {
-                let (f, df, t) = tmp;
-                let at = a * t;
-                let er = erfc(h * at.sqrt() / k);
-                let iter = (1. - f64::exp(h.powf(2.) * at / k.powf(2.)) * er) * delta_temp;
-                let d_iter = -delta_temp
-                    * (2. * at.sqrt() / k / PI.sqrt()
-                        - (2. * at * h * f64::exp(at * h.powf(2.) / k.powf(2.)) * er) / k.powf(2.));
+    let res = delta_temps.iter().skip(1).take(peak_frame - 1).fold(
+        (0., 0., (peak_frame - 1) as f64 * dt),
+        |tmp, &delta_temp| {
+            let (f, df, t) = tmp;
+            let at = a * t;
+            let er = erfc(h * at.sqrt() / k);
+            let iter = (1. - f64::exp(h.powf(2.) * at / k.powf(2.)) * er) * delta_temp;
+            let d_iter = -delta_temp
+                * (2. * at.sqrt() / k / PI.sqrt()
+                    - (2. * at * h * f64::exp(at * h.powf(2.) / k.powf(2.)) * er) / k.powf(2.));
 
-                (f + iter, df + d_iter, t - dt)
-            });
+            (f + iter, df + d_iter, t - dt)
+        },
+    );
 
     (tw - t0 - res.0, res.1)
 }
@@ -107,36 +99,22 @@ pub fn cal_delta_temps(mut t2d: Array2<f64>) -> Array2<f64> {
 pub fn solve(
     const_vals: (f64, f64, f64, f64),
     peak_frames: Array1<usize>,
-    t2d: Array2<f64>,
-    interp_method: InterpMethod,
+    interp_t2d: Array2<f64>,
+    query_index: Array1<usize>,
     h0: f64,
     max_iter_num: usize,
 ) -> Array1<f64> {
-    match interp_method {
-        InterpMethod::Horizontal => {}
-        _ => unimplemented!("在做了！"),
-    }
-    let (pix_num, cal_w) = (peak_frames.len(), t2d.ncols());
-    let cal_h = pix_num / cal_w;
-    let mut hs = Array1::zeros(pix_num);
-    let mut xs = Array1::zeros(pix_num);
-    let mut iter = xs.iter_mut();
-    for _ in 0..cal_h {
-        for i in 0..cal_w {
-            *iter.next().unwrap() = i; // will never panic
-        }
-    }
-
-    let delta_temps_2d = cal_delta_temps(t2d);
+    let mut hs = Array1::zeros(query_index.len());
+    let delta_temps_2d = cal_delta_temps(interp_t2d);
 
     Zip::from(&peak_frames)
-        .and(&xs)
+        .and(&query_index)
         .and(&mut hs)
-        .par_apply(|&peak_frame, &x, h| {
+        .par_apply(|&peak_frame, &index, h| {
             *h = newtow_tangent(
                 const_vals,
                 peak_frame,
-                delta_temps_2d.column(x),
+                delta_temps_2d.column(index),
                 h0,
                 max_iter_num,
             );

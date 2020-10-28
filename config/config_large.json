@@ -9,12 +9,12 @@
         100
     ],
     "region_shape": [
-        600,
-        600
+        300,
+        300
     ],
     "temp_colunm_num": [
         14,
-        14
+        10
     ],
     "thermocouple_pos": [
         [

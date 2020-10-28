@@ -6,6 +6,7 @@ use ffmpeg_next as ffmpeg;
 use ffmpeg::format::{input, Pixel};
 use ffmpeg::software::scaling::{context::Context, flag::Flags};
 use ffmpeg::util::frame::video::Video;
+
 /// *read the video and collect all green values spatially and temporally*
 /// ### Argument:
 /// video record(start frame, frame num, video path)
@@ -83,6 +84,7 @@ pub fn read_video<P: AsRef<Path>>(
 }
 
 use calamine::{open_workbook, DataType, Reader, Xlsx};
+
 /// *read temperature data from excel*
 /// ### Argument:
 /// temperature record(start line number, total frame number, column numbers that record the temperatures, excel_path)
