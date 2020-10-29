@@ -72,15 +72,28 @@ pub mod calculate {
     fn test_interp_x() {
         let config_paras = io::read_config(CONFIG_PATH).unwrap();
         let t2d = example_t2d();
-        let tc_x: Vec<i32> = config_paras
-            .thermocouple_pos
-            .iter()
-            .map(|&pos| pos.1 as i32 - config_paras.upper_left_pos.1 as i32)
-            .collect();
-        let region_shape = config_paras.region_shape;
+        let io::ConfigParas {
+            region_shape,
+            thermocouple_pos,
+            upper_left_pos,
+            ..
+        } = config_paras;
+        let interp_method = match config_paras.interp_method.as_str() {
+            "horzontal" => preprocess::InterpMethod::Horizontal,
+            "vertical" => preprocess::InterpMethod::Vertical,
+            "2d" => preprocess::InterpMethod::TwoDimension,
+            _ => panic!("wrong interpl method, please choose among horizontal/vertical/2d"),
+        };
 
         let t0 = std::time::Instant::now();
-        let interp_x_t2d = preprocess::interp_x(t2d.view(), &tc_x, region_shape.1);
+        let interp_x_t2d = preprocess::interp(
+            t2d.view(),
+            &thermocouple_pos,
+            interp_method,
+            upper_left_pos,
+            region_shape,
+        )
+        .0;
         println!("{:?}", std::time::Instant::now().duration_since(t0));
 
         println!("{}", t2d.slice(s![..3, ..]));
@@ -114,10 +127,10 @@ pub mod calculate {
         } = config_paras;
 
         let interp_method = match interp_method.as_str() {
-            "horizontal" => solve::InterpMethod::Horizontal,
-            "vertical" => solve::InterpMethod::Vertical,
-            "2d" => solve::InterpMethod::TwoDimension,
-            _ => panic!("wrong interpl method, please choose among horizontal/vertical/2d")
+            "horizontal" => preprocess::InterpMethod::Horizontal,
+            "vertical" => preprocess::InterpMethod::Vertical,
+            "2d" => preprocess::InterpMethod::TwoDimension,
+            _ => panic!("wrong interpl method, please choose among horizontal/vertical/2d"),
         };
         let t0 = std::time::Instant::now();
         println!("read video...");
@@ -129,13 +142,14 @@ pub mod calculate {
         println!("detect peak...");
         let peak_frames = preprocess::detect_peak(g2d);
 
-        let tc_x: Vec<i32> = thermocouple_pos
-            .iter()
-            .map(|&pos| pos.1 as i32 - upper_left_pos.1 as i32)
-            .collect();
         println!("interpolate...");
-        let interp_x_t2d = preprocess::interp_x(t2d.view(), &tc_x, region_shape.1);
-
+        let (interp_t2d, query_index) = preprocess::interp(
+            t2d.view(),
+            &thermocouple_pos,
+            interp_method,
+            upper_left_pos,
+            region_shape,
+        );
         let const_vals = (
             solid_thermal_conductivity,
             solid_thermal_diffusivity,
@@ -147,8 +161,8 @@ pub mod calculate {
         let hs = solve::solve(
             const_vals,
             peak_frames,
-            interp_x_t2d,
-            interp_method,
+            interp_t2d,
+            query_index,
             h0,
             max_iter_num,
         );
