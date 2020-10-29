@@ -16,7 +16,7 @@ use ffmpeg::util::frame::video::Video;
 /// (green values 2D matrix, frame rate)
 ///
 /// * pixels in rows, frames in columns, shape: (total_pix_num, frame_num)
-/// ### Paincs
+/// ### Panics
 /// ffmpeg errors
 pub fn read_video<P: AsRef<Path>>(
     video_record: (usize, usize, P),
@@ -134,7 +134,7 @@ pub struct ConfigParas {
     pub frame_num: usize,
     pub upper_left_pos: (usize, usize),
     pub region_shape: (usize, usize),
-    pub temp_colunm_num: Vec<usize>,
+    pub temp_column_num: Vec<usize>,
     pub thermocouple_pos: Vec<(i32, i32)>,
     pub interp_method: String,
     pub peak_temp: f64,

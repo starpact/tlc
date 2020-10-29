@@ -77,7 +77,7 @@ fn newtow_tangent(
     h
 }
 
-/// *calculate the delta temperature of adjacent frames for the convenientce of calculating*
+/// *calculate the delta temperature of adjacent frames for the convenience of calculating*
 /// *thermal equation, and store the initial value in first row, like:*
 ///
 /// `t0(average), t1 - t0, t2 - t1, ... tn - tn_1`

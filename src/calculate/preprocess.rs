@@ -69,7 +69,7 @@ pub fn interp(
 /// ### Argument:
 /// 2D matrix of the delta temperatures between adjacent frames
 ///
-/// realtative x positions of thermocouples in the calculation region
+/// relative x positions of thermocouples in the calculation region
 ///
 /// width of calculation region
 /// ### Return:

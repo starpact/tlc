@@ -28,11 +28,11 @@ pub mod calculate {
         let io::ConfigParas {
             start_line,
             frame_num,
-            temp_colunm_num,
+            temp_column_num,
             excel_path,
             ..
         } = config_paras;
-        let temp_record = (start_line, frame_num, temp_colunm_num, &excel_path);
+        let temp_record = (start_line, frame_num, temp_column_num, &excel_path);
         io::read_temp_excel(temp_record).unwrap()
     }
 
@@ -79,7 +79,7 @@ pub mod calculate {
             ..
         } = config_paras;
         let interp_method = match config_paras.interp_method.as_str() {
-            "horzontal" => preprocess::InterpMethod::Horizontal,
+            "horizontal" => preprocess::InterpMethod::Horizontal,
             "vertical" => preprocess::InterpMethod::Vertical,
             "2d" => preprocess::InterpMethod::TwoDimension,
             _ => panic!("wrong interpl method, please choose among horizontal/vertical/2d"),
