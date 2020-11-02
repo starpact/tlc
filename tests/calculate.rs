@@ -140,7 +140,8 @@ pub mod calculate {
         println!("read excel...");
         let t2d = example_t2d();
         println!("detect peak...");
-        let peak_frames = preprocess::detect_peak(g2d);
+        let filtered_g2d = preprocess::filtering(g2d, preprocess::FilterMethod::Median(20));
+        let peak_frames = preprocess::detect_peak(filtered_g2d);
 
         println!("interpolate...");
         let (interp_t2d, query_index) = preprocess::interp(
@@ -182,5 +183,67 @@ pub mod calculate {
     fn test_read_config() {
         let c = io::read_config("./config/config_small.json").unwrap();
         println!("{:#?}", c);
+    }
+
+    use plotters::prelude::*;
+    #[test]
+    fn test_plot() {
+        let root = BitMapBackend::new("plotters/0.png", (640, 480)).into_drawing_area();
+        root.fill(&WHITE).unwrap();
+        let mut chart = ChartBuilder::on(&root)
+            .caption("y=x^2", ("sans-serif", 50).into_font())
+            .margin(5)
+            .x_label_area_size(30)
+            .y_label_area_size(30)
+            .build_cartesian_2d(-1f32..1f32, -0.1f32..1f32)
+            .unwrap();
+        chart.configure_mesh().draw().unwrap();
+        chart
+            .draw_series(LineSeries::new(
+                (-50..=50).map(|x| x as f32 / 50.).map(|x| (x, x * x)),
+                &RED,
+            ))
+            .unwrap()
+            .label("y=x^2")
+            .legend(|(x, y)| PathElement::new(vec![(x, y), (x + 20, y)], &RED));
+        chart
+            .configure_series_labels()
+            .background_style(&WHITE.mix(0.8))
+            .border_style(&BLACK)
+            .draw()
+            .unwrap();
+    }
+
+    #[test]
+    fn test_filtering() {
+        let mut raw = Vec::new();
+        let mut filtered = Vec::new();
+
+        let g2d = example_g2d().0;
+        const COLUMN_NUM: usize = 15000;
+        for g in g2d.column(COLUMN_NUM) {
+            raw.push(*g as usize);
+        }
+        println!("start filtering");
+        let filtered_g2d = preprocess::filtering(g2d, preprocess::FilterMethod::Median(20));
+        for g in filtered_g2d.column(COLUMN_NUM) {
+            filtered.push(*g as usize);
+        }
+        // println!("{:?}", raw);
+        // println!("{:?}",filtered);
+
+        let root = BitMapBackend::new("plotters/1.png", (2400, 800)).into_drawing_area();
+        root.fill(&WHITE).unwrap();
+        let mut chart = ChartBuilder::on(&root)
+            .build_cartesian_2d(0..filtered_g2d.nrows(), 80usize..180)
+            .unwrap();
+        chart
+            .draw_series(LineSeries::new(raw.into_iter().enumerate(), &RED))
+            .unwrap();
+        chart
+            .draw_series(LineSeries::new(filtered.into_iter().enumerate(), &BLUE))
+            .unwrap();
+
+        chart.configure_series_labels().draw().unwrap();
     }
 }

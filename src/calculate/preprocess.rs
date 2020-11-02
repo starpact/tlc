@@ -1,5 +1,31 @@
 use ndarray::parallel::prelude::*;
 use ndarray::prelude::*;
+use ndarray::Zip;
+
+use median::Filter;
+pub enum FilterMethod {
+    Median(usize),
+    Wavelet,
+}
+
+pub fn filtering(g2d: Array2<u8>, filter_method: FilterMethod) -> Array2<u8> {
+    match filter_method {
+        FilterMethod::Median(window_size) => {
+            let mut filtered_g2d = Array2::zeros(g2d.dim());
+            Zip::from(g2d.axis_iter(Axis(1)))
+                .and(filtered_g2d.axis_iter_mut(Axis(1)))
+                .par_apply(|col0, mut col1| {
+                    let mut filter = Filter::new(window_size);
+                    col0.iter().zip(col1.iter_mut()).for_each(|(g0, g1)| {
+                        *g1 = filter.consume(*g0);
+                    })
+                });
+
+            filtered_g2d
+        }
+        _ => unimplemented!("在做了"),
+    }
+}
 
 /// *traverse along the timeline to detect the peak of green values and record that frame index*
 /// ### Argument:

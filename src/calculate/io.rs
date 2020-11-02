@@ -68,8 +68,8 @@ pub fn read_video<P: AsRef<Path>>(
         decoder.receive_frame(&mut raw_frame)?;
         scaler.run(&raw_frame, &mut rgb_frame)?;
         // the data of each frame stores in one 1D array:
-        // ||rgbrgbrgb...rgb|rgbrgbrgb...rgb|......|rgbrgbrgb...rgb||
-        // ||.....row_0.....|.....row_1.....|......|.....row_n.....||
+        // ||r g b r g b...r g b|......|r g b r g b...r g b||
+        // ||.......row_0.......|......|.......row_n.......||
         let rgb = rgb_frame.data(0);
 
         let mut iter = row.iter_mut();
@@ -95,7 +95,7 @@ pub fn read_temp_excel<P: AsRef<Path>>(
 ) -> Result<Array2<f64>, calamine::Error> {
     let (start_line, frame_num, columns, temp_path) = temp_record;
     let mut excel: Xlsx<_> = open_workbook(temp_path).unwrap();
-    let sheet = excel.worksheet_range_at(0).expect("no sheet exsits")?;
+    let sheet = excel.worksheet_range_at(0).expect("no sheet exists")?;
 
     let mut t2d = Array2::zeros((frame_num, columns.len()));
 
