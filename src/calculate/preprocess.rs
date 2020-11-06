@@ -106,43 +106,43 @@ fn interp_1d(
     region_shape: (usize, usize),
 ) -> (Array2<f64>, Array1<usize>) {
     let (cal_h, cal_w) = region_shape;
-    let mut query_index = Array1::zeros(cal_h * cal_w);
-    let mut iter = query_index.iter_mut();
 
-    let (len_of_interp_dimension, tc_pos_1d) = if let InterpMethod::Horizontal = interp_method {
-        (0..cal_h).for_each(|_| (0..cal_w).for_each(|x| *iter.next().unwrap() = x));
-        (
-            cal_w,
-            thermocouple_pos
-                .iter()
-                .map(|pos| pos.1 - upper_left_pos.1 as i32)
-                .collect::<Vec<i32>>(),
-        )
-    } else {
-        (0..cal_h).for_each(|y| (0..cal_w).for_each(|_| *iter.next().unwrap() = y));
-        (
-            cal_h,
-            thermocouple_pos
-                .iter()
-                .map(|pos| pos.0 - upper_left_pos.0 as i32)
-                .collect::<Vec<i32>>(),
-        )
-    };
+    let (len_of_interp_dimension, tc_pos_relative, query_index): (_, Vec<_>, Array1<_>) =
+        if let InterpMethod::Horizontal = interp_method {
+            (
+                cal_w,
+                thermocouple_pos
+                    .iter()
+                    .map(|tc_pos_raw| tc_pos_raw.1 - upper_left_pos.1 as i32)
+                    .collect(),
+                (0..cal_w).cycle().take(cal_h * cal_w).collect(),
+            )
+        } else {
+            (
+                cal_h,
+                thermocouple_pos
+                    .iter()
+                    .map(|tc_pos_raw| tc_pos_raw.0 - upper_left_pos.0 as i32)
+                    .collect(),
+                (0..cal_h * cal_w).map(|x| x / cal_w).collect(),
+            )
+        };
 
-    let mut interp_1d_temp = Array2::zeros((t2d.nrows(), len_of_interp_dimension));
-    par_azip!((row0 in t2d.axis_iter(Axis(0)), mut row1 in interp_1d_temp.axis_iter_mut(Axis(0))) {
+    let mut interp_temps = Array2::zeros((t2d.nrows(), len_of_interp_dimension));
+    par_azip!((row0 in t2d.axis_iter(Axis(0)), mut row1 in interp_temps.axis_iter_mut(Axis(0))) {
         let mut iter = row1.iter_mut();
         let mut curr = 0;
-        let (mut left, mut right) = (tc_pos_1d[curr], tc_pos_1d[curr + 1]);
+        let (mut left_end, mut right_end) = (tc_pos_relative[curr], tc_pos_relative[curr + 1]);
         for pos in 0..len_of_interp_dimension as i32 {
-            if pos == right && curr + 2 < tc_pos_1d.len() {
+            if pos == right_end && curr + 2 < tc_pos_relative.len() {
                 curr += 1;
-                left = tc_pos_1d[curr];
-                right = tc_pos_1d[curr + 1];
+                left_end = tc_pos_relative[curr];
+                right_end = tc_pos_relative[curr + 1];
             }
-            *iter.next().unwrap() = (row0[curr] * (right - pos) as f64
-                + row0[curr + 1] * (pos - left) as f64) / (right -left) as f64;
+            *iter.next().unwrap() = (row0[curr] * (right_end - pos) as f64
+                + row0[curr + 1] * (pos - left_end) as f64) / (right_end -left_end) as f64;
         }
     });
-    (interp_1d_temp, query_index)
+    
+    (interp_temps, query_index)
 }

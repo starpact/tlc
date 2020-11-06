@@ -99,13 +99,13 @@ pub fn cal_delta_temps(mut t2d: Array2<f64>) -> Array2<f64> {
 pub fn solve(
     const_vals: (f64, f64, f64, f64),
     peak_frames: Array1<usize>,
-    interp_t2d: Array2<f64>,
+    interp_temps: Array2<f64>,
     query_index: Array1<usize>,
     h0: f64,
     max_iter_num: usize,
 ) -> Array1<f64> {
     let mut hs = Array1::zeros(query_index.len());
-    let delta_temps_2d = cal_delta_temps(interp_t2d);
+    let delta_temps = cal_delta_temps(interp_temps);
 
     Zip::from(&peak_frames)
         .and(&query_index)
@@ -114,7 +114,7 @@ pub fn solve(
             *h = newtow_tangent(
                 const_vals,
                 peak_frame,
-                delta_temps_2d.column(index),
+                delta_temps.column(index),
                 h0,
                 max_iter_num,
             );

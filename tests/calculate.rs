@@ -140,12 +140,12 @@ pub mod calculate {
         println!("read excel...");
         let t2d = example_t2d();
         println!("filtering");
-        let filtered_g2d = preprocess::filtering(g2d, preprocess::FilterMethod::Median(20));
+        let g2d_filtered = preprocess::filtering(g2d, preprocess::FilterMethod::Median(20));
         println!("detect peak...");
-        let peak_frames = preprocess::detect_peak(filtered_g2d);
+        let peak_frames = preprocess::detect_peak(g2d_filtered);
 
         println!("interpolate...");
-        let (interp_t2d, query_index) = preprocess::interp(
+        let (interp_temps, query_index) = preprocess::interp(
             t2d.view(),
             &thermocouple_pos,
             interp_method,
@@ -163,7 +163,7 @@ pub mod calculate {
         let hs = solve::solve(
             const_vals,
             peak_frames,
-            interp_t2d,
+            interp_temps,
             query_index,
             h0,
             max_iter_num,
@@ -230,8 +230,6 @@ pub mod calculate {
         for g in filtered_g2d.column(COLUMN_NUM) {
             filtered.push(*g as usize);
         }
-        // println!("{:?}", raw);
-        // println!("{:?}",filtered);
 
         let root = BitMapBackend::new("plotters/1.png", (2400, 800)).into_drawing_area();
         root.fill(&WHITE).unwrap();
