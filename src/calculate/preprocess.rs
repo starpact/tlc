@@ -9,17 +9,21 @@ pub enum FilterMethod {
     Wavelet,
 }
 
+/// filter the green history of each pixel along time axis
 pub fn filtering(g2d: Array2<u8>, filter_method: FilterMethod) -> Array2<u8> {
     match filter_method {
         FilterMethod::Median(window_size) => {
             let mut filtered_g2d = Array2::zeros(g2d.dim());
             Zip::from(g2d.axis_iter(Axis(1)))
                 .and(filtered_g2d.axis_iter_mut(Axis(1)))
-                .par_apply(|col0, mut col1| {
+                .par_apply(|col_raw, mut col_filtered| {
                     let mut filter = Filter::new(window_size);
-                    col0.iter().zip(col1.iter_mut()).for_each(|(g0, g1)| {
-                        *g1 = filter.consume(*g0);
-                    })
+                    col_raw
+                        .iter()
+                        .zip(col_filtered.iter_mut())
+                        .for_each(|(g_raw, g_filtered)| {
+                            *g_filtered = filter.consume(*g_raw);
+                        })
                 });
 
             filtered_g2d
@@ -96,34 +100,41 @@ pub fn interp(
 /// *one dimension interpolation, along axis X or Y*
 fn interp_1d(
     t2d: ArrayView2<f64>,
-    tc_pos: &Vec<(i32, i32)>,
-    ul_pos: (usize, usize),
+    thermocouple_pos: &Vec<(i32, i32)>,
+    upper_left_pos: (usize, usize),
     interp_method: InterpMethod,
     region_shape: (usize, usize),
 ) -> (Array2<f64>, Array1<usize>) {
     let (cal_h, cal_w) = region_shape;
     let mut query_index = Array1::zeros(cal_h * cal_w);
     let mut iter = query_index.iter_mut();
-    let mut interp_1d_t: Array2<f64>;
-    let tc_pos_1d: Vec<i32> = match interp_method {
-        InterpMethod::Horizontal => {
-            (0..cal_h).for_each(|_| (0..cal_w).for_each(|x| *iter.next().unwrap() = x));
-            interp_1d_t = Array2::zeros((t2d.nrows(), cal_w));
-            tc_pos.iter().map(|pos| pos.1 - ul_pos.1 as i32).collect()
-        }
-        InterpMethod::Vertical => {
-            (0..cal_h).for_each(|y| (0..cal_w).for_each(|_| *iter.next().unwrap() = y));
-            interp_1d_t = Array2::zeros((t2d.nrows(), cal_h));
-            tc_pos.iter().map(|pos| pos.0 - ul_pos.0 as i32).collect()
-        }
-        _ => panic!("only horizontal or vertical for interpolation 1D"),
+
+    let (len_of_interp_dimension, tc_pos_1d) = if let InterpMethod::Horizontal = interp_method {
+        (0..cal_h).for_each(|_| (0..cal_w).for_each(|x| *iter.next().unwrap() = x));
+        (
+            cal_w,
+            thermocouple_pos
+                .iter()
+                .map(|pos| pos.1 - upper_left_pos.1 as i32)
+                .collect::<Vec<i32>>(),
+        )
+    } else {
+        (0..cal_h).for_each(|y| (0..cal_w).for_each(|_| *iter.next().unwrap() = y));
+        (
+            cal_h,
+            thermocouple_pos
+                .iter()
+                .map(|pos| pos.0 - upper_left_pos.0 as i32)
+                .collect::<Vec<i32>>(),
+        )
     };
-    let len_of_interp_dimension = interp_1d_t.ncols() as i32;
-    par_azip!((row0 in t2d.axis_iter(Axis(0)), mut row1 in interp_1d_t.axis_iter_mut(Axis(0))) {
+
+    let mut interp_1d_temp = Array2::zeros((t2d.nrows(), len_of_interp_dimension));
+    par_azip!((row0 in t2d.axis_iter(Axis(0)), mut row1 in interp_1d_temp.axis_iter_mut(Axis(0))) {
         let mut iter = row1.iter_mut();
         let mut curr = 0;
         let (mut left, mut right) = (tc_pos_1d[curr], tc_pos_1d[curr + 1]);
-        for pos in 0..len_of_interp_dimension {
+        for pos in 0..len_of_interp_dimension as i32 {
             if pos == right && curr + 2 < tc_pos_1d.len() {
                 curr += 1;
                 left = tc_pos_1d[curr];
@@ -133,5 +144,5 @@ fn interp_1d(
                 + row0[curr + 1] * (pos - left) as f64) / (right -left) as f64;
         }
     });
-    (interp_1d_t, query_index)
+    (interp_1d_temp, query_index)
 }
