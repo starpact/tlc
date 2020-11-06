@@ -3,6 +3,7 @@ use ndarray::prelude::*;
 use ndarray::Zip;
 
 use median::Filter;
+
 pub enum FilterMethod {
     Median(usize),
     Wavelet,

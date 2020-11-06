@@ -139,8 +139,9 @@ pub mod calculate {
 
         println!("read excel...");
         let t2d = example_t2d();
-        println!("detect peak...");
+        println!("filtering");
         let filtered_g2d = preprocess::filtering(g2d, preprocess::FilterMethod::Median(20));
+        println!("detect peak...");
         let peak_frames = preprocess::detect_peak(filtered_g2d);
 
         println!("interpolate...");
