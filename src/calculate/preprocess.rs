@@ -50,7 +50,7 @@ pub fn detect_peak(g2d: Array2<u8>) -> Array1<usize> {
                     .iter()
                     .enumerate()
                     .fold((0, 0, 0), |(mi_l, mi_r, mg), (i, &g)| {
-                        if g >= mg {
+                        if g > mg {
                             (i, i, g)
                         } else if g == mg {
                             (mi_l, i, g)
