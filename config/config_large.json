@@ -26,7 +26,10 @@
             1380
         ]
     ],
-    "interp_method": "horizontal",
+    "interp_method": "Horizontal",
+    "filter_method": {
+        "Median": 20
+    },
     "peak_temp": 35.48,
     "solid_thermal_conductivity": 0.18,
     "solid_thermal_diffusivity": 1.091e-7,

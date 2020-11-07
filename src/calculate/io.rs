@@ -118,14 +118,15 @@ pub fn read_temp_excel<P: AsRef<Path>>(
     Ok(t2d)
 }
 
-use serde::Deserialize;
+use serde::{Serialize, Deserialize};
 use serde_json;
 
 use std::error::Error;
 use std::fs::File;
 use std::io::BufReader;
+use super::preprocess::{InterpMethod, FilterMethod};
 
-#[derive(Deserialize, Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ConfigParas {
     pub video_path: String,
     pub excel_path: String,
@@ -136,7 +137,8 @@ pub struct ConfigParas {
     pub region_shape: (usize, usize),
     pub temp_column_num: Vec<usize>,
     pub thermocouple_pos: Vec<(i32, i32)>,
-    pub interp_method: String,
+    pub interp_method: InterpMethod,
+    pub filter_method: FilterMethod,
     pub peak_temp: f64,
     pub solid_thermal_conductivity: f64,
     pub solid_thermal_diffusivity: f64,

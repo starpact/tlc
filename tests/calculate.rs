@@ -1,6 +1,6 @@
 #[cfg(test)]
 
-pub mod calculate {
+mod calculate {
     use ndarray::prelude::*;
 
     use tlc::calculate::*;
@@ -76,14 +76,9 @@ pub mod calculate {
             region_shape,
             thermocouple_pos,
             upper_left_pos,
+            interp_method,
             ..
         } = config_paras;
-        let interp_method = match config_paras.interp_method.as_str() {
-            "horizontal" => preprocess::InterpMethod::Horizontal,
-            "vertical" => preprocess::InterpMethod::Vertical,
-            "2d" => preprocess::InterpMethod::TwoDimension,
-            _ => panic!("wrong interpl method, please choose among horizontal/vertical/2d"),
-        };
 
         let t0 = std::time::Instant::now();
         let interp_x_t2d = preprocess::interp(
@@ -117,6 +112,7 @@ pub mod calculate {
             upper_left_pos,
             h0,
             interp_method,
+            filter_method,
             max_iter_num,
             thermocouple_pos,
             region_shape,
@@ -126,12 +122,6 @@ pub mod calculate {
             ..
         } = config_paras;
 
-        let interp_method = match interp_method.as_str() {
-            "horizontal" => preprocess::InterpMethod::Horizontal,
-            "vertical" => preprocess::InterpMethod::Vertical,
-            "2d" => preprocess::InterpMethod::TwoDimension,
-            _ => panic!("wrong interpl method, please choose among horizontal/vertical/2d"),
-        };
         let t0 = std::time::Instant::now();
         println!("read video...");
         let (g2d, frame_rate) = example_g2d();
@@ -140,7 +130,7 @@ pub mod calculate {
         println!("read excel...");
         let t2d = example_t2d();
         println!("filtering");
-        let g2d_filtered = preprocess::filtering(g2d, preprocess::FilterMethod::Median(20));
+        let g2d_filtered = preprocess::filtering(g2d, filter_method);
         println!("detect peak...");
         let peak_frames = preprocess::detect_peak(g2d_filtered);
 
@@ -182,7 +172,7 @@ pub mod calculate {
 
     #[test]
     fn test_read_config() {
-        let c = io::read_config("./config/config_small.json").unwrap();
+        let c = io::read_config(CONFIG_PATH).unwrap();
         println!("{:#?}", c);
     }
 
@@ -221,13 +211,13 @@ pub mod calculate {
         let mut filtered = Vec::new();
 
         let g2d = example_g2d().0;
-        const COLUMN_NUM: usize = 15000;
-        for g in g2d.column(COLUMN_NUM) {
+        let column_num: usize = 15000;
+        for g in g2d.column(column_num) {
             raw.push(*g as usize);
         }
         println!("start filtering");
         let filtered_g2d = preprocess::filtering(g2d, preprocess::FilterMethod::Median(20));
-        for g in filtered_g2d.column(COLUMN_NUM) {
+        for g in filtered_g2d.column(column_num) {
             filtered.push(*g as usize);
         }
 

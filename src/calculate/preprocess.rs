@@ -1,9 +1,11 @@
 use ndarray::parallel::prelude::*;
 use ndarray::prelude::*;
 use ndarray::Zip;
+use serde::{Serialize, Deserialize};
 
 use median::Filter;
 
+#[derive(Debug, Serialize, Deserialize)]
 pub enum FilterMethod {
     Median(usize),
     Wavelet,
@@ -43,25 +45,27 @@ pub fn detect_peak(g2d: Array2<u8>) -> Array1<usize> {
     g2d.axis_iter(Axis(1))
         .into_par_iter()
         .map(|column| {
-            column
-                .iter()
-                .enumerate()
-                .fold((0, 0, 0), |(mi_l, mi_r, mg), (i, &g)| {
-                    if g > mg {
-                        (i, i, g)
-                    } else if g == mg {
-                        (mi_l, i, g)
-                    } else {
-                        (mi_l, mi_r, mg)
-                    }
-                })
+            let (first_max, last_max, _) =
+                column
+                    .iter()
+                    .enumerate()
+                    .fold((0, 0, 0), |(mi_l, mi_r, mg), (i, &g)| {
+                        if g >= mg {
+                            (i, i, g)
+                        } else if g == mg {
+                            (mi_l, i, g)
+                        } else {
+                            (mi_l, mi_r, mg)
+                        }
+                    });
+            (first_max + last_max) >> 1
         })
-        .map(|x| (x.0 + x.1) >> 1)
         .collect_into_vec(&mut peak_frames);
 
     Array1::from(peak_frames)
 }
 
+#[derive(Debug, Serialize, Deserialize)]
 pub enum InterpMethod {
     Horizontal,
     Vertical,
@@ -107,42 +111,39 @@ fn interp_1d(
 ) -> (Array2<f64>, Array1<usize>) {
     let (cal_h, cal_w) = region_shape;
 
-    let (len_of_interp_dimension, tc_pos_relative, query_index): (_, Vec<_>, Array1<_>) =
-        if let InterpMethod::Horizontal = interp_method {
-            (
-                cal_w,
-                thermocouple_pos
-                    .iter()
-                    .map(|tc_pos_raw| tc_pos_raw.1 - upper_left_pos.1 as i32)
-                    .collect(),
-                (0..cal_w).cycle().take(cal_h * cal_w).collect(),
-            )
-        } else {
-            (
-                cal_h,
-                thermocouple_pos
-                    .iter()
-                    .map(|tc_pos_raw| tc_pos_raw.0 - upper_left_pos.0 as i32)
-                    .collect(),
-                (0..cal_h * cal_w).map(|x| x / cal_w).collect(),
-            )
-        };
+    let (len_of_interp_dimension, tc_pos_relative, query_index) = match interp_method {
+        InterpMethod::Horizontal => (
+            cal_w,
+            thermocouple_pos
+                .iter()
+                .map(|tc_pos_raw| tc_pos_raw.1 - upper_left_pos.1 as i32)
+                .collect::<Vec<_>>(),
+            (0..cal_w).cycle().take(cal_h * cal_w).collect(),
+        ),
+        InterpMethod::Vertical => (
+            cal_h,
+            thermocouple_pos
+                .iter()
+                .map(|tc_pos_raw| tc_pos_raw.0 - upper_left_pos.0 as i32)
+                .collect::<Vec<_>>(),
+            (0..cal_h * cal_w).map(|x| x / cal_w).collect(),
+        ),
+        _ => panic!("only horizontal or vertical for one dimensional interpolation"),
+    };
 
     let mut interp_temps = Array2::zeros((t2d.nrows(), len_of_interp_dimension));
     par_azip!((row0 in t2d.axis_iter(Axis(0)), mut row1 in interp_temps.axis_iter_mut(Axis(0))) {
         let mut iter = row1.iter_mut();
         let mut curr = 0;
-        let (mut left_end, mut right_end) = (tc_pos_relative[curr], tc_pos_relative[curr + 1]);
         for pos in 0..len_of_interp_dimension as i32 {
+            let (left_end, right_end) = (tc_pos_relative[curr], tc_pos_relative[curr + 1]);
             if pos == right_end && curr + 2 < tc_pos_relative.len() {
                 curr += 1;
-                left_end = tc_pos_relative[curr];
-                right_end = tc_pos_relative[curr + 1];
             }
             *iter.next().unwrap() = (row0[curr] * (right_end - pos) as f64
                 + row0[curr + 1] * (pos - left_end) as f64) / (right_end -left_end) as f64;
         }
     });
-    
+
     (interp_temps, query_index)
 }
