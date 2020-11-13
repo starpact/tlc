@@ -1,4 +1,6 @@
 #[cfg(test)]
+#[macro_use]
+extern crate lazy_static;
 
 mod calculate {
     use ndarray::prelude::*;
@@ -7,32 +9,40 @@ mod calculate {
 
     const CONFIG_PATH: &str = "./config/config_large.json";
 
-    fn example_g2d() -> (Array2<u8>, usize) {
-        let config_paras = io::read_config(CONFIG_PATH).unwrap();
-        let io::ConfigParas {
-            start_frame,
-            frame_num,
-            video_path,
-            upper_left_pos,
-            region_shape,
-            ..
-        } = config_paras;
+    lazy_static! {
+        static ref CONFIG_PARAS: io::ConfigParas = io::read_config(CONFIG_PATH).unwrap();
+        static ref VIDEO_PATH: &'static str = CONFIG_PARAS.video_path.as_str();
+        static ref EXCEL_PATH: &'static str = CONFIG_PARAS.excel_path.as_str();
+        static ref START_FRAME: usize = CONFIG_PARAS.start_frame;
+        static ref START_LINE: usize = CONFIG_PARAS.start_line;
+        static ref FRAME_NUM: usize = CONFIG_PARAS.frame_num;
+        static ref UPPER_LEFT_POS: (usize, usize) = CONFIG_PARAS.upper_left_pos;
+        static ref REGION_SHAPE: (usize, usize) = CONFIG_PARAS.region_shape;
+        static ref TEMP_COLUMN_NUM: &'static Vec<usize> = &CONFIG_PARAS.temp_column_num;
+        static ref THERMOCOUPLE_POS: &'static Vec<(i32, i32)> = &CONFIG_PARAS.thermocouple_pos;
+        static ref INTERP_METHOD: preprocess::InterpMethod = CONFIG_PARAS.interp_method;
+        static ref FILTER_METHOD: preprocess::FilterMethod = CONFIG_PARAS.filter_method;
+        static ref PEAK_TEMP: f64 = CONFIG_PARAS.peak_temp;
+        static ref SOLID_THERMAL_CONDUCTIVITY: f64 = CONFIG_PARAS.solid_thermal_conductivity;
+        static ref SOLID_THERMAL_DIFFUSIVITY: f64 = CONFIG_PARAS.solid_thermal_diffusivity;
+        static ref H0: f64 = CONFIG_PARAS.h0;
+        static ref MAX_ITER_NUM: usize = CONFIG_PARAS.max_iter_num;
+    }
 
-        let video_record = (start_frame, frame_num, &video_path.to_string());
-        let region_record = (upper_left_pos, region_shape);
+    #[test]
+    fn show_config() {
+        let c = io::read_config(CONFIG_PATH).unwrap();
+        println!("{:#?}", c);
+    }
+
+    fn example_g2d() -> (Array2<u8>, usize) {
+        let video_record = (*START_FRAME, *FRAME_NUM, *VIDEO_PATH);
+        let region_record = (*UPPER_LEFT_POS, *REGION_SHAPE);
         io::read_video(video_record, region_record).unwrap()
     }
 
     fn example_t2d() -> Array2<f64> {
-        let config_paras = io::read_config(CONFIG_PATH).unwrap();
-        let io::ConfigParas {
-            start_line,
-            frame_num,
-            temp_column_num,
-            excel_path,
-            ..
-        } = config_paras;
-        let temp_record = (start_line, frame_num, temp_column_num, &excel_path);
+        let temp_record = (*START_LINE, *FRAME_NUM, *TEMP_COLUMN_NUM, *EXCEL_PATH);
         io::read_temp_excel(temp_record).unwrap()
     }
 
@@ -48,13 +58,12 @@ mod calculate {
 
     #[test]
     fn test_read_temp_excel() {
-        let frame_num = io::read_config(CONFIG_PATH).unwrap().frame_num;
         let t0 = std::time::Instant::now();
         let res = example_t2d();
         println!("{:?}", std::time::Instant::now().duration_since(t0));
 
         println!("{}", res.slice(s![..3, ..]));
-        println!("{}", res.row(frame_num - 1));
+        println!("{}", res.row(*FRAME_NUM - 1));
     }
 
     #[test]
@@ -70,23 +79,15 @@ mod calculate {
 
     #[test]
     fn test_interp_x() {
-        let config_paras = io::read_config(CONFIG_PATH).unwrap();
         let t2d = example_t2d();
-        let io::ConfigParas {
-            region_shape,
-            thermocouple_pos,
-            upper_left_pos,
-            interp_method,
-            ..
-        } = config_paras;
 
         let t0 = std::time::Instant::now();
         let interp_x_t2d = preprocess::interp(
             t2d.view(),
-            &thermocouple_pos,
-            interp_method,
-            upper_left_pos,
-            region_shape,
+            *THERMOCOUPLE_POS,
+            *INTERP_METHOD,
+            *UPPER_LEFT_POS,
+            *REGION_SHAPE,
         )
         .0;
         println!("{:?}", std::time::Instant::now().duration_since(t0));
@@ -107,46 +108,34 @@ mod calculate {
 
     #[test]
     fn test_solve() {
-        let config_paras = io::read_config(CONFIG_PATH).unwrap();
-        let io::ConfigParas {
-            upper_left_pos,
-            h0,
-            interp_method,
-            filter_method,
-            max_iter_num,
-            thermocouple_pos,
-            region_shape,
-            solid_thermal_conductivity,
-            solid_thermal_diffusivity,
-            peak_temp,
-            ..
-        } = config_paras;
-
         let t0 = std::time::Instant::now();
+
         println!("read video...");
         let (g2d, frame_rate) = example_g2d();
         let dt = 1. / frame_rate as f64;
 
         println!("read excel...");
         let t2d = example_t2d();
+
         println!("filtering");
-        let g2d_filtered = preprocess::filtering(g2d, filter_method);
+        let g2d_filtered = preprocess::filtering(g2d, *FILTER_METHOD);
+
         println!("detect peak...");
         let peak_frames = preprocess::detect_peak(g2d_filtered);
 
         println!("interpolate...");
         let (interp_temps, query_index) = preprocess::interp(
             t2d.view(),
-            &thermocouple_pos,
-            interp_method,
-            upper_left_pos,
-            region_shape,
+            *THERMOCOUPLE_POS,
+            *INTERP_METHOD,
+            *UPPER_LEFT_POS,
+            *REGION_SHAPE,
         );
         let const_vals = (
-            solid_thermal_conductivity,
-            solid_thermal_diffusivity,
+            *SOLID_THERMAL_CONDUCTIVITY,
+            *SOLID_THERMAL_DIFFUSIVITY,
             dt,
-            peak_temp,
+            *PEAK_TEMP,
         );
 
         println!("start calculating...");
@@ -155,11 +144,11 @@ mod calculate {
             peak_frames,
             interp_temps,
             query_index,
-            h0,
-            max_iter_num,
+            *H0,
+            *MAX_ITER_NUM,
         );
-        println!("{:?}", std::time::Instant::now().duration_since(t0));
-        println!("{}", hs.slice(s![..10]));
+        println!("\ntotal time cost: {:?}\n", std::time::Instant::now().duration_since(t0));
+        println!("{}\n", hs.slice(s![..10]));
         let res = hs.iter().fold((0, 0.), |(count, sum), &h| {
             if h.is_finite() {
                 (count + 1, sum + h)
@@ -167,13 +156,7 @@ mod calculate {
                 (count, sum)
             }
         });
-        println!("{}", res.1 / res.0 as f64 * 0.03429 / 0.0276);
-    }
-
-    #[test]
-    fn test_read_config() {
-        let c = io::read_config(CONFIG_PATH).unwrap();
-        println!("{:#?}", c);
+        println!("overall Nu: {}", res.1 / res.0 as f64 * 0.03429 / 0.0276);
     }
 
     use plotters::prelude::*;

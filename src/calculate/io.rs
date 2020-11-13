@@ -91,7 +91,7 @@ use calamine::{open_workbook, DataType, Reader, Xlsx};
 /// ### Return:
 /// 2D matrix of the temperatures from thermocouples
 pub fn read_temp_excel<P: AsRef<Path>>(
-    temp_record: (usize, usize, Vec<usize>, P),
+    temp_record: (usize, usize, &Vec<usize>, P),
 ) -> Result<Array2<f64>, calamine::Error> {
     let (start_line, frame_num, columns, temp_path) = temp_record;
     let mut excel: Xlsx<_> = open_workbook(temp_path).unwrap();
