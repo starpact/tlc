@@ -1,15 +1,15 @@
 use ndarray::parallel::prelude::*;
 use ndarray::prelude::*;
 use ndarray::Zip;
-use serde::{Serialize, Deserialize};
-
-use median::Filter;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum FilterMethod {
     Median(usize),
     Wavelet,
 }
+
+use median::Filter;
 
 /// filter the green history of each pixel along time axis
 pub fn filtering(g2d: Array2<u8>, filter_method: FilterMethod) -> Array2<u8> {
@@ -65,7 +65,7 @@ pub fn detect_peak(g2d: Array2<u8>) -> Array1<usize> {
     Array1::from(peak_frames)
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub enum InterpMethod {
     Horizontal,
     Vertical,
