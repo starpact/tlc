@@ -147,6 +147,7 @@ mod calculate {
             *H0,
             *MAX_ITER_NUM,
         );
+
         println!("\ntotal time cost: {:?}\n", std::time::Instant::now().duration_since(t0));
         println!("{}\n", hs.slice(s![..10]));
         let res = hs.iter().fold((0, 0.), |(count, sum), &h| {
@@ -198,7 +199,6 @@ mod calculate {
         for g in g2d.column(column_num) {
             raw.push(*g as usize);
         }
-        println!("start filtering");
         let filtered_g2d = preprocess::filtering(g2d, preprocess::FilterMethod::Median(20));
         for g in filtered_g2d.column(column_num) {
             filtered.push(*g as usize);
