@@ -3,13 +3,13 @@ use ndarray::prelude::*;
 use ndarray::Zip;
 use serde::{Deserialize, Serialize};
 
-use median::Filter;
-
 #[derive(Debug, Serialize, Deserialize, Copy, Clone)]
 pub enum FilterMethod {
     Median(usize),
     Wavelet,
 }
+
+use median::Filter;
 
 /// filter the green history of each pixel along time axis
 pub fn filtering(g2d: Array2<u8>, filter_method: FilterMethod) -> Array2<u8> {
