@@ -3,7 +3,7 @@ use ndarray::prelude::*;
 use ndarray::Zip;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Copy, Clone)]
 pub enum FilterMethod {
     Median(usize),
     Wavelet,
@@ -65,7 +65,7 @@ pub fn detect_peak(g2d: Array2<u8>) -> Array1<usize> {
     Array1::from(peak_frames)
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Serialize, Deserialize, Copy, Clone)]
 pub enum InterpMethod {
     Horizontal,
     Vertical,

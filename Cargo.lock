@@ -1209,6 +1209,7 @@ version = "0.1.0"
 dependencies = [
  "calamine",
  "ffmpeg-next",
+ "lazy_static",
  "libc",
  "median",
  "ndarray",
