@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 /// there is no erfc() in std, so use erfc() from libc
 mod cmath {
     use libc::c_double;
