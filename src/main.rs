@@ -1,5 +1,5 @@
 use std::fs::File;
-use std::io::{self, Read, Write, BufReader};
+use std::io::{self, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::thread;
 
@@ -21,7 +21,6 @@ fn handle_connection(mut stream: TcpStream) -> io::Result<()> {
     stream.read(&mut buf)?;
     println!("{}", String::from_utf8_lossy(&buf).lines().nth(0).unwrap());
     stream.write("HTTP/1.1 200 OK\r\n\r\n".as_bytes())?;
-    stream.flush()?;
 
     let simple_get_head = b"GET / HTTP/1.1\r\n";
     if buf.starts_with(simple_get_head) {
@@ -31,7 +30,6 @@ fn handle_connection(mut stream: TcpStream) -> io::Result<()> {
         reader.read_to_end(&mut buf)?;
         stream.write(&buf[..])?;
     }
-
 
     stream.flush()?;
 
