@@ -98,15 +98,6 @@ mod calculate {
     }
 
     #[test]
-    fn test_cal_delta_temps() {
-        let t2d = example_t2d();
-        let delta_temps = solve::cal_delta_temps(t2d);
-
-        println!("{}", delta_temps.slice(s![..3, ..]));
-        println!("{}", delta_temps.sum_axis(Axis(0)));
-    }
-
-    #[test]
     fn test_solve() {
         let t0 = std::time::Instant::now();
 
@@ -131,16 +122,13 @@ mod calculate {
             *UPPER_LEFT_POS,
             *REGION_SHAPE,
         );
-        let const_vals = (
+
+        println!("start calculating...");
+        let hs = solve::solve(
             *SOLID_THERMAL_CONDUCTIVITY,
             *SOLID_THERMAL_DIFFUSIVITY,
             dt,
             *PEAK_TEMP,
-        );
-
-        println!("start calculating...");
-        let hs = solve::solve(
-            const_vals,
             peak_frames,
             interp_temps,
             query_index,
@@ -148,8 +136,11 @@ mod calculate {
             *MAX_ITER_NUM,
         );
 
-        println!("\ntotal time cost: {:?}\n", std::time::Instant::now().duration_since(t0));
-        println!("{}\n", hs.slice(s![..10]));
+        println!(
+            "\ntotal time cost: {:?}\n",
+            std::time::Instant::now().duration_since(t0)
+        );
+        println!("{}\n", hs.slice(s![..6]));
         let res = hs.iter().fold((0, 0.), |(count, sum), &h| {
             if h.is_finite() {
                 (count + 1, sum + h)
@@ -157,7 +148,7 @@ mod calculate {
                 (count, sum)
             }
         });
-        println!("overall Nu: {}", res.1 / res.0 as f64 * 0.03429 / 0.0276);
+        println!("overall average Nu: {}", res.1 / res.0 as f64 * 0.03429 / 0.0276);
     }
 
     use plotters::prelude::*;

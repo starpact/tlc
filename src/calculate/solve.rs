@@ -14,72 +14,82 @@ use ndarray::prelude::*;
 use ndarray::Zip;
 use std::f64::consts::PI;
 
-/// *semi-infinite plate heat transfer equation of each pixel*
-/// ### Argument:
-/// (conductivity, diffusivity, time_step, the peak temperature(wall temp at peak frame))
-///
-/// the frame that reaches the max green value
-///
-/// delta temperature history of this pixel(initial values in the first row)
-///
-/// heat transfer coefficient(a certain value during iterating)
-/// ### Return:
-/// equation and its derivative
-fn thermal_equation(
-    const_vals: (f64, f64, f64, f64),
+/// *struct that stores necessary information for solving the equation*
+/// * conductivity
+/// * diffusivity
+/// * time step
+/// * the frame that reaches the max green value
+/// * wall temperature at peak frame
+/// * delta temperature history of this pixel(initial values in the first row)
+/// * heat transfer coefficient(a certain value during iterating)
+/// * max step number of iteration
+pub struct SinglePointSolver<'a> {
+    solid_thermal_conductivity: f64,
+    solid_thermal_diffusivity: f64,
+    dt: f64,
     peak_frame: usize,
-    delta_temps: ArrayView1<f64>,
+    peak_temp: f64,
+    delta_temps: ArrayView1<'a, f64>,
     h: f64,
-) -> (f64, f64) {
-    let (k, a, dt, tw) = const_vals;
-    let t0 = delta_temps[0];
-
-    let res = delta_temps.iter().skip(1).take(peak_frame - 1).fold(
-        (0., 0., (peak_frame - 1) as f64 * dt),
-        |tmp, &delta_temp| {
-            let (f, df, t) = tmp;
-            let at = a * t;
-            let er = erfc(h * at.sqrt() / k);
-            let iter = (1. - f64::exp(h.powf(2.) * at / k.powf(2.)) * er) * delta_temp;
-            let d_iter = -delta_temp
-                * (2. * at.sqrt() / k / PI.sqrt()
-                    - (2. * at * h * f64::exp(at * h.powf(2.) / k.powf(2.)) * er) / k.powf(2.));
-
-            (f + iter, df + d_iter, t - dt)
-        },
-    );
-
-    (tw - t0 - res.0, res.1)
+    max_iter_num: usize,
 }
 
-fn newtow_tangent(
-    const_vals: (f64, f64, f64, f64),
-    peak_frame: usize,
-    delta_temps: ArrayView1<f64>,
-    h0: f64,
-    max_iter_num: usize,
-) -> f64 {
-    let mut h = h0;
-    for _ in 0..max_iter_num {
-        let (f, df) = thermal_equation(const_vals, peak_frame, delta_temps, h);
-        let hh = h - f / df;
-        if hh.abs() > 10000. {
-            return std::f64::NAN;
-        }
-        if (hh - h).abs() < 1e-3 {
-            break;
-        }
-        h = hh;
+impl SinglePointSolver<'_> {
+    /// *semi-infinite plate heat transfer equation of each pixel*
+    /// ### Return:
+    /// equation and its derivative
+    fn thermal_equation(&self) -> (f64, f64) {
+        let (k, a, dt, tw, h, delta_temps, peak_frame) = (
+            self.solid_thermal_conductivity,
+            self.solid_thermal_diffusivity,
+            self.dt,
+            self.peak_temp,
+            self.h,
+            self.delta_temps,
+            self.peak_frame,
+        );
+        let t0 = self.delta_temps[0];
+
+        let res = delta_temps.iter().skip(1).take(peak_frame - 1).fold(
+            (0., 0., (peak_frame - 1) as f64 * dt),
+            |tmp, &delta_temp| {
+                let (f, df, t) = tmp;
+                let at = a * t;
+                let er = erfc(h * at.sqrt() / k);
+                let iter = (1. - f64::exp(h.powf(2.) * at / k.powf(2.)) * er) * delta_temp;
+                let d_iter = -delta_temp
+                    * (2. * at.sqrt() / k / PI.sqrt()
+                        - (2. * at * h * f64::exp(at * h.powf(2.) / k.powf(2.)) * er) / k.powf(2.));
+
+                (f + iter, df + d_iter, t - dt)
+            },
+        );
+
+        (tw - t0 - res.0, res.1)
     }
 
-    h
+    fn newtow_tangent(&mut self) -> f64 {
+        for _ in 0..self.max_iter_num {
+            let prev_h = self.h;
+            let (f, df) = self.thermal_equation();
+            self.h = prev_h - f / df;
+            if self.h.abs() > 10000. {
+                return std::f64::NAN;
+            }
+            if (self.h - prev_h).abs() < 1e-3 {
+                break;
+            }
+        }
+
+        self.h
+    }
 }
 
 /// *calculate the delta temperature of adjacent frames for the convenience of calculating*
 /// *thermal equation, and store the initial value in first row, like:*
 ///
 /// `t0(average), t1 - t0, t2 - t1, ... tn - tn_1`
-pub fn cal_delta_temps(mut t2d: Array2<f64>) -> Array2<f64> {
+fn cal_delta_temps(mut t2d: Array2<f64>) -> Array2<f64> {
     for mut col in t2d.axis_iter_mut(Axis(1)) {
         if let Some(t0) = col.slice(s![..4]).mean() {
             col[0] = t0;
@@ -95,7 +105,10 @@ pub fn cal_delta_temps(mut t2d: Array2<f64>) -> Array2<f64> {
 }
 
 pub fn solve(
-    const_vals: (f64, f64, f64, f64),
+    solid_thermal_conductivity: f64,
+    solid_thermal_diffusivity: f64,
+    dt: f64,
+    peak_temp: f64,
     peak_frames: Array1<usize>,
     interp_temps: Array2<f64>,
     query_index: Array1<usize>,
@@ -103,19 +116,23 @@ pub fn solve(
     max_iter_num: usize,
 ) -> Array1<f64> {
     let mut hs = Array1::zeros(query_index.len());
-    let delta_temps = cal_delta_temps(interp_temps);
+    let delta_temps_2d = cal_delta_temps(interp_temps);
 
     Zip::from(&peak_frames)
         .and(&query_index)
         .and(&mut hs)
         .par_apply(|&peak_frame, &index, h| {
-            *h = newtow_tangent(
-                const_vals,
+            let mut single_point_solver = SinglePointSolver {
+                solid_thermal_conductivity,
+                solid_thermal_diffusivity,
+                dt,
+                peak_temp,
                 peak_frame,
-                delta_temps.column(index),
-                h0,
+                delta_temps: delta_temps_2d.column(index),
+                h: h0,
                 max_iter_num,
-            );
+            };
+            *h = single_point_solver.newtow_tangent();
         });
 
     hs
