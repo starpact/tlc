@@ -1,70 +1,104 @@
-// use std::fs::File;
-// use std::io::{self, BufReader, Read, Write};
-// use std::net::{TcpListener, TcpStream};
-// use std::thread;
-
-// fn main() -> io::Result<()> {
-//     let listener = TcpListener::bind("127.0.0.1:2333")?;
-
-//     for stream in listener.incoming() {
-//         let stream = stream?;
-//         thread::spawn(move || {
-//             handle_connection(stream).unwrap_or(());
-//         });
-//     }
-
-//     Ok(())
-// }
-
-// fn handle_connection(mut stream: TcpStream) -> io::Result<()> {
-//     let mut buf = [0; 1024];
-//     stream.read(&mut buf)?;
-//     println!("{}", String::from_utf8_lossy(&buf).lines().nth(0).unwrap());
-//     stream.write("HTTP/1.1 200 OK\r\n\r\n".as_bytes())?;
-
-//     let simple_get_head = b"GET / HTTP/1.1\r\n";
-//     if buf.starts_with(simple_get_head) {
-//         let file = File::open("./config/config_large.json")?;
-//         let mut reader = BufReader::new(file);
-//         let mut buf = Vec::new();
-//         reader.read_to_end(&mut buf)?;
-//         stream.write(&buf[..])?;
-//     }
-
-//     stream.flush()?;
-
-//     Ok(())
-// }
-
-#[macro_use]
-extern crate lazy_static;
+use std::time::Instant;
 use tlc::calculate::*;
 
-const CONFIG_PATH: &str = "./config/config_large.json";
-
-lazy_static! {
-    static ref CONFIG_PARAS: io::ConfigParas = io::read_config(CONFIG_PATH).unwrap();
-    static ref VIDEO_PATH: &'static str = CONFIG_PARAS.video_path.as_str();
-    static ref EXCEL_PATH: &'static str = CONFIG_PARAS.excel_path.as_str();
-    static ref START_FRAME: usize = CONFIG_PARAS.start_frame;
-    static ref START_LINE: usize = CONFIG_PARAS.start_line;
-    static ref FRAME_NUM: usize = CONFIG_PARAS.frame_num;
-    static ref UPPER_LEFT_POS: (usize, usize) = CONFIG_PARAS.upper_left_pos;
-    static ref REGION_SHAPE: (usize, usize) = CONFIG_PARAS.region_shape;
-    static ref TEMP_COLUMN_NUM: &'static Vec<usize> = &CONFIG_PARAS.temp_column_num;
-    static ref THERMOCOUPLE_POS: &'static Vec<(i32, i32)> = &CONFIG_PARAS.thermocouple_pos;
-    static ref INTERP_METHOD: preprocess::InterpMethod = CONFIG_PARAS.interp_method;
-    static ref FILTER_METHOD: preprocess::FilterMethod = CONFIG_PARAS.filter_method;
-    static ref PEAK_TEMP: f64 = CONFIG_PARAS.peak_temp;
-    static ref SOLID_THERMAL_CONDUCTIVITY: f64 = CONFIG_PARAS.solid_thermal_conductivity;
-    static ref SOLID_THERMAL_DIFFUSIVITY: f64 = CONFIG_PARAS.solid_thermal_diffusivity;
-    static ref H0: f64 = CONFIG_PARAS.h0;
-    static ref MAX_ITER_NUM: usize = CONFIG_PARAS.max_iter_num;
-}
+const CONFIG_PATH: &str = "./config/config.json";
 
 fn main() {
-    let video_record = (*START_FRAME, *FRAME_NUM, *VIDEO_PATH);
-    let region_record = (*UPPER_LEFT_POS, *REGION_SHAPE);
-    let v = io::read_video(video_record, region_record).unwrap().1;
-    println!("{}", v);
+    let t0 = Instant::now();
+
+    let io::ConfigParas {
+        start_frame,
+        frame_num,
+        video_path,
+        upper_left_pos,
+        region_shape,
+        start_line,
+        temp_column_num,
+        excel_path,
+        filter_method,
+        interp_method,
+        thermocouple_pos,
+        solid_thermal_conductivity,
+        solid_thermal_diffusivity,
+        characteristic_length,
+        air_thermal_conductivity,
+        peak_temp,
+        h0,
+        max_iter_num,
+    } = io::read_config(CONFIG_PATH).unwrap();
+
+    //tmp
+    let (temp_column_num, thermocouple_pos) = match interp_method {
+        preprocess::InterpMethod::Horizontal => {
+            let mut x = temp_column_num;
+            let mut y = thermocouple_pos;
+            x.truncate(4);
+            y.truncate(4);
+            (x, y)
+        }
+        _ => (temp_column_num, thermocouple_pos),
+    };
+
+    println!("read video...");
+    let video_record = (start_frame, frame_num, video_path);
+    let region_record = (upper_left_pos, region_shape);
+    let (g2d, frame_rate) = io::read_video(video_record, region_record).unwrap();
+    let dt = 1. / frame_rate as f64;
+    let t1 = Instant::now();
+    println!("{:?}", t1.duration_since(t0));
+
+    println!("read excel...");
+    let temp_record = (start_line, frame_num, &temp_column_num, &excel_path);
+    let t2d = io::read_temp_excel(temp_record).unwrap();
+    let t2 = Instant::now();
+    println!("{:?}", t2.duration_since(t1));
+
+    println!("filtering...");
+    let g2d_filtered = preprocess::filtering(g2d, filter_method);
+    let t3 = Instant::now();
+    println!("{:?}", t3.duration_since(t2));
+
+    println!("detect peak...");
+    let peak_frames = preprocess::detect_peak(g2d_filtered);
+    let t4 = Instant::now();
+    println!("{:?}", t4.duration_since(t3));
+
+    println!("interpolate...");
+    let (interp_temps, query_index) = preprocess::interp(
+        t2d.view(),
+        &thermocouple_pos,
+        interp_method,
+        upper_left_pos,
+        region_shape,
+    );
+    let t5 = Instant::now();
+    println!("{:?}", t5.duration_since(t4));
+
+    println!("start calculating...");
+    let nus = solve::solve(
+        solid_thermal_conductivity,
+        solid_thermal_diffusivity,
+        characteristic_length,
+        air_thermal_conductivity,
+        dt,
+        peak_temp,
+        peak_frames,
+        interp_temps,
+        query_index,
+        h0,
+        max_iter_num,
+    );
+    let t6 = Instant::now();
+    println!("{:?}", t6.duration_since(t5));
+
+    println!("\ntotal time cost: {:?}\n", t6.duration_since(t0));
+
+    let (valid_count, valid_sum) = nus.iter().fold((0, 0.), |(count, sum), &h| {
+        if h.is_finite() {
+            (count + 1, sum + h)
+        } else {
+            (count, sum)
+        }
+    });
+    println!("overall average Nu: {}", valid_sum / valid_count as f64);
 }

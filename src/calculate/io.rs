@@ -118,13 +118,13 @@ pub fn read_temp_excel<P: AsRef<Path>>(
     Ok(t2d)
 }
 
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use serde_json;
 
+use super::preprocess::{FilterMethod, InterpMethod};
 use std::error::Error;
 use std::fs::File;
 use std::io::BufReader;
-use super::preprocess::{InterpMethod, FilterMethod};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ConfigParas {
@@ -142,6 +142,8 @@ pub struct ConfigParas {
     pub peak_temp: f64,
     pub solid_thermal_conductivity: f64,
     pub solid_thermal_diffusivity: f64,
+    pub characteristic_length: f64,
+    pub air_thermal_conductivity: f64,
     pub h0: f64,
     pub max_iter_num: usize,
 }

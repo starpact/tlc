@@ -7,7 +7,7 @@ mod calculate {
 
     use tlc::calculate::*;
 
-    const CONFIG_PATH: &str = "./config/config_large.json";
+    const CONFIG_PATH: &str = "./config/config.json";
 
     lazy_static! {
         static ref CONFIG_PARAS: io::ConfigParas = io::read_config(CONFIG_PATH).unwrap();
@@ -25,6 +25,8 @@ mod calculate {
         static ref PEAK_TEMP: f64 = CONFIG_PARAS.peak_temp;
         static ref SOLID_THERMAL_CONDUCTIVITY: f64 = CONFIG_PARAS.solid_thermal_conductivity;
         static ref SOLID_THERMAL_DIFFUSIVITY: f64 = CONFIG_PARAS.solid_thermal_diffusivity;
+        static ref CHARACTERISTIC_LENGTH: f64 = CONFIG_PARAS.characteristic_length;
+        static ref AIR_THERMAL_CONDUCTIVITY: f64 = CONFIG_PARAS.air_thermal_conductivity;
         static ref H0: f64 = CONFIG_PARAS.h0;
         static ref MAX_ITER_NUM: usize = CONFIG_PARAS.max_iter_num;
     }
@@ -52,8 +54,9 @@ mod calculate {
         let (g2d, frame_rate) = example_g2d();
         println!("{:?}", std::time::Instant::now().duration_since(t0));
 
-        println!("{}", frame_rate);
-        println!("{}", g2d.row(0));
+        println!("frame rate: {}", frame_rate);
+        let row = g2d.row(0);
+        println!("{}", row.slice(s![..100]));
     }
 
     #[test]
@@ -124,9 +127,11 @@ mod calculate {
         );
 
         println!("start calculating...");
-        let hs = solve::solve(
+        let nus = solve::solve(
             *SOLID_THERMAL_CONDUCTIVITY,
             *SOLID_THERMAL_DIFFUSIVITY,
+            *CHARACTERISTIC_LENGTH,
+            *AIR_THERMAL_CONDUCTIVITY,
             dt,
             *PEAK_TEMP,
             peak_frames,
@@ -140,15 +145,15 @@ mod calculate {
             "\ntotal time cost: {:?}\n",
             std::time::Instant::now().duration_since(t0)
         );
-        println!("{}\n", hs.slice(s![..6]));
-        let res = hs.iter().fold((0, 0.), |(count, sum), &h| {
+        println!("{}\n", nus.slice(s![..6]));
+        let (valid_count, valid_sum) = nus.iter().fold((0, 0.), |(count, sum), &h| {
             if h.is_finite() {
                 (count + 1, sum + h)
             } else {
                 (count, sum)
             }
         });
-        println!("overall average Nu: {}", res.1 / res.0 as f64 * 0.03429 / 0.0276);
+        println!("overall average Nu: {}", valid_sum / valid_count as f64);
     }
 
     use plotters::prelude::*;
