@@ -26,6 +26,8 @@ use std::f64::consts::PI;
 pub struct SinglePointSolver<'a> {
     solid_thermal_conductivity: f64,
     solid_thermal_diffusivity: f64,
+    characteristic_length: f64,
+    air_thermal_conductivity: f64,
     dt: f64,
     peak_frame: usize,
     peak_temp: f64,
@@ -81,7 +83,7 @@ impl SinglePointSolver<'_> {
             }
         }
 
-        self.h
+        self.h * self.characteristic_length / self.air_thermal_conductivity
     }
 }
 
@@ -107,6 +109,8 @@ fn cal_delta_temps(mut t2d: Array2<f64>) -> Array2<f64> {
 pub fn solve(
     solid_thermal_conductivity: f64,
     solid_thermal_diffusivity: f64,
+    characteristic_length: f64,
+    air_thermal_conductivity: f64,
     dt: f64,
     peak_temp: f64,
     peak_frames: Array1<usize>,
@@ -115,16 +119,18 @@ pub fn solve(
     h0: f64,
     max_iter_num: usize,
 ) -> Array1<f64> {
-    let mut hs = Array1::zeros(query_index.len());
+    let mut nus = Array1::zeros(query_index.len());
     let delta_temps_2d = cal_delta_temps(interp_temps);
 
     Zip::from(&peak_frames)
         .and(&query_index)
-        .and(&mut hs)
-        .par_apply(|&peak_frame, &index, h| {
+        .and(&mut nus)
+        .par_apply(|&peak_frame, &index, nu| {
             let mut single_point_solver = SinglePointSolver {
                 solid_thermal_conductivity,
                 solid_thermal_diffusivity,
+                characteristic_length,
+                air_thermal_conductivity,
                 dt,
                 peak_temp,
                 peak_frame,
@@ -132,8 +138,8 @@ pub fn solve(
                 h: h0,
                 max_iter_num,
             };
-            *h = single_point_solver.newtow_tangent();
+            *nu = single_point_solver.newtow_tangent();
         });
 
-    hs
+    nus
 }

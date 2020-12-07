@@ -1,5 +1,5 @@
 use ndarray::prelude::*;
-use std::path::Path;
+use std::{path::Path, unimplemented};
 
 use ffmpeg_next as ffmpeg;
 
@@ -83,16 +83,31 @@ pub fn read_video<P: AsRef<Path>>(
     Ok((g2d, frame_rate))
 }
 
-use calamine::{open_workbook, DataType, Reader, Xlsx};
+use std::error::Error;
+
+pub fn read_daq<P: AsRef<Path>>(
+    temp_record: (usize, usize, &Vec<usize>, P),
+) -> Result<Array2<f64>, Box<dyn Error>> {
+    let ext = temp_record.3.as_ref().extension().unwrap();
+    if ext.eq("lvm") || ext.eq("csv") {
+        read_temp_csv(temp_record)
+    } else if ext.eq("xlsx") {
+        read_temp_excel(temp_record)
+    } else {
+        unimplemented!();
+    }
+}
+
+use calamine::{open_workbook, Reader, Xlsx};
 
 /// *read temperature data from excel*
 /// ### Argument:
 /// temperature record(start line number, total frame number, column numbers that record the temperatures, excel_path)
 /// ### Return:
 /// 2D matrix of the temperatures from thermocouples
-pub fn read_temp_excel<P: AsRef<Path>>(
+fn read_temp_excel<P: AsRef<Path>>(
     temp_record: (usize, usize, &Vec<usize>, P),
-) -> Result<Array2<f64>, calamine::Error> {
+) -> Result<Array2<f64>, Box<dyn Error>> {
     let (start_line, frame_num, columns, temp_path) = temp_record;
     let mut excel: Xlsx<_> = open_workbook(temp_path).unwrap();
     let sheet = excel.worksheet_range_at(0).expect("no sheet exists")?;
@@ -106,25 +121,47 @@ pub fn read_temp_excel<P: AsRef<Path>>(
         .zip(t2d.axis_iter_mut(Axis(0)))
     {
         for (&index, t) in columns.iter().zip(temp_row.iter_mut()) {
-            match excel_row[index] {
-                DataType::Float(t0) => *t = t0,
-                _ => {
-                    return Err(calamine::Error::Msg("temperatures not as floats"));
-                }
-            }
+            *t = excel_row[index]
+                .get_float()
+                .ok_or("temperate not in floats")?;
         }
     }
 
     Ok(t2d)
 }
 
-use serde::{Serialize, Deserialize};
+fn read_temp_csv<P: AsRef<Path>>(
+    temp_record: (usize, usize, &Vec<usize>, P),
+) -> Result<Array2<f64>, Box<dyn std::error::Error>> {
+    let (start_line, frame_num, columns, temp_path) = temp_record;
+    let mut rdr = csv::ReaderBuilder::new()
+        .has_headers(false)
+        .delimiter(b'\t')
+        .from_path(temp_path)?;
+
+    let mut t2d = Array2::zeros((frame_num, columns.len()));
+
+    for (csv_row, mut temp_row) in rdr
+        .records()
+        .skip(start_line)
+        .take(frame_num)
+        .zip(t2d.axis_iter_mut(Axis(0)))
+    {
+        let csv_row = csv_row?;
+        for (&index, t) in columns.iter().zip(temp_row.iter_mut()) {
+            *t = csv_row[index].parse::<f64>()?;
+        }
+    }
+
+    Ok(t2d)
+}
+
+use serde::{Deserialize, Serialize};
 use serde_json;
 
-use std::error::Error;
+use super::preprocess::{FilterMethod, InterpMethod};
 use std::fs::File;
 use std::io::BufReader;
-use super::preprocess::{InterpMethod, FilterMethod};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ConfigParas {
@@ -142,6 +179,8 @@ pub struct ConfigParas {
     pub peak_temp: f64,
     pub solid_thermal_conductivity: f64,
     pub solid_thermal_diffusivity: f64,
+    pub characteristic_length: f64,
+    pub air_thermal_conductivity: f64,
     pub h0: f64,
     pub max_iter_num: usize,
 }
