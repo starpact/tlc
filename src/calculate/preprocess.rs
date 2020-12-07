@@ -7,7 +7,6 @@ use serde::{Deserialize, Serialize};
 pub enum FilterMethod {
     No,
     Median(usize),
-    Wavelet,
 }
 
 use median::Filter;
@@ -32,7 +31,6 @@ pub fn filtering(g2d: Array2<u8>, filter_method: FilterMethod) -> Array2<u8> {
 
             filtered_g2d
         }
-        _ => unimplemented!("在做了"),
     }
 }
 
@@ -122,7 +120,7 @@ fn interp_1d(
                 .collect::<Vec<_>>(),
             (0..cal_w).cycle().take(cal_h * cal_w).collect(),
         ),
-        InterpMethod::Vertical => (
+        _ => (
             cal_h,
             thermocouple_pos
                 .iter()
@@ -130,7 +128,6 @@ fn interp_1d(
                 .collect::<Vec<_>>(),
             (0..cal_h * cal_w).map(|x| x / cal_w).collect(),
         ),
-        _ => panic!("only horizontal or vertical for one dimensional interpolation"),
     };
 
     let mut interp_temps = Array2::zeros((t2d.nrows(), len_of_interp_dimension));
@@ -142,8 +139,10 @@ fn interp_1d(
             if pos == right_end && curr + 2 < tc_pos_relative.len() {
                 curr += 1;
             }
-            *iter.next().unwrap() = (row_tc[curr] * (right_end - pos) as f64
-                + row_tc[curr + 1] * (pos - left_end) as f64) / (right_end -left_end) as f64;
+            if let Some(t) = iter.next() {
+                *t = (row_tc[curr] * (right_end - pos) as f64
+                    + row_tc[curr + 1] * (pos - left_end) as f64) / (right_end -left_end) as f64;
+            }
         }
     });
 
@@ -181,7 +180,9 @@ fn interp_scatter(
         let mut iter = row.iter_mut();
         for y in 0..cal_h {
             for x in 0..cal_w {
-                *iter.next().unwrap() = scatter.eval(DVector::from_vec(vec![y as f64, x as f64]))[0];
+                if let Some(t) = iter.next() {
+                    *t = scatter.eval(DVector::from_vec(vec![y as f64, x as f64]))[0];
+                }
             }
         }
     });

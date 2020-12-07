@@ -1,69 +1,58 @@
 {
-    "video_path": "./resource/ed2_50000_1.avi",
-    "excel_path": "./resource/ed2_50000_1.xlsx",
-    "start_frame": 0,
-    "start_line": 0,
-    "frame_num": 3,
+    "video_path": "D:/research/EXP/exp_20201206/imp/videos/imp_20000_1_up.avi",
+    "daq_path": "D:/research/EXP/exp_20201206/imp/daq/imp_20000_1.lvm",
+    "start_frame": 91,
+    "start_row": 160,
     "upper_left_pos": [
-        0,
-        43
+        638,
+        36
     ],
     "region_shape": [
-        300,
-        1000
+        380,
+        1213
     ],
     "temp_column_num": [
-        7,
-        6,
-        5,
-        4,
-        0,
         1,
         2,
-        3
+        3,
+        4,
+        5,
+        6
     ],
     "thermocouple_pos": [
         [
-            51,
-            33
+            0,
+            166
         ],
         [
-            51,
-            401
+            0,
+            355
         ],
         [
-            51,
-            762
+            0,
+            543
         ],
         [
-            51,
-            1139
+            0,
+            731
         ],
         [
-            465,
-            24
+            0,
+            922
         ],
         [
-            465,
-            377
-        ],
-        [
-            465,
-            825
-        ],
-        [
-            465,
-            1144
+            0,
+            1116
         ]
     ],
-    "interp_method": "Scatter",
+    "interp_method": "Horizontal",
     "filter_method": {
         "Median": 20
     },
-    "peak_temp": 35.18,
+    "peak_temp": 35.48,
     "solid_thermal_conductivity": 0.19,
     "solid_thermal_diffusivity": 1.091e-7,
-    "characteristic_length": 0.0445,
+    "characteristic_length": 0.015,
     "air_thermal_conductivity": 0.0276,
     "h0": 50,
     "max_iter_num": 10
