@@ -1,6 +1,51 @@
-use ndarray::prelude::*;
 use std::error::Error;
+use std::fs::File;
+use std::io::BufReader;
 use std::path::Path;
+
+use serde::{Deserialize, Serialize};
+use serde_json;
+
+use ndarray::prelude::*;
+
+use ffmpeg_next as ffmpeg;
+
+use ffmpeg::format::{input, Pixel};
+use ffmpeg::software::scaling::{context::Context, flag::Flags};
+use ffmpeg::util::frame::video::Video;
+
+use calamine::{open_workbook, Reader, Xlsx};
+
+use super::preprocess::{FilterMethod, InterpMethod};
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ConfigParas {
+    pub video_path: String,
+    pub daq_path: String,
+    pub start_frame: usize,
+    pub start_row: usize,
+    pub upper_left_pos: (usize, usize),
+    pub region_shape: (usize, usize),
+    pub temp_column_num: Vec<usize>,
+    pub thermocouple_pos: Vec<(i32, i32)>,
+    pub interp_method: InterpMethod,
+    pub filter_method: FilterMethod,
+    pub peak_temp: f64,
+    pub solid_thermal_conductivity: f64,
+    pub solid_thermal_diffusivity: f64,
+    pub characteristic_length: f64,
+    pub air_thermal_conductivity: f64,
+    pub h0: f64,
+    pub max_iter_num: usize,
+}
+
+pub fn read_config<P: AsRef<Path>>(config_path: P) -> Result<ConfigParas, Box<dyn Error>> {
+    let file = File::open(config_path)?;
+    let reader = BufReader::new(file);
+    let cfg = serde_json::from_reader(reader)?;
+
+    Ok(cfg)
+}
 
 pub fn get_metadata<P: AsRef<Path>>(
     video_path: P,
@@ -11,14 +56,9 @@ pub fn get_metadata<P: AsRef<Path>>(
     let (total_frames, frame_rate) = get_frames_of_video(video_path)?;
     let total_rows = get_rows_of_daq(daq_path)?;
     let frame_num = (total_frames - start_frame).min(total_rows - start_row) - 1;
+
     Ok((frame_num, frame_rate, total_frames, total_rows))
 }
-
-use ffmpeg_next as ffmpeg;
-
-use ffmpeg::format::{input, Pixel};
-use ffmpeg::software::scaling::{context::Context, flag::Flags};
-use ffmpeg::util::frame::video::Video;
 
 fn get_frames_of_video<P: AsRef<Path>>(video_path: P) -> Result<(usize, usize), Box<dyn Error>> {
     ffmpeg::init()?;
@@ -30,24 +70,28 @@ fn get_frames_of_video<P: AsRef<Path>>(video_path: P) -> Result<(usize, usize), 
         .codec()
         .decoder()
         .video()?;
-    let rational = decoder.frame_rate().ok_or("")?;
+    let rational = decoder.frame_rate().ok_or("wrong video file")?;
     let frame_rate = (rational.numerator() as f64 / rational.denominator() as f64).round() as usize;
     let total_frame = ictx.duration() as usize * frame_rate / 1_000_000;
+
     Ok((total_frame, frame_rate))
 }
 
-use calamine::{open_workbook, Reader, Xlsx};
-
 fn get_rows_of_daq<P: AsRef<Path>>(daq_path: P) -> Result<usize, Box<dyn Error>> {
     use std::io::{Error, ErrorKind::InvalidData};
-    match daq_path.as_ref().extension() {
-        Some(ext) if "lvm".eq(ext) => {
-            let mut rdr = csv::ReaderBuilder::new()
-                .has_headers(false)
-                .from_path(daq_path)?;
-            Ok(rdr.records().count())
-        }
-        Some(ext) if "xlsx".eq(ext) => {
+    match daq_path
+        .as_ref()
+        .extension()
+        .ok_or("wrong daq path")?
+        .to_str()
+        .ok_or("wrong daq path")?
+    {
+        "lvm" => Ok(csv::ReaderBuilder::new()
+            .has_headers(false)
+            .from_path(daq_path)?
+            .records()
+            .count()),
+        "xlsx" => {
             let mut excel: Xlsx<_> = open_workbook(daq_path)?;
             let sheet = excel.worksheet_range_at(0).ok_or("no sheet exists")??;
             Ok(sheet.height())
@@ -144,9 +188,16 @@ pub fn read_daq<P: AsRef<Path>>(
     temp_record: (usize, usize, &Vec<usize>, P),
 ) -> Result<Array2<f64>, Box<dyn Error>> {
     use std::io::{Error, ErrorKind::InvalidData};
-    match temp_record.3.as_ref().extension() {
-        Some(ext) if "lvm".eq(ext) => read_temp_from_lvm(temp_record),
-        Some(ext) if "xlsx".eq(ext) => read_temp_from_excel(temp_record),
+    match temp_record
+        .3
+        .as_ref()
+        .extension()
+        .ok_or("wrong daq path")?
+        .to_str()
+        .ok_or("wrong daq path")?
+    {
+        "lvm" => read_temp_from_lvm(temp_record),
+        "xlsx" => read_temp_from_excel(temp_record),
         _ => Err(Box::new(Error::new(
             InvalidData,
             "only .lvm or .xlsx supported",
@@ -201,39 +252,4 @@ fn read_temp_from_excel<P: AsRef<Path>>(
     }
 
     Ok(t2d)
-}
-
-use serde::{Deserialize, Serialize};
-use serde_json;
-
-use super::preprocess::{FilterMethod, InterpMethod};
-use std::fs::File;
-use std::io::BufReader;
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct ConfigParas {
-    pub video_path: String,
-    pub daq_path: String,
-    pub start_frame: usize,
-    pub start_row: usize,
-    pub upper_left_pos: (usize, usize),
-    pub region_shape: (usize, usize),
-    pub temp_column_num: Vec<usize>,
-    pub thermocouple_pos: Vec<(i32, i32)>,
-    pub interp_method: InterpMethod,
-    pub filter_method: FilterMethod,
-    pub peak_temp: f64,
-    pub solid_thermal_conductivity: f64,
-    pub solid_thermal_diffusivity: f64,
-    pub characteristic_length: f64,
-    pub air_thermal_conductivity: f64,
-    pub h0: f64,
-    pub max_iter_num: usize,
-}
-
-pub fn read_config<P: AsRef<Path>>(config_path: P) -> Result<ConfigParas, Box<dyn Error>> {
-    let file = File::open(config_path)?;
-    let reader = BufReader::new(file);
-    let cfg = serde_json::from_reader(reader)?;
-    Ok(cfg)
 }
