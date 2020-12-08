@@ -13,13 +13,14 @@ mod calculate {
         static ref CONFIG_PARAS: io::ConfigParas = io::read_config(CONFIG_PATH).unwrap();
         static ref VIDEO_PATH: &'static str = CONFIG_PARAS.video_path.as_str();
         static ref DAQ_PATH: &'static str = CONFIG_PARAS.daq_path.as_str();
+        static ref SAVE_DIR: &'static str = CONFIG_PARAS.save_dir.as_str();
         static ref START_FRAME: usize = CONFIG_PARAS.start_frame;
         static ref START_ROW: usize = CONFIG_PARAS.start_row;
         static ref METADATA: (usize, usize, usize, usize) =
             io::get_metadata(*VIDEO_PATH, *DAQ_PATH, *START_FRAME, *START_ROW).unwrap();
         static ref FRAME_NUM: usize = METADATA.0;
         static ref FRAME_RATE: usize = METADATA.1;
-        static ref UPPER_LEFT_POS: (usize, usize) = CONFIG_PARAS.upper_left_pos;
+        static ref TOP_LEFT_POS: (usize, usize) = CONFIG_PARAS.top_left_pos;
         static ref REGION_SHAPE: (usize, usize) = CONFIG_PARAS.region_shape;
         static ref TEMP_COLUMN_NUM: &'static Vec<usize> = &CONFIG_PARAS.temp_column_num;
         static ref THERMOCOUPLE_POS: &'static Vec<(i32, i32)> = &CONFIG_PARAS.thermocouple_pos;
@@ -35,11 +36,6 @@ mod calculate {
     }
 
     #[test]
-    fn aaa() {
-        println!("{:?}", *METADATA);
-    }
-
-    #[test]
     fn show_config() {
         let c = io::read_config(CONFIG_PATH).unwrap();
         println!("{:#?}", c);
@@ -47,7 +43,7 @@ mod calculate {
 
     fn example_g2d() -> Array2<u8> {
         let video_record = (*START_FRAME, *FRAME_NUM, *VIDEO_PATH);
-        let region_record = (*UPPER_LEFT_POS, *REGION_SHAPE);
+        let region_record = (*TOP_LEFT_POS, *REGION_SHAPE);
         io::read_video(video_record, region_record).unwrap()
     }
 
@@ -96,15 +92,12 @@ mod calculate {
             t2d.view(),
             *THERMOCOUPLE_POS,
             *INTERP_METHOD,
-            *UPPER_LEFT_POS,
+            *TOP_LEFT_POS,
             *REGION_SHAPE,
         )
         .0;
         println!("{:?}", std::time::Instant::now().duration_since(t0));
-
-        println!("{}", t2d.slice(s![..3, ..]));
-        println!("=================");
-        println!("{}", interp_x_t2d.slice(s![..3, ..]));
+        plot::plot_temps(interp_x_t2d.row(1000)).unwrap();
     }
 
     #[test]
@@ -129,7 +122,7 @@ mod calculate {
             t2d.view(),
             *THERMOCOUPLE_POS,
             *INTERP_METHOD,
-            *UPPER_LEFT_POS,
+            *TOP_LEFT_POS,
             *REGION_SHAPE,
         );
 
@@ -164,33 +157,6 @@ mod calculate {
     }
 
     use plotters::prelude::*;
-    #[test]
-    fn test_plot() {
-        let root = BitMapBackend::new("plotters/0.png", (640, 480)).into_drawing_area();
-        root.fill(&WHITE).unwrap();
-        let mut chart = ChartBuilder::on(&root)
-            .caption("y=x^2", ("sans-serif", 50).into_font())
-            .margin(5)
-            .x_label_area_size(30)
-            .y_label_area_size(30)
-            .build_cartesian_2d(-1f32..1f32, -0.1f32..1f32)
-            .unwrap();
-        chart.configure_mesh().draw().unwrap();
-        chart
-            .draw_series(LineSeries::new(
-                (-50..=50).map(|x| x as f32 / 50.).map(|x| (x, x * x)),
-                &RED,
-            ))
-            .unwrap()
-            .label("y=x^2")
-            .legend(|(x, y)| PathElement::new(vec![(x, y), (x + 20, y)], &RED));
-        chart
-            .configure_series_labels()
-            .background_style(&WHITE.mix(0.8))
-            .border_style(&BLACK)
-            .draw()
-            .unwrap();
-    }
 
     #[test]
     fn test_filtering() {
@@ -223,29 +189,12 @@ mod calculate {
     }
 
     #[test]
-    fn test_contour() -> Result<(), Box<dyn std::error::Error>> {
-        let (height, width) = (1000, 1000);
-        let root = BitMapBackend::new("plotters/2.png", (width, height)).into_drawing_area();
-        root.fill(&WHITE)?;
-        let mut chart = ChartBuilder::on(&root)
-            .margin(20)
-            .x_label_area_size(10)
-            .y_label_area_size(10)
-            .build_cartesian_2d(0..width, 0..height)?;
-        chart
-            .configure_mesh()
-            .disable_x_mesh()
-            .disable_y_mesh()
-            .draw()?;
-        let plotting_area = chart.plotting_area();
-        for y in 0..height {
-            for x in 0..width {
-                plotting_area.draw_pixel(
-                    (x, y),
-                    &RGBColor((x / 8) as u8, (y / 8) as u8, (x / 8) as u8 + (y / 8) as u8),
-                )?;
-            }
-        }
-        Ok(())
+    fn have_a_look() {
+        let (nu_path, plot_path) = io::get_save_path(*VIDEO_PATH, *SAVE_DIR).unwrap();
+        println!("{:?}", nu_path);
+        println!("{:?}", plot_path);
+        let nu2d = io::read_nu(nu_path).unwrap();
+
+        plot::plot_nu(nu2d.view(), plot_path).unwrap();
     }
 }

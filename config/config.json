@@ -1,9 +1,10 @@
 {
     "video_path": "D:/research/EXP/exp_20201206/imp/videos/imp_20000_1_up.avi",
     "daq_path": "D:/research/EXP/exp_20201206/imp/daq/imp_20000_1.lvm",
+    "save_dir": "D:/research/EXP/exp_20201206/result/imp",
     "start_frame": 91,
     "start_row": 160,
-    "upper_left_pos": [
+    "top_left_pos": [
         638,
         36
     ],
@@ -46,9 +47,7 @@
         ]
     ],
     "interp_method": "Horizontal",
-    "filter_method": {
-        "Median": 20
-    },
+    "filter_method": "No",
     "peak_temp": 35.48,
     "solid_thermal_conductivity": 0.19,
     "solid_thermal_diffusivity": 1.091e-7,

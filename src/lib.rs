@@ -1,9 +1,10 @@
 pub mod calculate;
 
-use calculate::*;
 use std::error::Error;
 use std::path::Path;
 use std::time::Instant;
+
+use calculate::*;
 
 pub fn cal<P: AsRef<Path>>(config_path: P) -> Result<(), Box<dyn Error>> {
     let t0 = Instant::now();
@@ -11,9 +12,10 @@ pub fn cal<P: AsRef<Path>>(config_path: P) -> Result<(), Box<dyn Error>> {
     let io::ConfigParas {
         video_path,
         daq_path,
+        save_dir,
         start_frame,
         start_row,
-        upper_left_pos,
+        top_left_pos,
         region_shape,
         temp_column_num,
         thermocouple_pos,
@@ -36,8 +38,8 @@ pub fn cal<P: AsRef<Path>>(config_path: P) -> Result<(), Box<dyn Error>> {
     );
 
     println!("read video...");
-    let video_record = (start_frame, frame_num, video_path);
-    let region_record = (upper_left_pos, region_shape);
+    let video_record = (start_frame, frame_num, &video_path);
+    let region_record = (top_left_pos, region_shape);
     let g2d = io::read_video(video_record, region_record)?;
     let dt = 1. / frame_rate as f64;
     let t1 = Instant::now();
@@ -64,7 +66,7 @@ pub fn cal<P: AsRef<Path>>(config_path: P) -> Result<(), Box<dyn Error>> {
         t2d.view(),
         &thermocouple_pos,
         interp_method,
-        upper_left_pos,
+        top_left_pos,
         region_shape,
     );
     let t5 = Instant::now();
@@ -89,14 +91,18 @@ pub fn cal<P: AsRef<Path>>(config_path: P) -> Result<(), Box<dyn Error>> {
 
     println!("\ntotal time cost: {:?}\n", t6.duration_since(t0));
 
-    let (valid_count, valid_sum) = nus.iter().fold((0, 0.), |(count, sum), &h| {
-        if h.is_finite() {
-            (count + 1, sum + h)
-        } else {
-            (count, sum)
-        }
-    });
-    println!("overall average Nu: {}", valid_sum / valid_count as f64);
+    println!("saving...");
+
+    let (nu_path, plot_path) = io::get_save_path(&video_path, &save_dir)?;
+
+    let nu2d = nus.into_shape(region_shape)?;
+
+    let (nu_nan_mean, nan_ratio) = plot::plot_nu(nu2d.view(), plot_path)?;
+
+    println!("overall average Nu: {}", nu_nan_mean);
+    println!("nan percent: {:.2}%", nan_ratio);
+
+    io::save_nu(nu2d.view(), nu_path)?;
 
     Ok(())
 }

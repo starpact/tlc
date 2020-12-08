@@ -90,14 +90,14 @@ pub fn interp(
     t2d: ArrayView2<f64>,
     tc_pos: &Vec<(i32, i32)>,
     interp_method: InterpMethod,
-    upper_left_pos: (usize, usize),
+    top_left_pos: (usize, usize),
     region_shape: (usize, usize),
 ) -> (Array2<f64>, Array1<usize>) {
     match interp_method {
         InterpMethod::Horizontal | InterpMethod::Vertical => {
-            interp_1d(t2d, tc_pos, upper_left_pos, interp_method, region_shape)
+            interp_1d(t2d, tc_pos, top_left_pos, interp_method, region_shape)
         }
-        InterpMethod::Scatter => interp_scatter(t2d, tc_pos, upper_left_pos, region_shape),
+        InterpMethod::Scatter => interp_scatter(t2d, tc_pos, top_left_pos, region_shape),
     }
 }
 
@@ -105,7 +105,7 @@ pub fn interp(
 fn interp_1d(
     t2d: ArrayView2<f64>,
     thermocouple_pos: &Vec<(i32, i32)>,
-    upper_left_pos: (usize, usize),
+    top_left_pos: (usize, usize),
     interp_method: InterpMethod,
     region_shape: (usize, usize),
 ) -> (Array2<f64>, Array1<usize>) {
@@ -116,7 +116,7 @@ fn interp_1d(
             cal_w,
             thermocouple_pos
                 .iter()
-                .map(|tc_pos_raw| tc_pos_raw.1 - upper_left_pos.1 as i32)
+                .map(|tc_pos_raw| tc_pos_raw.1 - top_left_pos.1 as i32)
                 .collect::<Vec<_>>(),
             (0..cal_w).cycle().take(cal_h * cal_w).collect(),
         ),
@@ -124,7 +124,7 @@ fn interp_1d(
             cal_h,
             thermocouple_pos
                 .iter()
-                .map(|tc_pos_raw| tc_pos_raw.0 - upper_left_pos.0 as i32)
+                .map(|tc_pos_raw| tc_pos_raw.0 - top_left_pos.0 as i32)
                 .collect::<Vec<_>>(),
             (0..cal_h * cal_w).map(|x| x / cal_w).collect(),
         ),
@@ -136,12 +136,12 @@ fn interp_1d(
         let mut curr = 0;
         for pos in 0..len_of_interp_dimension as i32 {
             let (left_end, right_end) = (tc_pos_relative[curr], tc_pos_relative[curr + 1]);
-            if pos == right_end && curr + 2 < tc_pos_relative.len() {
-                curr += 1;
-            }
             if let Some(t) = iter.next() {
                 *t = (row_tc[curr] * (right_end - pos) as f64
-                    + row_tc[curr + 1] * (pos - left_end) as f64) / (right_end -left_end) as f64;
+                    + row_tc[curr + 1] * (pos - left_end) as f64) / (right_end - left_end) as f64;
+            }
+            if pos == right_end && curr + 2 < tc_pos_relative.len() {
+                curr += 1;
             }
         }
     });
