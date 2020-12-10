@@ -16,7 +16,7 @@ use ffmpeg::util::frame::video::Video;
 
 use calamine::{open_workbook, Reader, Xlsx};
 
-use csv::{ByteRecord, ReaderBuilder, WriterBuilder};
+use csv::{ReaderBuilder, StringRecord, WriterBuilder};
 
 use super::preprocess::{FilterMethod, InterpMethod};
 
@@ -168,7 +168,7 @@ pub fn read_video<P: AsRef<Path>>(
         let mut iter = row.iter_mut();
         for i in (0..).step_by(real_w).skip(tl_y).take(cal_h) {
             for j in (i..).skip(1).step_by(3).skip(tl_x).take(cal_w) {
-                *iter.next().ok_or("")? = rgb[j];
+                *iter.next().ok_or("bakana")? = unsafe { *rgb.get_unchecked(j) };
             }
         }
     }
@@ -267,18 +267,21 @@ pub fn save_nu<P: AsRef<Path>>(nu2d: ArrayView2<f64>, nu_path: P) -> Result<(), 
 
     for row in nu2d.axis_iter(Axis(0)) {
         let v: Vec<_> = row.iter().map(|x| x.to_string()).collect();
-        wtr.write_byte_record(&ByteRecord::from(v))?;
+        wtr.write_record(&StringRecord::from(v))?;
     }
 
     Ok(())
 }
 
 pub fn read_nu<P: AsRef<Path>>(nu_path: P) -> Result<Array2<f64>, Box<dyn Error>> {
+    // avoid adding the shape into arguments, though ugly
     let mut rdr = ReaderBuilder::new()
         .has_headers(false)
-        .from_path(nu_path)?;
-    let height = rdr.records().count();
+        .from_path(&nu_path)?;
     let width = rdr.records().next().ok_or("wrong nu file")??.len();
+    let height = rdr.records().count() + 1;
+
+    let mut rdr = ReaderBuilder::new().has_headers(false).from_path(nu_path)?;
     let mut nu2d = Array2::zeros((height, width));
 
     for (csv_row_result, mut nu_row) in rdr.records().zip(nu2d.axis_iter_mut(Axis(0))) {

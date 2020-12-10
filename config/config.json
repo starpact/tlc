@@ -1,16 +1,16 @@
 {
-    "video_path": "D:/research/EXP/exp_20201206/imp/videos/imp_20000_1_up.avi",
-    "daq_path": "D:/research/EXP/exp_20201206/imp/daq/imp_20000_1.lvm",
-    "save_dir": "D:/research/EXP/exp_20201206/result/imp",
+    "video_path": "E:\\research\\EXP\\exp_20201206\\imp\\videos\\imp_20000_1_up.avi",
+    "daq_path": "E:\\research\\EXP\\exp_20201206\\imp\\daq\\imp_20000_1.lvm",
+    "save_dir": "E:\\research\\EXP\\exp_20201206\\result\\imp",
     "start_frame": 91,
     "start_row": 160,
     "top_left_pos": [
-        638,
-        36
+        660,
+        20
     ],
     "region_shape": [
-        380,
-        1213
+        340,
+        1248
     ],
     "temp_column_num": [
         1,

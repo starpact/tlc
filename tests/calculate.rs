@@ -145,7 +145,6 @@ mod calculate {
             "\ntotal time cost: {:?}\n",
             std::time::Instant::now().duration_since(t0)
         );
-        println!("{}\n", nus.slice(s![..6]));
         let (valid_count, valid_sum) = nus.iter().fold((0, 0.), |(count, sum), &h| {
             if h.is_finite() {
                 (count + 1, sum + h)
@@ -190,11 +189,20 @@ mod calculate {
 
     #[test]
     fn have_a_look() {
-        let (nu_path, plot_path) = io::get_save_path(*VIDEO_PATH, *SAVE_DIR).unwrap();
+        let (nu_path, mut plot_path) = io::get_save_path(*VIDEO_PATH, *SAVE_DIR).unwrap();
         println!("{:?}", nu_path);
         println!("{:?}", plot_path);
-        let nu2d = io::read_nu(nu_path).unwrap();
+        let nu2d = io::read_nu(&nu_path).unwrap();
 
+        let original_stem = plot_path.file_stem().unwrap().to_owned();
+
+        let mut cnt = 1;
+        while plot_path.exists() {
+            let mut file_stem = original_stem.clone();
+            file_stem.push(cnt.to_string() + ".png");
+            plot_path.set_file_name(file_stem);
+            cnt += 1;
+        }
         plot::plot_nu(nu2d.view(), plot_path).unwrap();
     }
 }

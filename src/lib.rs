@@ -5,8 +5,9 @@ use std::path::Path;
 use std::time::Instant;
 
 use calculate::*;
+use ndarray::Axis;
 
-pub fn cal<P: AsRef<Path>>(config_path: P) -> Result<(), Box<dyn Error>> {
+pub fn cal<P: AsRef<Path>>(config_path: P) -> Result<f64, Box<dyn Error>> {
     let t0 = Instant::now();
 
     let io::ConfigParas {
@@ -95,14 +96,15 @@ pub fn cal<P: AsRef<Path>>(config_path: P) -> Result<(), Box<dyn Error>> {
 
     let (nu_path, plot_path) = io::get_save_path(&video_path, &save_dir)?;
 
-    let nu2d = nus.into_shape(region_shape)?;
+    let mut nu2d = nus.into_shape(region_shape)?;
+    nu2d.invert_axis(Axis(0));
 
     let (nu_nan_mean, nan_ratio) = plot::plot_nu(nu2d.view(), plot_path)?;
 
     println!("overall average Nu: {}", nu_nan_mean);
-    println!("nan percent: {:.2}%", nan_ratio);
+    println!("nan percent: {:.3}%", nan_ratio);
 
     io::save_nu(nu2d.view(), nu_path)?;
 
-    Ok(())
+    Ok(nu_nan_mean)
 }
