@@ -48,7 +48,7 @@ fn filter(file_name: &str) -> bool {
         | "rib_30000_2_down.json"
         | "rib_40000_2_up.json"
         | "rib_40000_2_down.json"
-        | "rib_50000_2_up.json"
+        // | "rib_50000_2_up.json"
         | "rib_50000_2_down.json"
         | "fuck" => false,
         _ => true,

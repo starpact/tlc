@@ -3,6 +3,8 @@
 extern crate lazy_static;
 
 mod calculate {
+    use std::time::Instant;
+
     use ndarray::prelude::*;
 
     use tlc::calculate::*;
@@ -54,19 +56,19 @@ mod calculate {
 
     #[test]
     fn test_read_video() {
-        let t0 = std::time::Instant::now();
+        let t0 = Instant::now();
         let g2d = example_g2d();
-        println!("{:?}", std::time::Instant::now().duration_since(t0));
+        println!("{:?}", Instant::now().duration_since(t0));
 
         let row = g2d.row(0);
-        println!("{}", row.slice(s![..100]));
+        println!("{}", row.slice(s![..10]));
     }
 
     #[test]
     fn test_read_daq() {
-        let t0 = std::time::Instant::now();
+        let t0 = Instant::now();
         let res = example_t2d();
-        println!("{:?}", std::time::Instant::now().duration_since(t0));
+        println!("{:?}", Instant::now().duration_since(t0));
 
         println!("{}", res.slice(s![..3, ..]));
         println!("{}", res.row(*FRAME_NUM - 1));
@@ -76,9 +78,9 @@ mod calculate {
     fn test_detect_peak() {
         let g2d = example_g2d();
 
-        let t0 = std::time::Instant::now();
+        let t0 = Instant::now();
         let peak = preprocess::detect_peak(g2d);
-        println!("{:?}", std::time::Instant::now().duration_since(t0));
+        println!("{:?}", Instant::now().duration_since(t0));
 
         println!("{}", peak.slice(s![180000..180100]));
     }
@@ -87,7 +89,7 @@ mod calculate {
     fn test_interp_x() {
         let t2d = example_t2d();
 
-        let t0 = std::time::Instant::now();
+        let t0 = Instant::now();
         let interp_x_t2d = preprocess::interp(
             t2d.view(),
             *THERMOCOUPLE_POS,
@@ -96,13 +98,13 @@ mod calculate {
             *REGION_SHAPE,
         )
         .0;
-        println!("{:?}", std::time::Instant::now().duration_since(t0));
+        println!("{:?}", Instant::now().duration_since(t0));
         plot::plot_temps(interp_x_t2d.row(1000)).unwrap();
     }
 
     #[test]
     fn test_solve() {
-        let t0 = std::time::Instant::now();
+        let t0 = Instant::now();
 
         println!("read video...");
         let g2d = example_g2d();
@@ -143,7 +145,7 @@ mod calculate {
 
         println!(
             "\ntotal time cost: {:?}\n",
-            std::time::Instant::now().duration_since(t0)
+            Instant::now().duration_since(t0)
         );
         let (valid_count, valid_sum) = nus.iter().fold((0, 0.), |(count, sum), &h| {
             if h.is_finite() {

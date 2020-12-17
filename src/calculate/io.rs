@@ -1,18 +1,22 @@
+use std::cell::RefCell;
 use std::error::Error;
 use std::fs::{DirBuilder, File};
 use std::io::BufReader;
+use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
 use serde_json;
 
 use ndarray::prelude::*;
 
-use ffmpeg_next as ffmpeg;
+use rayon::{scope, ThreadPoolBuilder};
+use thread_local::ThreadLocal;
 
-use ffmpeg::format::{input, Pixel};
-use ffmpeg::software::scaling::{context::Context, flag::Flags};
-use ffmpeg::util::frame::video::Video;
+use ffmpeg_next::format::{input, Pixel};
+use ffmpeg_next::software::scaling::{context::Context, flag::Flags};
+use ffmpeg_next::util::frame::video::Video;
 
 use calamine::{open_workbook, Reader, Xlsx};
 
@@ -64,7 +68,7 @@ pub fn get_metadata<P: AsRef<Path>>(
 }
 
 fn get_frames_of_video<P: AsRef<Path>>(video_path: P) -> Result<(usize, usize), Box<dyn Error>> {
-    ffmpeg::init()?;
+    ffmpeg_next::init()?;
 
     let ictx = input(&video_path)?;
     let decoder = ictx
@@ -102,6 +106,24 @@ fn get_rows_of_daq<P: AsRef<Path>>(daq_path: P) -> Result<usize, Box<dyn Error>>
     }
 }
 
+struct SendableContext(Context);
+
+unsafe impl Send for SendableContext {}
+
+impl Deref for SendableContext {
+    type Target = Context;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for SendableContext {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
 /// *read the video and collect all green values spatially and temporally*
 /// ### Argument:
 /// video record(start frame, frame num, video path)
@@ -117,17 +139,7 @@ pub fn read_video<P: AsRef<Path>>(
     video_record: (usize, usize, P),
     region_record: ((usize, usize), (usize, usize)),
 ) -> Result<Array2<u8>, Box<dyn Error>> {
-    ffmpeg::init()?;
-    // .expect("ffmpeg failed to initialize");
-
     let (start_frame, frame_num, video_path) = video_record;
-    let mut ictx = input(&video_path)?;
-    let mut decoder = ictx
-        .stream(0)
-        .ok_or("invalid video file")?
-        .codec()
-        .decoder()
-        .video()?;
 
     // top_left_coordinate
     let (tl_y, tl_x) = region_record.0;
@@ -136,42 +148,73 @@ pub fn read_video<P: AsRef<Path>>(
     // total number of pixels in the calculation region
     let pix_num = cal_h * cal_w;
 
-    // Target color space: RGB24, 8 bits respectively for R, G and B
-    let mut scaler = Context::get(
-        decoder.format(),
-        decoder.width(),
-        decoder.height(),
-        Pixel::RGB24,
-        decoder.width(),
-        decoder.height(),
-        Flags::FAST_BILINEAR,
-    )?;
+    ffmpeg_next::init()?;
 
-    // g2d stores green values of all pixels at all frames in a 2D array: single row for all pixels at single frame
-    let mut g2d = Array2::zeros((frame_num, pix_num));
-    let real_w = decoder.width() as usize * 3;
+    let mut input = input(&video_path)?;
+    let decoder = input.stream(0).ok_or("艹")?.codec().decoder().video()?;
+    let real_w = (decoder.width() * 3) as usize;
+    let decoder = &Mutex::new(decoder);
 
-    for ((_, packet), mut row) in ictx
-        .packets()
-        .skip(start_frame)
-        .zip(g2d.axis_iter_mut(Axis(0)))
-    {
-        decoder.send_packet(&packet)?;
-        let (mut raw_frame, mut rgb_frame) = (Video::empty(), Video::empty());
-        decoder.receive_frame(&mut raw_frame)?;
-        scaler.run(&raw_frame, &mut rgb_frame)?;
-        // the data of each frame stores in one 1D array:
-        // ||r g b r g b...r g b|......|r g b r g b...r g b||
-        // ||.......row_0.......|......|.......row_n.......||
-        let rgb = rgb_frame.data(0);
+    let g2d = Array2::zeros((frame_num, pix_num));
+    let g2d_view = g2d.view();
 
-        let mut iter = row.iter_mut();
-        for i in (0..).step_by(real_w).skip(tl_y).take(cal_h) {
-            for j in (i..).skip(1).step_by(3).skip(tl_x).take(cal_w) {
-                *iter.next().ok_or("bakana")? = unsafe { *rgb.get_unchecked(j) };
+    let pool = ThreadPoolBuilder::new().build()?;
+    let tls = Arc::new(ThreadLocal::new());
+
+    pool.install(|| {
+        scope(|scp| {
+            for (frame_index, (_, packet)) in input
+                .packets()
+                .skip(start_frame)
+                .take(frame_num)
+                .enumerate()
+            {
+                let tls_arc = tls.clone();
+                scp.spawn(move |_| {
+                    let tls_paras = tls_arc.get_or(|| {
+                        let decoder = decoder.lock().unwrap().clone().decoder().video().unwrap();
+                        let sws_ctx = Context::get(
+                            decoder.format(),
+                            decoder.width(),
+                            decoder.height(),
+                            Pixel::RGB24,
+                            decoder.width(),
+                            decoder.height(),
+                            Flags::FAST_BILINEAR,
+                        )
+                        .unwrap();
+                        (
+                            RefCell::new(decoder),
+                            RefCell::new(SendableContext(sws_ctx)),
+                            RefCell::new(Video::empty()),
+                            RefCell::new(Video::empty()),
+                        )
+                    });
+
+                    let mut decoder = tls_paras.0.borrow_mut();
+                    let mut ctx = tls_paras.1.borrow_mut();
+                    let mut src_frame = tls_paras.2.borrow_mut();
+                    let mut dst_frame = tls_paras.3.borrow_mut();
+
+                    decoder.send_packet(&packet).unwrap();
+                    decoder.receive_frame(&mut src_frame).unwrap();
+                    ctx.run(&src_frame, &mut dst_frame).unwrap();
+                    let rgb = dst_frame.data(0);
+
+                    let mat_ptr = g2d_view.as_ptr() as *mut u8;
+                    unsafe {
+                        let mut row_ptr = mat_ptr.add(pix_num * frame_index);
+                        for i in (0..).step_by(real_w).skip(tl_y).take(cal_h) {
+                            for j in (i..).skip(1).step_by(3).skip(tl_x).take(cal_w) {
+                                *row_ptr = *rgb.get_unchecked(j);
+                                row_ptr = row_ptr.add(1);
+                            }
+                        }
+                    }
+                });
             }
-        }
-    }
+        })
+    });
 
     Ok(g2d)
 }
