@@ -1,41 +1,42 @@
 #[cfg(test)]
-#[macro_use]
-extern crate lazy_static;
-
 mod calculate {
     use std::time::Instant;
 
     use ndarray::prelude::*;
+    use once_cell::sync::Lazy;
 
     use tlc::calculate::*;
 
     const CONFIG_PATH: &str = "./config/config.json";
 
-    lazy_static! {
-        static ref CONFIG_PARAS: io::ConfigParas = io::read_config(CONFIG_PATH).unwrap();
-        static ref VIDEO_PATH: &'static str = CONFIG_PARAS.video_path.as_str();
-        static ref DAQ_PATH: &'static str = CONFIG_PARAS.daq_path.as_str();
-        static ref SAVE_DIR: &'static str = CONFIG_PARAS.save_dir.as_str();
-        static ref START_FRAME: usize = CONFIG_PARAS.start_frame;
-        static ref START_ROW: usize = CONFIG_PARAS.start_row;
-        static ref METADATA: (usize, usize, usize, usize) =
-            io::get_metadata(*VIDEO_PATH, *DAQ_PATH, *START_FRAME, *START_ROW).unwrap();
-        static ref FRAME_NUM: usize = METADATA.0;
-        static ref FRAME_RATE: usize = METADATA.1;
-        static ref TOP_LEFT_POS: (usize, usize) = CONFIG_PARAS.top_left_pos;
-        static ref REGION_SHAPE: (usize, usize) = CONFIG_PARAS.region_shape;
-        static ref TEMP_COLUMN_NUM: &'static Vec<usize> = &CONFIG_PARAS.temp_column_num;
-        static ref THERMOCOUPLE_POS: &'static Vec<(i32, i32)> = &CONFIG_PARAS.thermocouple_pos;
-        static ref INTERP_METHOD: preprocess::InterpMethod = CONFIG_PARAS.interp_method;
-        static ref FILTER_METHOD: preprocess::FilterMethod = CONFIG_PARAS.filter_method;
-        static ref PEAK_TEMP: f64 = CONFIG_PARAS.peak_temp;
-        static ref SOLID_THERMAL_CONDUCTIVITY: f64 = CONFIG_PARAS.solid_thermal_conductivity;
-        static ref SOLID_THERMAL_DIFFUSIVITY: f64 = CONFIG_PARAS.solid_thermal_diffusivity;
-        static ref CHARACTERISTIC_LENGTH: f64 = CONFIG_PARAS.characteristic_length;
-        static ref AIR_THERMAL_CONDUCTIVITY: f64 = CONFIG_PARAS.air_thermal_conductivity;
-        static ref H0: f64 = CONFIG_PARAS.h0;
-        static ref MAX_ITER_NUM: usize = CONFIG_PARAS.max_iter_num;
-    }
+    static CONFIG_PARAS: Lazy<io::ConfigParas> =
+        Lazy::new(|| io::read_config(CONFIG_PATH).unwrap());
+    static VIDEO_PATH: Lazy<&'static str> = Lazy::new(|| CONFIG_PARAS.video_path.as_str());
+    static DAQ_PATH: Lazy<&'static str> = Lazy::new(|| CONFIG_PARAS.daq_path.as_str());
+    static SAVE_DIR: Lazy<&'static str> = Lazy::new(|| CONFIG_PARAS.save_dir.as_str());
+    static START_FRAME: Lazy<usize> = Lazy::new(|| CONFIG_PARAS.start_frame);
+    static START_ROW: Lazy<usize> = Lazy::new(|| CONFIG_PARAS.start_row);
+    static METADATA: Lazy<(usize, usize, usize, usize)> =
+        Lazy::new(|| io::get_metadata(*VIDEO_PATH, *DAQ_PATH, *START_FRAME, *START_ROW).unwrap());
+    static FRAME_NUM: Lazy<usize> = Lazy::new(|| METADATA.0);
+    static FRAME_RATE: Lazy<usize> = Lazy::new(|| METADATA.1);
+    static TOP_LEFT_POS: Lazy<(usize, usize)> = Lazy::new(|| CONFIG_PARAS.top_left_pos);
+    static REGION_SHAPE: Lazy<(usize, usize)> = Lazy::new(|| CONFIG_PARAS.region_shape);
+    static TEMP_COLUMN_NUM: Lazy<&'static Vec<usize>> = Lazy::new(|| &CONFIG_PARAS.temp_column_num);
+    static THERMOCOUPLE_POS: Lazy<&'static Vec<(i32, i32)>> =
+        Lazy::new(|| &CONFIG_PARAS.thermocouple_pos);
+    static INTERP_METHOD: Lazy<preprocess::InterpMethod> = Lazy::new(|| CONFIG_PARAS.interp_method);
+    static FILTER_METHOD: Lazy<preprocess::FilterMethod> = Lazy::new(|| CONFIG_PARAS.filter_method);
+    static PEAK_TEMP: Lazy<f64> = Lazy::new(|| CONFIG_PARAS.peak_temp);
+    static SOLID_THERMAL_CONDUCTIVITY: Lazy<f64> =
+        Lazy::new(|| CONFIG_PARAS.solid_thermal_conductivity);
+    static SOLID_THERMAL_DIFFUSIVITY: Lazy<f64> =
+        Lazy::new(|| CONFIG_PARAS.solid_thermal_diffusivity);
+    static CHARACTERISTIC_LENGTH: Lazy<f64> = Lazy::new(|| CONFIG_PARAS.characteristic_length);
+    static AIR_THERMAL_CONDUCTIVITY: Lazy<f64> =
+        Lazy::new(|| CONFIG_PARAS.air_thermal_conductivity);
+    static H0: Lazy<f64> = Lazy::new(|| CONFIG_PARAS.h0);
+    static MAX_ITER_NUM: Lazy<usize> = Lazy::new(|| CONFIG_PARAS.max_iter_num);
 
     #[test]
     fn show_config() {
@@ -99,7 +100,7 @@ mod calculate {
         )
         .0;
         println!("{:?}", Instant::now().duration_since(t0));
-        plot::plot_temps(interp_x_t2d.row(1000)).unwrap();
+        postprocess::plot_temps(interp_x_t2d.row(1000)).unwrap();
     }
 
     #[test]
@@ -147,9 +148,9 @@ mod calculate {
             "\ntotal time cost: {:?}\n",
             Instant::now().duration_since(t0)
         );
-        let (valid_count, valid_sum) = nus.iter().fold((0, 0.), |(count, sum), &h| {
-            if h.is_finite() {
-                (count + 1, sum + h)
+        let (valid_count, valid_sum) = nus.iter().fold((0, 0.), |(count, sum), &nu| {
+            if nu.is_finite() {
+                (count + 1, sum + nu)
             } else {
                 (count, sum)
             }
@@ -195,6 +196,7 @@ mod calculate {
         println!("{:?}", nu_path);
         println!("{:?}", plot_path);
         let nu2d = io::read_nu(&nu_path).unwrap();
+        let nu_nan_mean = postprocess::cal_average(nu2d.view()).0;
 
         let original_stem = plot_path.file_stem().unwrap().to_owned();
 
@@ -205,6 +207,6 @@ mod calculate {
             plot_path.set_file_name(file_stem);
             cnt += 1;
         }
-        plot::plot_nu(nu2d.view(), plot_path).unwrap();
+        postprocess::plot_nu(nu2d.view(), nu_nan_mean, plot_path).unwrap();
     }
 }

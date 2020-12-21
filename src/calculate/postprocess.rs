@@ -7,10 +7,26 @@ use ndarray::prelude::*;
 
 use super::colormap::JET;
 
+pub fn cal_average<D: Dimension>(nus: ArrayView<f64, D>) -> (f64, f64) {
+    let (sum, cnt) = nus.iter().fold((0., 0), |(s, cnt), &nu| {
+        if nu.is_nan() {
+            (s, cnt)
+        } else {
+            (s + nu, cnt + 1)
+        }
+    });
+    let nan_cnt = nus.len() - cnt;
+    let nan_ratio = nan_cnt as f64 / cnt as f64;
+    let nan_mean = sum / cnt as f64;
+
+    (nan_mean, nan_ratio)
+}
+
 pub fn plot_nu<P: AsRef<Path>>(
     nu2d: ArrayView2<f64>,
+    nan_mean: f64,
     plot_path: P,
-) -> Result<(f64, f64), Box<dyn Error>> {
+) -> Result<(), Box<dyn Error>> {
     let (height, width) = nu2d.dim();
     let root = BitMapBackend::new(&plot_path, (width as u32, height as u32)).into_drawing_area();
     root.fill(&WHITE)?;
@@ -22,16 +38,6 @@ pub fn plot_nu<P: AsRef<Path>>(
         .draw()?;
     let pix_plotter = chart.plotting_area();
 
-    let (sum, cnt) = nu2d.iter().fold((0., 0), |(s, cnt), &nu| {
-        if nu.is_nan() {
-            (s, cnt)
-        } else {
-            (s + nu, cnt + 1)
-        }
-    });
-    let nan_cnt = height * width - cnt;
-    let nan_ratio = nan_cnt as f64 / cnt as f64;
-    let nan_mean = sum / cnt as f64;
     let (vmin, vmax) = (nan_mean * 0.4, nan_mean * 2.);
     let delta = vmax - vmin;
 
@@ -48,7 +54,7 @@ pub fn plot_nu<P: AsRef<Path>>(
         }
     }
 
-    Ok((nan_mean, nan_ratio))
+    Ok(())
 }
 
 pub fn plot_temps(temps: ArrayView1<f64>) -> Result<(), Box<dyn Error>> {

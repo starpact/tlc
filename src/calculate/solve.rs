@@ -11,6 +11,7 @@ fn erfc(x: f64) -> f64 {
 }
 
 use ndarray::prelude::*;
+use ndarray::Dimension;
 use ndarray::Zip;
 use std::f64::consts::PI;
 
@@ -70,7 +71,7 @@ impl SinglePointSolver<'_> {
         (tw - t0 - res.0, res.1)
     }
 
-    fn newtow_tangent(&mut self) -> f64 {
+    fn newton_tangent(&mut self) -> f64 {
         for _ in 0..self.max_iter_num {
             let prev_h = self.h;
             let (f, df) = self.thermal_equation();
@@ -138,7 +139,7 @@ pub fn solve(
                 h: h0,
                 max_iter_num,
             };
-            *nu = single_point_solver.newtow_tangent();
+            *nu = single_point_solver.newton_tangent();
         });
 
     nus

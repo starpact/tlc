@@ -89,20 +89,19 @@ pub fn cal<P: AsRef<Path>>(config_path: P) -> Result<f64, Box<dyn Error>> {
     );
     let t6 = Instant::now();
     println!("{:?}", t6.duration_since(t5));
-
     println!("\ntotal time cost: {:?}\n", t6.duration_since(t0));
 
-    println!("saving...");
+    let (nu_nan_mean, nan_ratio) = postprocess::cal_average(nus.view());
+    println!("overall average Nu: {}", nu_nan_mean);
+    println!("nan percent: {:.3}%", nan_ratio);
 
+    println!("saving...");
     let (nu_path, plot_path) = io::get_save_path(&video_path, &save_dir)?;
 
     let mut nu2d = nus.into_shape(region_shape)?;
     nu2d.invert_axis(Axis(0));
 
-    let (nu_nan_mean, nan_ratio) = plot::plot_nu(nu2d.view(), plot_path)?;
-
-    println!("overall average Nu: {}", nu_nan_mean);
-    println!("nan percent: {:.3}%", nan_ratio);
+    postprocess::plot_nu(nu2d.view(), nu_nan_mean, plot_path)?;
 
     io::save_nu(nu2d.view(), nu_path)?;
 

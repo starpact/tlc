@@ -863,6 +863,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "once_cell"
+version = "1.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "13bd41f508810a131401606d54ac32a467c97172d74ba7662562ebba5ad07fa0"
+
+[[package]]
 name = "ordered-float"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1404,11 +1410,11 @@ dependencies = [
  "calamine",
  "csv",
  "ffmpeg-next",
- "lazy_static",
  "libc",
  "median",
  "nalgebra",
  "ndarray",
+ "once_cell",
  "plotters",
  "rayon",
  "rbf-interp",

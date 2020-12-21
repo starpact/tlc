@@ -12,11 +12,15 @@ use serde_json;
 use ndarray::prelude::*;
 
 use rayon::{scope, ThreadPoolBuilder};
+
 use thread_local::ThreadLocal;
 
-use ffmpeg_next::format::{input, Pixel};
-use ffmpeg_next::software::scaling::{context::Context, flag::Flags};
-use ffmpeg_next::util::frame::video::Video;
+use ffmpeg_next as ffmpeg;
+
+use ffmpeg::format::{input, Pixel};
+use ffmpeg::media::Type;
+use ffmpeg::software::scaling::{flag::Flags, Context};
+use ffmpeg::util::frame::video::Video;
 
 use calamine::{open_workbook, Reader, Xlsx};
 
@@ -68,18 +72,16 @@ pub fn get_metadata<P: AsRef<Path>>(
 }
 
 fn get_frames_of_video<P: AsRef<Path>>(video_path: P) -> Result<(usize, usize), Box<dyn Error>> {
-    ffmpeg_next::init()?;
+    ffmpeg::init()?;
 
-    let ictx = input(&video_path)?;
-    let decoder = ictx
-        .stream(0)
-        .ok_or("wrong video file")?
-        .codec()
-        .decoder()
-        .video()?;
-    let rational = decoder.frame_rate().ok_or("wrong video file")?;
+    let input = input(&video_path)?;
+    let video_stream = input
+        .streams()
+        .best(Type::Video)
+        .ok_or(ffmpeg::Error::StreamNotFound)?;
+    let rational = video_stream.avg_frame_rate();
     let frame_rate = (rational.numerator() as f64 / rational.denominator() as f64).round() as usize;
-    let total_frame = ictx.duration() as usize * frame_rate / 1_000_000;
+    let total_frame = input.duration() as usize * frame_rate / 1_000_000;
 
     Ok((total_frame, frame_rate))
 }
@@ -141,30 +143,33 @@ pub fn read_video<P: AsRef<Path>>(
 ) -> Result<Array2<u8>, Box<dyn Error>> {
     let (start_frame, frame_num, video_path) = video_record;
 
-    // top_left_coordinate
+    // top left coordinate
     let (tl_y, tl_x) = region_record.0;
     // height and width of calculation region
     let (cal_h, cal_w) = region_record.1;
     // total number of pixels in the calculation region
     let pix_num = cal_h * cal_w;
 
-    ffmpeg_next::init()?;
+    ffmpeg::init()?;
 
     let mut input = input(&video_path)?;
-    let decoder = input.stream(0).ok_or("艹")?.codec().decoder().video()?;
-    let real_w = (decoder.width() * 3) as usize;
-    let decoder = &Mutex::new(decoder);
+    let video_stream = input
+        .streams()
+        .best(Type::Video)
+        .ok_or(ffmpeg::Error::StreamNotFound)?;
+    let video_stream_index = video_stream.index();
+    let ctx_mutex = &Mutex::new(video_stream.codec());
 
     let g2d = Array2::zeros((frame_num, pix_num));
     let g2d_view = g2d.view();
 
-    let pool = ThreadPoolBuilder::new().build()?;
     let tls = Arc::new(ThreadLocal::new());
 
-    pool.install(|| {
+    ThreadPoolBuilder::new().build()?.install(|| {
         scope(|scp| {
             for (frame_index, (_, packet)) in input
                 .packets()
+                .filter(|(stream, _)| stream.index() == video_stream_index)
                 .skip(start_frame)
                 .take(frame_num)
                 .enumerate()
@@ -172,7 +177,7 @@ pub fn read_video<P: AsRef<Path>>(
                 let tls_arc = tls.clone();
                 scp.spawn(move |_| {
                     let tls_paras = tls_arc.get_or(|| {
-                        let decoder = decoder.lock().unwrap().clone().decoder().video().unwrap();
+                        let decoder = ctx_mutex.lock().unwrap().clone().decoder().video().unwrap();
                         let sws_ctx = Context::get(
                             decoder.format(),
                             decoder.width(),
@@ -196,14 +201,18 @@ pub fn read_video<P: AsRef<Path>>(
                     let mut src_frame = tls_paras.2.borrow_mut();
                     let mut dst_frame = tls_paras.3.borrow_mut();
 
-                    decoder.send_packet(&packet).unwrap();
+                    decoder.send_packet(&packet).unwrap(); // most time-consuming function
                     decoder.receive_frame(&mut src_frame).unwrap();
                     ctx.run(&src_frame, &mut dst_frame).unwrap();
-                    let rgb = dst_frame.data(0);
 
-                    let mat_ptr = g2d_view.as_ptr() as *mut u8;
+                    // the data of each frame stores in one u8 array:
+                    // ||r g b r g b...r g b|......|r g b r g b...r g b||
+                    // ||.......row_0.......|......|.......row_n.......||
+                    let rgb = dst_frame.data(0);
+                    let real_w = (decoder.width() * 3) as usize;
+
                     unsafe {
-                        let mut row_ptr = mat_ptr.add(pix_num * frame_index);
+                        let mut row_ptr = (g2d_view.as_ptr() as *mut u8).add(pix_num * frame_index);
                         for i in (0..).step_by(real_w).skip(tl_y).take(cal_h) {
                             for j in (i..).skip(1).step_by(3).skip(tl_x).take(cal_w) {
                                 *row_ptr = *rgb.get_unchecked(j);
