@@ -1,12 +1,12 @@
 {
-    "video_path": "E:\\research\\EXP\\exp_20201206\\rib\\videos\\rib_50000_2_up.avi",
-    "daq_path": "E:\\research\\EXP\\exp_20201206\\rib\\daq\\rib_50000_2.lvm",
-    "save_dir": "E:\\research\\EXP\\exp_20201206\\result\\rib",
-    "start_frame": 77,
-    "start_row": 140,
-    "top_left_pos": [660, 0],
-    "region_shape": [340, 1248],
-    "temp_column_num": [2, 2, 3, 4, 4, 6],
+    "video_path": "D:\\research\\EXP\\exp_20201206\\imp\\videos\\imp_40000_1_up.avi",
+    "daq_path": "D:\\research\\EXP\\exp_20201206\\imp\\daq\\imp_40000_1.lvm",
+    "save_dir": "D:\\research\\EXP\\exp_20201206\\result\\imp",
+    "start_frame": 84,
+    "start_row": 143,
+    "top_left_pos": [720, 200],
+    "region_shape": [260, 800],
+    "temp_column_num": [1, 2, 3, 4, 5, 6],
     "thermocouple_pos": [
         [0, 166],
         [0, 355],
@@ -16,7 +16,9 @@
         [0, 1116]
     ],
     "interp_method": "Horizontal",
-    "filter_method": "No",
+    "filter_method": {
+        "Median": 20
+    },
     "peak_temp": 35.48,
     "solid_thermal_conductivity": 0.19,
     "solid_thermal_diffusivity": 1.091e-7,

@@ -41,7 +41,7 @@ pub fn cal<P: AsRef<Path>>(config_path: P) -> Result<f64, Box<dyn Error>> {
     println!("read video...");
     let video_record = (start_frame, frame_num, &video_path);
     let region_record = (top_left_pos, region_shape);
-    let g2d = io::read_video(video_record, region_record)?;
+    let mut g2d = io::read_video(video_record, region_record)?;
     let dt = 1. / frame_rate as f64;
     let t1 = Instant::now();
     println!("{:?}", t1.duration_since(t0));
@@ -53,12 +53,12 @@ pub fn cal<P: AsRef<Path>>(config_path: P) -> Result<f64, Box<dyn Error>> {
     println!("{:?}", t2.duration_since(t1));
 
     println!("filtering...");
-    let g2d_filtered = preprocess::filtering(g2d, filter_method);
+    preprocess::filtering(g2d.view_mut(), filter_method);
     let t3 = Instant::now();
     println!("{:?}", t3.duration_since(t2));
 
     println!("detect peak...");
-    let peak_frames = preprocess::detect_peak(g2d_filtered);
+    let peak_frames = preprocess::detect_peak(g2d.view());
     let t4 = Instant::now();
     println!("{:?}", t4.duration_since(t3));
 
@@ -81,9 +81,9 @@ pub fn cal<P: AsRef<Path>>(config_path: P) -> Result<f64, Box<dyn Error>> {
         air_thermal_conductivity,
         dt,
         peak_temp,
-        peak_frames,
-        interp_temps,
-        query_index,
+        peak_frames.view(),
+        interp_temps.view(),
+        query_index.view(),
         h0,
         max_iter_num,
     );

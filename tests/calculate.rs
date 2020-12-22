@@ -80,7 +80,7 @@ mod calculate {
         let g2d = example_g2d();
 
         let t0 = Instant::now();
-        let peak = preprocess::detect_peak(g2d);
+        let peak = preprocess::detect_peak(g2d.view());
         println!("{:?}", Instant::now().duration_since(t0));
 
         println!("{}", peak.slice(s![180000..180100]));
@@ -108,17 +108,17 @@ mod calculate {
         let t0 = Instant::now();
 
         println!("read video...");
-        let g2d = example_g2d();
+        let mut g2d = example_g2d();
         let dt = 1. / *FRAME_RATE as f64;
 
         println!("read excel...");
         let t2d = example_t2d();
 
         println!("filtering");
-        let g2d_filtered = preprocess::filtering(g2d, *FILTER_METHOD);
+        preprocess::filtering(g2d.view_mut(), *FILTER_METHOD);
 
         println!("detect peak...");
-        let peak_frames = preprocess::detect_peak(g2d_filtered);
+        let peak_frames = preprocess::detect_peak(g2d.view());
 
         println!("interpolate...");
         let (interp_temps, query_index) = preprocess::interp(
@@ -137,9 +137,9 @@ mod calculate {
             *AIR_THERMAL_CONDUCTIVITY,
             dt,
             *PEAK_TEMP,
-            peak_frames,
-            interp_temps,
-            query_index,
+            peak_frames.view(),
+            interp_temps.view(),
+            query_index.view(),
             *H0,
             *MAX_ITER_NUM,
         );
@@ -165,20 +165,24 @@ mod calculate {
         let mut raw = Vec::new();
         let mut filtered = Vec::new();
 
-        let g2d = example_g2d();
-        let column_num: usize = 15000;
+        let mut g2d = example_g2d();
+        let column_num: usize = 180000;
         for g in g2d.column(column_num) {
             raw.push(*g as usize);
         }
-        let filtered_g2d = preprocess::filtering(g2d, preprocess::FilterMethod::Median(20));
-        for g in filtered_g2d.column(column_num) {
+
+        let t0 = Instant::now();
+        preprocess::filtering(g2d.view_mut(), preprocess::FilterMethod::Median(20));
+        println!("{:?}", Instant::now().duration_since(t0));
+
+        for g in g2d.column(column_num) {
             filtered.push(*g as usize);
         }
 
         let root = BitMapBackend::new("plotters/1.png", (2400, 800)).into_drawing_area();
         root.fill(&WHITE).unwrap();
         let mut chart = ChartBuilder::on(&root)
-            .build_cartesian_2d(0..filtered_g2d.nrows(), 80usize..180)
+            .build_cartesian_2d(0..g2d.nrows(), 0usize..50)
             .unwrap();
         chart
             .draw_series(LineSeries::new(raw.into_iter().enumerate(), &RED))

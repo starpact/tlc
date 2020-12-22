@@ -1,6 +1,5 @@
 use ndarray::parallel::prelude::*;
 use ndarray::prelude::*;
-use ndarray::Zip;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize, Copy, Clone)]
@@ -12,25 +11,17 @@ pub enum FilterMethod {
 use median::Filter;
 
 /// filter the green history of each pixel along time axis
-pub fn filtering(g2d: Array2<u8>, filter_method: FilterMethod) -> Array2<u8> {
+pub fn filtering(mut g2d: ArrayViewMut2<u8>, filter_method: FilterMethod) {
     match filter_method {
-        FilterMethod::No => g2d,
         FilterMethod::Median(window_size) => {
-            let mut filtered_g2d = Array2::zeros(g2d.dim());
-            Zip::from(g2d.axis_iter(Axis(1)))
-                .and(filtered_g2d.axis_iter_mut(Axis(1)))
-                .par_apply(|col_raw, mut col_filtered| {
+            g2d.axis_iter_mut(Axis(1))
+                .into_par_iter()
+                .for_each(|mut col| {
                     let mut filter = Filter::new(window_size);
-                    col_raw
-                        .iter()
-                        .zip(col_filtered.iter_mut())
-                        .for_each(|(g_raw, g_filtered)| {
-                            *g_filtered = filter.consume(*g_raw);
-                        })
+                    col.iter_mut().for_each(|g| *g = filter.consume(*g))
                 });
-
-            filtered_g2d
         }
+        _ => {}
     }
 }
 
@@ -39,7 +30,7 @@ pub fn filtering(g2d: Array2<u8>, filter_method: FilterMethod) -> Array2<u8> {
 /// green values 2D matrix
 /// ### Return:
 /// frame indexes of maximal green values
-pub fn detect_peak(g2d: Array2<u8>) -> Array1<usize> {
+pub fn detect_peak(g2d: ArrayView2<u8>) -> Array1<usize> {
     let mut peak_frames = Vec::with_capacity(g2d.ncols());
 
     g2d.axis_iter(Axis(1))
@@ -49,13 +40,13 @@ pub fn detect_peak(g2d: Array2<u8>) -> Array1<usize> {
                 column
                     .iter()
                     .enumerate()
-                    .fold((0, 0, 0), |(mi_l, mi_r, mg), (i, &g)| {
-                        if g > mg {
+                    .fold((0, 0, 0), |(first_m, last_m, max_g), (i, &g)| {
+                        if g > max_g {
                             (i, i, g)
-                        } else if g == mg {
-                            (mi_l, i, g)
+                        } else if g == max_g {
+                            (first_m, i, g)
                         } else {
-                            (mi_l, mi_r, mg)
+                            (first_m, last_m, max_g)
                         }
                     });
             (first_max + last_max) >> 1
