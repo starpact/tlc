@@ -23,7 +23,7 @@ use std::f64::consts::PI;
 /// * delta temperature history of this pixel(initial values in the first row)
 /// * heat transfer coefficient(a certain value during iterating)
 /// * max step number of iteration
-pub struct SinglePointSolver<'a> {
+struct SinglePointSolver<'a> {
     solid_thermal_conductivity: f64,
     solid_thermal_diffusivity: f64,
     characteristic_length: f64,
@@ -31,7 +31,7 @@ pub struct SinglePointSolver<'a> {
     dt: f64,
     peak_frame: usize,
     peak_temp: f64,
-    delta_temps: ArrayView1<'a, f64>,
+    temps: ArrayView1<'a, f64>,
     h: f64,
     max_iter_num: usize,
 }
@@ -41,31 +41,28 @@ impl SinglePointSolver<'_> {
     /// ### Return:
     /// equation and its derivative
     fn thermal_equation(&self) -> (f64, f64) {
-        let (k, a, dt, tw, h, delta_temps, peak_frame) = (
+        let (k, a, dt, tw, h, temps, peak_frame) = (
             self.solid_thermal_conductivity,
             self.solid_thermal_diffusivity,
             self.dt,
             self.peak_temp,
             self.h,
-            self.delta_temps,
+            self.temps,
             self.peak_frame,
         );
-        let t0 = self.delta_temps[0];
 
-        let res = delta_temps.iter().skip(1).take(peak_frame - 1).fold(
-            (0., 0., (peak_frame - 1) as f64 * dt),
-            |tmp, &delta_temp| {
-                let (f, df, t) = tmp;
-                let at = a * t;
-                let er = erfc(h * at.sqrt() / k);
-                let iter = (1. - f64::exp(h.powf(2.) * at / k.powf(2.)) * er) * delta_temp;
-                let d_iter = -delta_temp
-                    * (2. * at.sqrt() / k / PI.sqrt()
-                        - (2. * at * h * f64::exp(at * h.powf(2.) / k.powf(2.)) * er) / k.powf(2.));
+        let res = (1..peak_frame).fold((0., 0.), |(f, df), i| {
+            let delta_temp = unsafe { temps.uget(i) - temps.uget(i - 1) };
+            let at = a * dt * (peak_frame - i) as f64;
+            let exp_erfc = (h.powf(2.) / k.powf(2.) * at).exp() * erfc(h / k * at.sqrt());
+            let iter = (1. - exp_erfc) * delta_temp;
+            let d_iter = -delta_temp
+                * (2. * at.sqrt() / k / PI.sqrt() - (2. * at * h * exp_erfc) / k.powf(2.));
 
-                (f + iter, df + d_iter, t - dt)
-            },
-        );
+            (f + iter, df + d_iter)
+        });
+
+        let t0 = self.temps.slice(s![..4]).mean().unwrap();
 
         (tw - t0 - res.0, res.1)
     }
@@ -87,23 +84,9 @@ impl SinglePointSolver<'_> {
     }
 }
 
-/// *calculate the delta temperature of adjacent frames for the convenience of calculating*
-/// *thermal equation, and store the initial value in first row, like:*
-///
-/// `t0(average), t1 - t0, t2 - t1, ... tn - tn_1`
-fn cal_delta_temps(mut t2d: Array2<f64>) -> Array2<f64> {
-    for mut col in t2d.axis_iter_mut(Axis(1)) {
-        if let Some(t0) = col.slice(s![..4]).mean() {
-            col[0] = t0;
-        }
-        col.iter_mut().fold(0., |prev, curr| {
-            let tmp = *curr;
-            *curr -= prev;
-            tmp
-        });
-    }
-
-    t2d
+struct DoublePointeSolver<'a> {
+    exp1: SinglePointSolver<'a>,
+    exp2: SinglePointSolver<'a>,
 }
 
 pub fn solve(
@@ -113,14 +96,13 @@ pub fn solve(
     air_thermal_conductivity: f64,
     dt: f64,
     peak_temp: f64,
-    peak_frames: Array1<usize>,
-    interp_temps: Array2<f64>,
-    query_index: Array1<usize>,
+    peak_frames: ArrayView1<usize>,
+    interp_temps: ArrayView2<f64>,
+    query_index: ArrayView1<usize>,
     h0: f64,
     max_iter_num: usize,
 ) -> Array1<f64> {
     let mut nus = Array1::zeros(query_index.len());
-    let delta_temps_2d = cal_delta_temps(interp_temps);
 
     Zip::from(&peak_frames)
         .and(&query_index)
@@ -134,7 +116,7 @@ pub fn solve(
                 dt,
                 peak_temp,
                 peak_frame,
-                delta_temps: delta_temps_2d.column(index),
+                temps: interp_temps.column(index),
                 h: h0,
                 max_iter_num,
             };
