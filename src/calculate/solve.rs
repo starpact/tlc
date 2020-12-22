@@ -11,7 +11,6 @@ fn erfc(x: f64) -> f64 {
 }
 
 use ndarray::prelude::*;
-use ndarray::Dimension;
 use ndarray::Zip;
 use std::f64::consts::PI;
 

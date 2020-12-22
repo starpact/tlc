@@ -25,32 +25,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
 fn filter(file_name: &str) -> bool {
     match file_name {
-        "deprecated"
-        | "imp_20000_1_up.json"
-        | "imp_20000_1_down.json"
-        | "imp_30000_2_up.json"
-        | "imp_30000_2_down.json"
-        | "imp_40000_1_up.json"
-        | "imp_40000_1_down.json"
-        | "imp_50000_2_up.json"
-        | "imp_50000_2_down.json"
-        | "sta_20000_1_up.json"
-        | "sta_20000_1_down.json"
-        | "sta_30000_2_up.json"
-        | "sta_30000_2_down.json"
-        | "sta_40000_2_up.json"
-        | "sta_40000_2_down.json"
-        | "sta_50000_2_up.json"
-        | "sta_50000_2_down.json"
-        | "rib_20000_2_up.json"
-        | "rib_20000_2_down.json"
-        | "rib_30000_2_up.json"
-        | "rib_30000_2_down.json"
-        | "rib_40000_2_up.json"
-        | "rib_40000_2_down.json"
-        // | "rib_50000_2_up.json"
-        | "rib_50000_2_down.json"
-        | "fuck" => false,
-        _ => true,
+        "imp_40000_1_up.json" | "imp_40000_2_up.json" => true,
+        _ => false,
     }
 }
