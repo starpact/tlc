@@ -211,13 +211,12 @@ pub fn read_video<P: AsRef<Path>>(
                     let rgb = dst_frame.data(0);
                     let real_w = (decoder.width() * 3) as usize;
 
-                    unsafe {
-                        let mut row_ptr = (g2d_view.as_ptr() as *mut u8).add(pix_num * frame_index);
-                        for i in (0..).step_by(real_w).skip(tl_y).take(cal_h) {
-                            for j in (i..).skip(1).step_by(3).skip(tl_x).take(cal_w) {
-                                *row_ptr = *rgb.get_unchecked(j);
-                                row_ptr = row_ptr.add(1);
-                            }
+                    let ptr = g2d_view.view().as_ptr() as *mut u8;
+                    let mut index = (pix_num * frame_index) as isize;
+                    for i in (0..).step_by(real_w).skip(tl_y).take(cal_h) {
+                        for j in (i..).skip(1).step_by(3).skip(tl_x).take(cal_w) {
+                            unsafe { *ptr.offset(index) = *rgb.get_unchecked(j) };
+                            index += 1;
                         }
                     }
                 });

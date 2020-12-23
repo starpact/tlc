@@ -100,7 +100,7 @@ mod calculate {
         )
         .0;
         println!("{:?}", Instant::now().duration_since(t0));
-        postprocess::plot_temps(interp_x_t2d.row(1000)).unwrap();
+        postprocess::simple_plot(interp_x_t2d.row(1000)).unwrap();
     }
 
     #[test]
@@ -130,19 +130,20 @@ mod calculate {
         );
 
         println!("start calculating...");
-        let nus = solve::solve(
-            *SOLID_THERMAL_CONDUCTIVITY,
-            *SOLID_THERMAL_DIFFUSIVITY,
-            *CHARACTERISTIC_LENGTH,
-            *AIR_THERMAL_CONDUCTIVITY,
+        let case_data = solve::CaseData {
+            peak_frames,
+            interp_temps,
+            query_index,
+            solid_thermal_conductivity: *SOLID_THERMAL_CONDUCTIVITY,
+            solid_thermal_diffusivity: *SOLID_THERMAL_DIFFUSIVITY,
+            characteristic_length: *CHARACTERISTIC_LENGTH,
+            air_thermal_conductivity: *AIR_THERMAL_CONDUCTIVITY,
             dt,
-            *PEAK_TEMP,
-            peak_frames.view(),
-            interp_temps.view(),
-            query_index.view(),
-            *H0,
-            *MAX_ITER_NUM,
-        );
+            peak_temp: *PEAK_TEMP,
+            h0: *H0,
+            max_iter_num: *MAX_ITER_NUM,
+        };
+        let nus = case_data.solve();
 
         println!(
             "\ntotal time cost: {:?}\n",
