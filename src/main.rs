@@ -3,7 +3,7 @@ use std::error::Error;
 use std::path::Path;
 use tlc::cal;
 
-const CFG_DIR: &str = "D:\\research\\EXP\\exp_20201206\\config";
+const CFG_DIR: &str = "E:\\research\\EXP\\exp_20201206\\config";
 
 fn main() -> Result<(), Box<dyn Error>> {
     let mut bm = BTreeMap::new();
