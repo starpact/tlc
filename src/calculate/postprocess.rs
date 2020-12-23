@@ -1,7 +1,6 @@
 use std::error::Error;
 use std::path::Path;
 
-use calamine::Cell;
 use plotters::prelude::*;
 
 use ndarray::prelude::*;
