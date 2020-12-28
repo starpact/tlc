@@ -27,15 +27,15 @@ mod calculate {
         Lazy::new(|| &CONFIG_PARAS.thermocouple_pos);
     static INTERP_METHOD: Lazy<preprocess::InterpMethod> = Lazy::new(|| CONFIG_PARAS.interp_method);
     static FILTER_METHOD: Lazy<preprocess::FilterMethod> = Lazy::new(|| CONFIG_PARAS.filter_method);
-    static PEAK_TEMP: Lazy<f64> = Lazy::new(|| CONFIG_PARAS.peak_temp);
-    static SOLID_THERMAL_CONDUCTIVITY: Lazy<f64> =
+    static PEAK_TEMP: Lazy<f32> = Lazy::new(|| CONFIG_PARAS.peak_temp);
+    static SOLID_THERMAL_CONDUCTIVITY: Lazy<f32> =
         Lazy::new(|| CONFIG_PARAS.solid_thermal_conductivity);
-    static SOLID_THERMAL_DIFFUSIVITY: Lazy<f64> =
+    static SOLID_THERMAL_DIFFUSIVITY: Lazy<f32> =
         Lazy::new(|| CONFIG_PARAS.solid_thermal_diffusivity);
-    static CHARACTERISTIC_LENGTH: Lazy<f64> = Lazy::new(|| CONFIG_PARAS.characteristic_length);
-    static AIR_THERMAL_CONDUCTIVITY: Lazy<f64> =
+    static CHARACTERISTIC_LENGTH: Lazy<f32> = Lazy::new(|| CONFIG_PARAS.characteristic_length);
+    static AIR_THERMAL_CONDUCTIVITY: Lazy<f32> =
         Lazy::new(|| CONFIG_PARAS.air_thermal_conductivity);
-    static H0: Lazy<f64> = Lazy::new(|| CONFIG_PARAS.h0);
+    static H0: Lazy<f32> = Lazy::new(|| CONFIG_PARAS.h0);
     static MAX_ITER_NUM: Lazy<usize> = Lazy::new(|| CONFIG_PARAS.max_iter_num);
 
     #[test]
@@ -50,7 +50,7 @@ mod calculate {
         io::read_video(video_record, region_record).unwrap()
     }
 
-    fn example_t2d() -> Array2<f64> {
+    fn example_t2d() -> Array2<f32> {
         let temp_record = (*START_ROW, *FRAME_NUM, *TEMP_COLUMN_NUM, *DAQ_PATH);
         io::read_daq(temp_record).unwrap()
     }
@@ -109,7 +109,7 @@ mod calculate {
 
         println!("read video...");
         let mut g2d = example_g2d();
-        let dt = 1. / *FRAME_RATE as f64;
+        let dt = 1. / *FRAME_RATE as f32;
 
         println!("read excel...");
         let t2d = example_t2d();
@@ -155,7 +155,7 @@ mod calculate {
                 (count, sum)
             }
         });
-        println!("overall average Nu: {}", valid_sum / valid_count as f64);
+        println!("overall average Nu: {}", valid_sum / valid_count as f32);
     }
 
     use plotters::prelude::*;

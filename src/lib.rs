@@ -9,7 +9,7 @@ use ndarray::prelude::*;
 use calculate::*;
 use io::{read_config, ConfigParas};
 
-pub fn cal<P: AsRef<Path>>(config_path: P) -> Result<f64, Box<dyn Error>> {
+pub fn cal<P: AsRef<Path>>(config_path: P) -> Result<f32, Box<dyn Error>> {
     let t0 = Instant::now();
 
     let ConfigParas {
@@ -44,7 +44,7 @@ pub fn cal<P: AsRef<Path>>(config_path: P) -> Result<f64, Box<dyn Error>> {
     let video_record = (start_frame, frame_num, &video_path);
     let region_record = (top_left_pos, region_shape);
     let mut g2d = io::read_video(video_record, region_record)?;
-    let dt = 1. / frame_rate as f64;
+    let dt = 1. / frame_rate as f32;
     let t1 = Instant::now();
     println!("{:?}", t1.duration_since(t0));
 
