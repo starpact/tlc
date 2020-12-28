@@ -1,18 +1,9 @@
-use ndarray::prelude::*;
-use ndarray::Zip;
 use std::f64::{consts::PI, NAN};
 
-/// there is no erfc() in std, so use erfc() from libc
-mod cmath {
-    use libc::c_double;
-    extern "C" {
-        pub fn erfc(x: c_double) -> c_double;
-    }
-}
+use libm::erfc;
 
-fn erfc(x: f64) -> f64 {
-    unsafe { cmath::erfc(x) }
-}
+use ndarray::prelude::*;
+use ndarray::Zip;
 
 /// *struct that stores necessary information for solving the equation*
 struct PointData<'a> {
@@ -24,8 +15,6 @@ struct PointData<'a> {
     max_iter_num: usize,
     solid_thermal_conductivity: f64,
     solid_thermal_diffusivity: f64,
-    characteristic_length: f64,
-    air_thermal_conductivity: f64,
 }
 
 impl PointData<'_> {
@@ -68,12 +57,12 @@ impl PointData<'_> {
                 return NAN;
             }
             if (next_h - h).abs() < 1e-3 {
-                break;
+                return next_h;
             }
             h = next_h;
         }
 
-        h * self.characteristic_length / self.air_thermal_conductivity
+        h
     }
 
     #[allow(dead_code)]
@@ -88,7 +77,7 @@ impl PointData<'_> {
                 let (next_f, next_df) = self.thermal_equation(next_h);
                 if next_f.abs() < f.abs() {
                     if (next_h - h).abs() < 1e-3 {
-                        break;
+                        return next_h;
                     }
                     h = next_h;
                     f = next_f;
@@ -105,7 +94,7 @@ impl PointData<'_> {
             }
         }
 
-        h * self.characteristic_length / self.air_thermal_conductivity
+        h
     }
 }
 
@@ -137,10 +126,8 @@ pub fn solve(
                 max_iter_num,
                 solid_thermal_conductivity,
                 solid_thermal_diffusivity,
-                characteristic_length,
-                air_thermal_conductivity,
             };
-            *nu = point_data.newton_tangent();
+            *nu = point_data.newton_tangent() * characteristic_length / air_thermal_conductivity;
         });
 
     nus

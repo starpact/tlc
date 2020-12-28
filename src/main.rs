@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::error::Error;
 use std::path::Path;
 
-const CFG_DIR: &str = "D:\\research\\EXP\\exp_20201206\\config";
+const CFG_DIR: &str = "E:\\research\\EXP\\exp_20201206\\config";
 
 fn main() -> Result<(), Box<dyn Error>> {
     let mut bm = BTreeMap::new();
@@ -24,8 +24,9 @@ fn main() -> Result<(), Box<dyn Error>> {
 
 fn filter(file_name: &str) -> bool {
     match file_name {
-        // "imp_40000_1_up.json" | "imp_40000_2_up.json" => true,
-        "imp_50000_2_up.json" => true,
+        // "imp_50000_2_up.json" => true,
+        "imp_40000_1_up.json" => true,
+        "imp_40000_2_up.json" => true,
         _ => false,
     }
 }

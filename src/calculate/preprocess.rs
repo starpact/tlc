@@ -1,14 +1,15 @@
+use median::Filter;
+use nalgebra::DVector;
 use ndarray::parallel::prelude::*;
 use ndarray::prelude::*;
+use rbf_interp::{Basis, Scatter};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Serialize, Deserialize, Copy, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 pub enum FilterMethod {
     No,
     Median(usize),
 }
-
-use median::Filter;
 
 /// filter the green history of each pixel along time axis
 pub fn filtering(mut g2d: ArrayViewMut2<u8>, filter_method: FilterMethod) {
@@ -122,26 +123,29 @@ fn interp_1d(
     };
 
     let mut interp_temps = Array2::zeros((t2d.nrows(), len_of_interp_dimension));
-    par_azip!((row_tc in t2d.axis_iter(Axis(0)), mut row in interp_temps.axis_iter_mut(Axis(0))) {
-        let mut iter = row.iter_mut();
-        let mut curr = 0;
-        for pos in 0..len_of_interp_dimension as i32 {
-            let (left_end, right_end) = (tc_pos_relative[curr], tc_pos_relative[curr + 1]);
-            if let Some(t) = iter.next() {
-                *t = (row_tc[curr] * (right_end - pos) as f64
-                    + row_tc[curr + 1] * (pos - left_end) as f64) / (right_end - left_end) as f64;
+
+    interp_temps
+        .axis_iter_mut(Axis(0))
+        .into_par_iter()
+        .zip(t2d.axis_iter(Axis(0)).into_par_iter())
+        .for_each(|(mut row, row_tc)| {
+            let mut iter = row.iter_mut();
+            let mut curr = 0;
+            for pos in 0..len_of_interp_dimension as i32 {
+                let (left_end, right_end) = (tc_pos_relative[curr], tc_pos_relative[curr + 1]);
+                if let Some(t) = iter.next() {
+                    *t = (row_tc[curr] * (right_end - pos) as f64
+                        + row_tc[curr + 1] * (pos - left_end) as f64)
+                        / (right_end - left_end) as f64;
+                }
+                if pos == right_end && curr + 2 < tc_pos_relative.len() {
+                    curr += 1;
+                }
             }
-            if pos == right_end && curr + 2 < tc_pos_relative.len() {
-                curr += 1;
-            }
-        }
-    });
+        });
 
     (interp_temps, query_index)
 }
-
-use nalgebra::DVector;
-use rbf_interp::{Basis, Scatter};
 
 fn interp_scatter(
     t2d: ArrayView2<f64>,
