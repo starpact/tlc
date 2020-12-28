@@ -24,8 +24,8 @@ fn main() -> Result<(), Box<dyn Error>> {
 
 fn filter(file_name: &str) -> bool {
     match file_name {
-        // "imp_40000_1_up.json" | "imp_40000_2_up.json" => true,
-        "imp_50000_2_up.json" => true,
+        "imp_40000_1_up.json" | "imp_40000_2_up.json" => true,
+        // "imp_50000_2_up.json" => true,
         _ => false,
     }
 }
