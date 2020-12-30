@@ -41,12 +41,12 @@ pub struct ConfigParas {
     pub thermocouple_pos: Vec<(i32, i32)>,
     pub interp_method: InterpMethod,
     pub filter_method: FilterMethod,
-    pub peak_temp: f64,
-    pub solid_thermal_conductivity: f64,
-    pub solid_thermal_diffusivity: f64,
-    pub characteristic_length: f64,
-    pub air_thermal_conductivity: f64,
-    pub h0: f64,
+    pub peak_temp: f32,
+    pub solid_thermal_conductivity: f32,
+    pub solid_thermal_diffusivity: f32,
+    pub characteristic_length: f32,
+    pub air_thermal_conductivity: f32,
+    pub h0: f32,
     pub max_iter_num: usize,
 }
 
@@ -80,7 +80,7 @@ fn get_frames_of_video<P: AsRef<Path>>(video_path: P) -> Result<(usize, usize), 
         .best(Type::Video)
         .ok_or(ffmpeg::Error::StreamNotFound)?;
     let rational = video_stream.avg_frame_rate();
-    let frame_rate = (rational.numerator() as f64 / rational.denominator() as f64).round() as usize;
+    let frame_rate = (rational.numerator() as f32 / rational.denominator() as f32).round() as usize;
     let total_frame = input.duration() as usize * frame_rate / 1_000_000;
 
     Ok((total_frame, frame_rate))
@@ -234,7 +234,7 @@ pub fn read_video<P: AsRef<Path>>(
 /// 2D matrix of the temperatures from thermocouples
 pub fn read_daq<P: AsRef<Path>>(
     temp_record: (usize, usize, &Vec<usize>, P),
-) -> Result<Array2<f64>, Box<dyn Error>> {
+) -> Result<Array2<f32>, Box<dyn Error>> {
     match temp_record
         .3
         .as_ref()
@@ -251,7 +251,7 @@ pub fn read_daq<P: AsRef<Path>>(
 
 fn read_temp_from_lvm<P: AsRef<Path>>(
     temp_record: (usize, usize, &Vec<usize>, P),
-) -> Result<Array2<f64>, Box<dyn Error>> {
+) -> Result<Array2<f32>, Box<dyn Error>> {
     let (start_line, frame_num, columns, temp_path) = temp_record;
     let mut rdr = ReaderBuilder::new()
         .has_headers(false)
@@ -267,7 +267,7 @@ fn read_temp_from_lvm<P: AsRef<Path>>(
     {
         let csv_row = csv_row_result?;
         for (&index, t) in columns.iter().zip(temp_row.iter_mut()) {
-            *t = csv_row[index].parse::<f64>()?;
+            *t = csv_row[index].parse::<f32>()?;
         }
     }
 
@@ -276,7 +276,7 @@ fn read_temp_from_lvm<P: AsRef<Path>>(
 
 fn read_temp_from_excel<P: AsRef<Path>>(
     temp_record: (usize, usize, &Vec<usize>, P),
-) -> Result<Array2<f64>, Box<dyn Error>> {
+) -> Result<Array2<f32>, Box<dyn Error>> {
     let (start_line, frame_num, columns, temp_path) = temp_record;
     let mut excel: Xlsx<_> = open_workbook(temp_path)?;
     let sheet = excel.worksheet_range_at(0).ok_or("no sheet exists")??;
@@ -291,7 +291,7 @@ fn read_temp_from_excel<P: AsRef<Path>>(
         for (&index, t) in columns.iter().zip(temp_row.iter_mut()) {
             *t = excel_row[index]
                 .get_float()
-                .ok_or("temperate not in floats")?;
+                .ok_or("temperate not in floats")? as f32;
         }
     }
 
@@ -313,7 +313,7 @@ pub fn get_save_path<P: AsRef<Path>>(
     Ok((nu_path, plot_path))
 }
 
-pub fn save_nu<P: AsRef<Path>>(nu2d: ArrayView2<f64>, nu_path: P) -> Result<(), Box<dyn Error>> {
+pub fn save_nu<P: AsRef<Path>>(nu2d: ArrayView2<f32>, nu_path: P) -> Result<(), Box<dyn Error>> {
     let mut wtr = WriterBuilder::new().has_headers(false).from_path(nu_path)?;
 
     for row in nu2d.axis_iter(Axis(0)) {
@@ -324,7 +324,7 @@ pub fn save_nu<P: AsRef<Path>>(nu2d: ArrayView2<f64>, nu_path: P) -> Result<(), 
     Ok(())
 }
 
-pub fn read_nu<P: AsRef<Path>>(nu_path: P) -> Result<Array2<f64>, Box<dyn Error>> {
+pub fn read_nu<P: AsRef<Path>>(nu_path: P) -> Result<Array2<f32>, Box<dyn Error>> {
     // avoid adding the shape into arguments, though ugly
     let mut rdr = ReaderBuilder::new()
         .has_headers(false)
@@ -338,7 +338,7 @@ pub fn read_nu<P: AsRef<Path>>(nu_path: P) -> Result<Array2<f64>, Box<dyn Error>
     for (csv_row_result, mut nu_row) in rdr.records().zip(nu2d.axis_iter_mut(Axis(0))) {
         let csv_row = csv_row_result?;
         for (csv_val, nu) in csv_row.iter().zip(nu_row.iter_mut()) {
-            *nu = csv_val.parse::<f64>()?;
+            *nu = csv_val.parse::<f32>()?;
         }
     }
 

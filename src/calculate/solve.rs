@@ -1,65 +1,107 @@
+use std::f32::{consts::PI, NAN};
+
+use libm::erfcf;
+
 use ndarray::prelude::*;
 use ndarray::Zip;
-use std::f64::{consts::PI, NAN};
 
-/// there is no erfc() in std, so use erfc() from libc
-mod cmath {
-    use libc::c_double;
-    extern "C" {
-        pub fn erfc(x: c_double) -> c_double;
+use packed_simd::{f32x8, Simd};
+
+/// erfcf() if the single floats version of erfc(), this is a temporary simd wrapper of it
+/// I'm waiting for the std simd to support more vectorized math function
+fn erfcf_simd(arr: Simd<[f32; 8]>) -> Simd<[f32; 8]> {
+    unsafe {
+        let (x0, x1, x2, x3, x4, x5, x6, x7): (f32, f32, f32, f32, f32, f32, f32, f32) =
+            std::mem::transmute(arr);
+        f32x8::new(
+            erfcf(x0),
+            erfcf(x1),
+            erfcf(x2),
+            erfcf(x3),
+            erfcf(x4),
+            erfcf(x5),
+            erfcf(x6),
+            erfcf(x7),
+        )
     }
-}
-
-fn erfc(x: f64) -> f64 {
-    unsafe { cmath::erfc(x) }
 }
 
 /// *struct that stores necessary information for solving the equation*
 struct PointData<'a> {
     peak_frame: usize,
-    temps: ArrayView1<'a, f64>,
-    peak_temp: f64,
-    dt: f64,
-    h0: f64,
+    temps: ArrayView1<'a, f32>,
+    peak_temp: f32,
+    dt: f32,
+    h0: f32,
     max_iter_num: usize,
-    solid_thermal_conductivity: f64,
-    solid_thermal_diffusivity: f64,
-    characteristic_length: f64,
-    air_thermal_conductivity: f64,
+    solid_thermal_conductivity: f32,
+    solid_thermal_diffusivity: f32,
 }
 
 impl PointData<'_> {
-    /// *semi-infinite plate heat transfer equation of each pixel*
+    /// *semi-infinite plate heat transfer equation of each pixel(simd)*
     /// ### Return:
     /// equation and its derivative
-    fn thermal_equation(&self, h: f64) -> (f64, f64) {
+    fn thermal_equation(&self, h: f32) -> (f32, f32) {
         let (k, a, dt, temps, tw, peak_frame) = (
             self.solid_thermal_conductivity,
             self.solid_thermal_diffusivity,
             self.dt,
-            self.temps,
+            self.temps.as_slice_memory_order().unwrap(),
             self.peak_temp,
             self.peak_frame,
         );
+        let t0 = temps[..4].iter().sum::<f32>() / 4.;
+        let (mut sum, mut diff_sum) = (f32x8::splat(0.), f32x8::splat(0.));
 
-        let (sum, diff_sum) = (1..peak_frame).fold((0., 0.), |(f, df), i| {
-            let delta_temp = unsafe { temps.uget(i) - temps.uget(i - 1) };
-            let at = a * dt * (peak_frame - i) as f64;
-            let exp_erfc = (h.powf(2.) / k.powf(2.) * at).exp() * erfc(h / k * at.sqrt());
+        let mut i = 1;
+        while i + f32x8::lanes() < peak_frame {
+            let delta_temp = unsafe {
+                f32x8::from_slice_unaligned_unchecked(&temps[i..])
+                    - f32x8::from_slice_unaligned_unchecked(&temps[i - 1..])
+            };
+            let at = a
+                * dt
+                * f32x8::new(
+                    (peak_frame - i) as f32,
+                    (peak_frame - i - 1) as f32,
+                    (peak_frame - i - 2) as f32,
+                    (peak_frame - i - 3) as f32,
+                    (peak_frame - i - 4) as f32,
+                    (peak_frame - i - 5) as f32,
+                    (peak_frame - i - 6) as f32,
+                    (peak_frame - i - 7) as f32,
+                );
+            let exp_erfc = (h.powf(2.) / k.powf(2.) * at).exp() * erfcf_simd(h / k * at.sqrt());
             let step = (1. - exp_erfc) * delta_temp;
             let d_step = -delta_temp
                 * (2. * at.sqrt() / k / PI.sqrt() - (2. * at * h * exp_erfc) / k.powf(2.));
 
-            (f + step, df + d_step)
-        });
+            i += f32x8::lanes();
+            sum += step;
+            diff_sum += d_step;
+        }
 
-        let t0 = self.temps.slice(s![..4]).mean().unwrap();
+        let (mut sum, mut diff_sum) = (sum.sum(), diff_sum.sum());
+
+        while i < peak_frame {
+            let delta_temp = unsafe { temps.get_unchecked(i) - temps.get_unchecked(i - 1) };
+            let at = a * dt * (peak_frame - i) as f32;
+            let exp_erfc = (h.powf(2.) / k.powf(2.) * at).exp() * erfcf(h / k * at.sqrt());
+            let step = (1. - exp_erfc) * delta_temp;
+            let d_step = -delta_temp
+                * (2. * at.sqrt() / k / PI.sqrt() - (2. * at * h * exp_erfc) / k.powf(2.));
+
+            i += 1;
+            sum += step;
+            diff_sum += d_step;
+        }
 
         (tw - t0 - sum, diff_sum)
     }
 
     #[allow(dead_code)]
-    fn newton_tangent(&self) -> f64 {
+    fn newton_tangent(&self) -> f32 {
         let mut h = self.h0;
         for _ in 0..self.max_iter_num {
             let (f, df) = self.thermal_equation(h);
@@ -68,16 +110,16 @@ impl PointData<'_> {
                 return NAN;
             }
             if (next_h - h).abs() < 1e-3 {
-                break;
+                return next_h;
             }
             h = next_h;
         }
 
-        h * self.characteristic_length / self.air_thermal_conductivity
+        h
     }
 
     #[allow(dead_code)]
-    fn newton_down(&self) -> f64 {
+    fn newton_down(&self) -> f32 {
         let mut h = self.h0;
         let (mut f, mut df) = self.thermal_equation(h);
 
@@ -88,7 +130,7 @@ impl PointData<'_> {
                 let (next_f, next_df) = self.thermal_equation(next_h);
                 if next_f.abs() < f.abs() {
                     if (next_h - h).abs() < 1e-3 {
-                        break;
+                        return next_h;
                     }
                     h = next_h;
                     f = next_f;
@@ -105,23 +147,23 @@ impl PointData<'_> {
             }
         }
 
-        h * self.characteristic_length / self.air_thermal_conductivity
+        h
     }
 }
 
 pub fn solve(
     peak_frames: ArrayView1<usize>,
-    interp_temps: ArrayView2<f64>,
+    interp_temps: ArrayView2<f32>,
     query_index: ArrayView1<usize>,
-    solid_thermal_conductivity: f64,
-    solid_thermal_diffusivity: f64,
-    characteristic_length: f64,
-    air_thermal_conductivity: f64,
-    dt: f64,
-    peak_temp: f64,
-    h0: f64,
+    solid_thermal_conductivity: f32,
+    solid_thermal_diffusivity: f32,
+    characteristic_length: f32,
+    air_thermal_conductivity: f32,
+    dt: f32,
+    peak_temp: f32,
+    h0: f32,
     max_iter_num: usize,
-) -> Array1<f64> {
+) -> Array1<f32> {
     let mut nus = Array1::zeros(query_index.len());
 
     Zip::from(&mut nus)
@@ -130,17 +172,15 @@ pub fn solve(
         .par_apply(|nu, &index, &peak_frame| {
             let point_data = PointData {
                 peak_frame,
-                temps: interp_temps.column(index),
+                temps: interp_temps.row(index),
                 peak_temp,
                 dt,
                 h0,
                 max_iter_num,
                 solid_thermal_conductivity,
                 solid_thermal_diffusivity,
-                characteristic_length,
-                air_thermal_conductivity,
             };
-            *nu = point_data.newton_tangent();
+            *nu = point_data.newton_tangent() * characteristic_length / air_thermal_conductivity;
         });
 
     nus

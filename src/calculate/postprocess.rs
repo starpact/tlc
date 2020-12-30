@@ -7,7 +7,7 @@ use ndarray::prelude::*;
 
 use super::colormap::JET;
 
-pub fn cal_average<D: Dimension>(nus: ArrayView<f64, D>) -> (f64, f64) {
+pub fn cal_average<D: Dimension>(nus: ArrayView<f32, D>) -> (f32, f32) {
     let (sum, cnt) = nus.iter().fold((0., 0), |(s, cnt), &nu| {
         if nu.is_nan() {
             (s, cnt)
@@ -16,16 +16,16 @@ pub fn cal_average<D: Dimension>(nus: ArrayView<f64, D>) -> (f64, f64) {
         }
     });
     let nan_cnt = nus.len() - cnt;
-    let nan_ratio = nan_cnt as f64 / cnt as f64;
-    let nan_mean = sum / cnt as f64;
+    let nan_ratio = nan_cnt as f32 / cnt as f32;
+    let nan_mean = sum / cnt as f32;
 
     (nan_mean, nan_ratio)
 }
 
 pub fn plot_nu<P: AsRef<Path>>(
-    nu2d: ArrayView2<f64>,
-    vmin: f64,
-    vmax: f64,
+    nu2d: ArrayView2<f32>,
+    vmin: f32,
+    vmax: f32,
     plot_path: P,
 ) -> Result<(), Box<dyn Error>> {
     let (height, width) = nu2d.dim();
@@ -57,7 +57,7 @@ pub fn plot_nu<P: AsRef<Path>>(
     Ok(())
 }
 
-pub fn simple_plot(arr: ArrayView1<f64>) -> Result<(), Box<dyn Error>> {
+pub fn simple_plot(arr: ArrayView1<f32>) -> Result<(), Box<dyn Error>> {
     let len = arr.len();
     let x0 = *arr.first().ok_or("")?;
     let min = arr.into_iter().fold(x0, |m, &x| if x < m { x } else { m });

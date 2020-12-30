@@ -1,14 +1,15 @@
+use median::Filter;
+use nalgebra::DVector;
 use ndarray::parallel::prelude::*;
 use ndarray::prelude::*;
+use rbf_interp::{Basis, Scatter};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Serialize, Deserialize, Copy, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 pub enum FilterMethod {
     No,
     Median(usize),
 }
-
-use median::Filter;
 
 /// filter the green history of each pixel along time axis
 pub fn filtering(mut g2d: ArrayViewMut2<u8>, filter_method: FilterMethod) {
@@ -78,12 +79,12 @@ pub enum InterpMethod {
 /// ### Return:
 /// 2D matrix of the interpolated temperatures and how a pixel query about its temperature from this matrix
 pub fn interp(
-    t2d: ArrayView2<f64>,
+    t2d: ArrayView2<f32>,
     tc_pos: &Vec<(i32, i32)>,
     interp_method: InterpMethod,
     top_left_pos: (usize, usize),
     region_shape: (usize, usize),
-) -> (Array2<f64>, Array1<usize>) {
+) -> (Array2<f32>, Array1<usize>) {
     match interp_method {
         InterpMethod::Horizontal | InterpMethod::Vertical => {
             interp_1d(t2d, tc_pos, top_left_pos, interp_method, region_shape)
@@ -94,12 +95,12 @@ pub fn interp(
 
 /// *one dimension interpolation, along axis X or Y*
 fn interp_1d(
-    t2d: ArrayView2<f64>,
+    t2d: ArrayView2<f32>,
     thermocouple_pos: &Vec<(i32, i32)>,
     top_left_pos: (usize, usize),
     interp_method: InterpMethod,
     region_shape: (usize, usize),
-) -> (Array2<f64>, Array1<usize>) {
+) -> (Array2<f32>, Array1<usize>) {
     let (cal_h, cal_w) = region_shape;
 
     let (len_of_interp_dimension, tc_pos_relative, query_index) = match interp_method {
@@ -121,34 +122,37 @@ fn interp_1d(
         ),
     };
 
-    let mut interp_temps = Array2::zeros((t2d.nrows(), len_of_interp_dimension));
-    par_azip!((row_tc in t2d.axis_iter(Axis(0)), mut row in interp_temps.axis_iter_mut(Axis(0))) {
-        let mut iter = row.iter_mut();
-        let mut curr = 0;
-        for pos in 0..len_of_interp_dimension as i32 {
-            let (left_end, right_end) = (tc_pos_relative[curr], tc_pos_relative[curr + 1]);
-            if let Some(t) = iter.next() {
-                *t = (row_tc[curr] * (right_end - pos) as f64
-                    + row_tc[curr + 1] * (pos - left_end) as f64) / (right_end - left_end) as f64;
+    let mut interp_temps = Array2::zeros((len_of_interp_dimension, t2d.nrows()));
+
+    interp_temps
+        .axis_iter_mut(Axis(1))
+        .into_par_iter()
+        .zip(t2d.axis_iter(Axis(0)).into_par_iter())
+        .for_each(|(mut col, row_tc)| {
+            let mut iter = col.iter_mut();
+            let mut curr = 0;
+            for pos in 0..len_of_interp_dimension as i32 {
+                let (left_end, right_end) = (tc_pos_relative[curr], tc_pos_relative[curr + 1]);
+                if let Some(t) = iter.next() {
+                    *t = (row_tc[curr] * (right_end - pos) as f32
+                        + row_tc[curr + 1] * (pos - left_end) as f32)
+                        / (right_end - left_end) as f32;
+                }
+                if pos == right_end && curr + 2 < tc_pos_relative.len() {
+                    curr += 1;
+                }
             }
-            if pos == right_end && curr + 2 < tc_pos_relative.len() {
-                curr += 1;
-            }
-        }
-    });
+        });
 
     (interp_temps, query_index)
 }
 
-use nalgebra::DVector;
-use rbf_interp::{Basis, Scatter};
-
 fn interp_scatter(
-    t2d: ArrayView2<f64>,
+    t2d: ArrayView2<f32>,
     thermocouple_pos: &Vec<(i32, i32)>,
     upper_left_pos: (usize, usize),
     region_shape: (usize, usize),
-) -> (Array2<f64>, Array1<usize>) {
+) -> (Array2<f32>, Array1<usize>) {
     let (cal_h, cal_w) = region_shape;
     let pix_num = cal_h * cal_w;
     let query_index: Array1<usize> = (0..pix_num).collect();
@@ -165,14 +169,14 @@ fn interp_scatter(
 
     let mut interp_temps = Array2::zeros((t2d.nrows(), pix_num));
     par_azip!((row_tc in t2d.axis_iter(Axis(0)), mut row in interp_temps.axis_iter_mut(Axis(0))) {
-        let datum_temps = row_tc.iter().map(|temp| DVector::from_vec(vec![*temp])).collect::<Vec<_>>();
+        let datum_temps = row_tc.iter().map(|temp| DVector::from_vec(vec![*temp as f64])).collect::<Vec<_>>();
         let scatter = Scatter::create(datum_locs.clone(), datum_temps, Basis::PolyHarmonic(2) , 2);
 
         let mut iter = row.iter_mut();
         for y in 0..cal_h {
             for x in 0..cal_w {
                 if let Some(t) = iter.next() {
-                    *t = scatter.eval(DVector::from_vec(vec![y as f64, x as f64]))[0];
+                    *t = scatter.eval(DVector::from_vec(vec![y as f64, x as f64]))[0] as f32;
                 }
             }
         }
