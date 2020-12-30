@@ -211,6 +211,6 @@ mod calculate {
             plot_path.set_file_name(file_stem);
             cnt += 1;
         }
-        postprocess::plot_nu(nu2d.view(), nu_nan_mean, plot_path).unwrap();
+        postprocess::plot_nu(nu2d.view(), nu_nan_mean * 0.6, nu_nan_mean * 2., plot_path).unwrap();
     }
 }

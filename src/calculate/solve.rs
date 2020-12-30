@@ -7,28 +7,19 @@ use ndarray::Zip;
 
 use packed_simd::{f32x8, Simd};
 
-// fn erfcf_simd(arr: Simd<[f32; 4]>) -> Simd<[f32; 4]> {
-//     unsafe {
-//         let (x0, x1, x2, x3): (f32, f32, f32, f32) = std::mem::transmute(arr);
-//         f32x8::new(erfcf(x0), erfcf(x1), erfcf(x2), erfcf(x3))
-//     }
-// }
-
 fn erfcf_simd(arr: Simd<[f32; 8]>) -> Simd<[f32; 8]> {
-    unsafe {
-        let (x0, x1, x2, x3, x4, x5, x6, x7): (f32, f32, f32, f32, f32, f32, f32, f32) =
-            std::mem::transmute(arr);
-        f32x8::new(
-            erfcf(x0),
-            erfcf(x1),
-            erfcf(x2),
-            erfcf(x3),
-            erfcf(x4),
-            erfcf(x5),
-            erfcf(x6),
-            erfcf(x7),
-        )
-    }
+    let (x0, x1, x2, x3, x4, x5, x6, x7): (f32, f32, f32, f32, f32, f32, f32, f32) =
+        unsafe { std::mem::transmute(arr) };
+    f32x8::new(
+        erfcf(x0),
+        erfcf(x1),
+        erfcf(x2),
+        erfcf(x3),
+        erfcf(x4),
+        erfcf(x5),
+        erfcf(x6),
+        erfcf(x7),
+    )
 }
 
 /// *struct that stores necessary information for solving the equation*
@@ -47,32 +38,6 @@ impl PointData<'_> {
     /// *semi-infinite plate heat transfer equation of each pixel*
     /// ### Return:
     /// equation and its derivative
-    // fn thermal_equation(&self, h: f32) -> (f32, f32) {
-    //     let (k, a, dt, temps, tw, peak_frame) = (
-    //         self.solid_thermal_conductivity,
-    //         self.solid_thermal_diffusivity,
-    //         self.dt,
-    //         self.temps,
-    //         self.peak_temp,
-    //         self.peak_frame,
-    //     );
-
-    //     let (sum, diff_sum) = (1..peak_frame).fold((0., 0.), |(f, df), i| {
-    //         let delta_temp = unsafe { temps.uget(i) - temps.uget(i - 1) };
-    //         let at = a * dt * (peak_frame - i) as f32;
-    //         let exp_erfc = (h.powf(2.) / k.powf(2.) * at).exp() * erfcf(h / k * at.sqrt());
-    //         let step = (1. - exp_erfc) * delta_temp;
-    //         let d_step = -delta_temp
-    //             * (2. * at.sqrt() / k / PI.sqrt() - (2. * at * h * exp_erfc) / k.powf(2.));
-
-    //         (f + step, df + d_step)
-    //     });
-
-    //     let t0 = temps.slice(s![..4]).mean().unwrap();
-
-    //     (tw - t0 - sum, diff_sum)
-    // }
-
     fn thermal_equation(&self, h: f32) -> (f32, f32) {
         let (k, a, dt, temps, tw, peak_frame) = (
             self.solid_thermal_conductivity,
@@ -134,6 +99,7 @@ impl PointData<'_> {
     #[allow(dead_code)]
     fn newton_tangent(&self) -> f32 {
         let mut h = self.h0;
+
         for _ in 0..self.max_iter_num {
             let (f, df) = self.thermal_equation(h);
             let next_h = h - f / df;
