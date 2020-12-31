@@ -2,6 +2,8 @@ use std::collections::BTreeMap;
 use std::error::Error;
 use std::path::Path;
 
+use tlc::calculate::error::TLCError;
+
 const CFG_DIR: &str = "D:\\research\\EXP\\exp_20201206\\config";
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -13,7 +15,18 @@ fn main() -> Result<(), Box<dyn Error>> {
         if filter(file_name.to_str().ok_or("")?) {
             let p = cfg_dir.to_owned().join(&file_name);
             println!("\n================\n{:?}...", p);
-            let nu = tlc::cal(p)?;
+            let nu = match tlc::cal(p) {
+                Ok(nu) => nu,
+                Err(TLCError::ConfigFormatError(e)) => panic!(e),
+                Err(TLCError::CreateDirFailedError(e)) => panic!(e),
+                Err(TLCError::VideoError(e)) => panic!(e),
+                Err(TLCError::ConfigIOError(s))
+                | Err(TLCError::DAQIOError(s))
+                | Err(TLCError::VideoIOError(s))
+                | Err(TLCError::NuIOError(s))
+                | Err(TLCError::PlotError(s))
+                | Err(TLCError::UnKnown(s)) => panic!(s),
+            };
             bm.insert(file_name, format!("{:.2}", nu));
         }
     }

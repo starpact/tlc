@@ -1446,6 +1446,7 @@ dependencies = [
  "rbf-interp",
  "serde",
  "serde_json",
+ "thiserror",
  "thread_local",
 ]
 

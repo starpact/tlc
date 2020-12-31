@@ -1,15 +1,15 @@
 pub mod calculate;
 
-use std::error::Error;
 use std::path::Path;
 use std::time::Instant;
 
 use ndarray::prelude::*;
 
 use calculate::*;
+use error::{TLCError, TLCResult};
 use io::{read_config, ConfigParas};
 
-pub fn cal<P: AsRef<Path>>(config_path: P) -> Result<f32, Box<dyn Error>> {
+pub fn cal<P: AsRef<Path>>(config_path: P) -> TLCResult<f32> {
     let t0 = Instant::now();
 
     let ConfigParas {
@@ -99,7 +99,9 @@ pub fn cal<P: AsRef<Path>>(config_path: P) -> Result<f32, Box<dyn Error>> {
 
     println!("saving...");
     let (nu_path, plot_path) = io::get_save_path(&video_path, &save_dir)?;
-    let mut nu2d = nus.into_shape(region_shape)?;
+    let mut nu2d = nus
+        .into_shape(region_shape)
+        .map_err(|err| TLCError::UnKnown(err.to_string()))?;
     nu2d.invert_axis(Axis(0));
 
     postprocess::plot_nu(nu2d.view(), nu_nan_mean * 0.6, nu_nan_mean * 2., plot_path)?;

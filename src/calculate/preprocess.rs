@@ -26,11 +26,7 @@ pub fn filtering(mut g2d: ArrayViewMut2<u8>, filter_method: FilterMethod) {
     }
 }
 
-/// *traverse along the timeline to detect the peak of green values and record that frame index*
-/// ### Argument:
-/// green values 2D matrix
-/// ### Return:
-/// frame indexes of maximal green values
+/// traverse along the timeline to detect the peak of green values and record that frame index
 pub fn detect_peak(g2d: ArrayView2<u8>) -> Array1<usize> {
     let mut peak_frames = Vec::with_capacity(g2d.ncols());
 
@@ -65,19 +61,6 @@ pub enum InterpMethod {
 }
 
 /// interpolation of temperature matrix
-/// ### Argument:
-/// 2D matrix of the delta temperatures between adjacent frames
-///
-/// positions of thermocouples
-///
-/// interpolation method
-///
-/// position of upper left corner
-///
-/// width of calculation region
-///
-/// ### Return:
-/// 2D matrix of the interpolated temperatures and how a pixel query about its temperature from this matrix
 pub fn interp(
     t2d: ArrayView2<f32>,
     tc_pos: &Vec<(i32, i32)>,
@@ -93,7 +76,7 @@ pub fn interp(
     }
 }
 
-/// *one dimension interpolation, along axis X or Y*
+/// one dimension interpolation, along axis X or Y
 fn interp_1d(
     t2d: ArrayView2<f32>,
     thermocouple_pos: &Vec<(i32, i32)>,
@@ -147,6 +130,7 @@ fn interp_1d(
     (interp_temps, query_index)
 }
 
+/// scattered interpolation, using rbf
 fn interp_scatter(
     t2d: ArrayView2<f32>,
     thermocouple_pos: &Vec<(i32, i32)>,

@@ -7,26 +7,23 @@ use ndarray::Zip;
 
 use packed_simd::{f32x8, Simd};
 
-/// erfcf() if the single floats version of erfc(), this is a temporary simd wrapper of it
-/// I'm waiting for the std simd to support more vectorized math function
+/// temporary fake SIMD wrapper of erfcf
 fn erfcf_simd(arr: Simd<[f32; 8]>) -> Simd<[f32; 8]> {
-    unsafe {
-        let (x0, x1, x2, x3, x4, x5, x6, x7): (f32, f32, f32, f32, f32, f32, f32, f32) =
-            std::mem::transmute(arr);
-        f32x8::new(
-            erfcf(x0),
-            erfcf(x1),
-            erfcf(x2),
-            erfcf(x3),
-            erfcf(x4),
-            erfcf(x5),
-            erfcf(x6),
-            erfcf(x7),
-        )
-    }
+    let (x0, x1, x2, x3, x4, x5, x6, x7): (f32, f32, f32, f32, f32, f32, f32, f32) =
+        unsafe { std::mem::transmute(arr) };
+    f32x8::new(
+        erfcf(x0),
+        erfcf(x1),
+        erfcf(x2),
+        erfcf(x3),
+        erfcf(x4),
+        erfcf(x5),
+        erfcf(x6),
+        erfcf(x7),
+    )
 }
 
-/// *struct that stores necessary information for solving the equation*
+/// struct that stores necessary information for solving the equation
 struct PointData<'a> {
     peak_frame: usize,
     temps: ArrayView1<'a, f32>,
@@ -39,7 +36,7 @@ struct PointData<'a> {
 }
 
 impl PointData<'_> {
-    /// *semi-infinite plate heat transfer equation of each pixel(simd)*
+    /// semi-infinite plate heat transfer equation of each pixel(simd)
     /// ### Return:
     /// equation and its derivative
     fn thermal_equation(&self, h: f32) -> (f32, f32) {
@@ -103,6 +100,7 @@ impl PointData<'_> {
     #[allow(dead_code)]
     fn newton_tangent(&self) -> f32 {
         let mut h = self.h0;
+
         for _ in 0..self.max_iter_num {
             let (f, df) = self.thermal_equation(h);
             let next_h = h - f / df;
