@@ -4,7 +4,7 @@ use std::path::Path;
 
 use tlc::calculate::error::TLCError;
 
-const CFG_DIR: &str = "D:\\research\\EXP\\exp_20201206\\config";
+const CFG_DIR: &str = "E:\\research\\EXP\\exp_20201206\\config";
 
 fn main() -> Result<(), Box<dyn Error>> {
     let mut bm = BTreeMap::new();
@@ -17,15 +17,23 @@ fn main() -> Result<(), Box<dyn Error>> {
             println!("\n================\n{:?}...", p);
             let nu = match tlc::cal(p) {
                 Ok(nu) => nu,
-                Err(TLCError::ConfigFormatError(e)) => panic!(e),
-                Err(TLCError::CreateDirFailedError(e)) => panic!(e),
-                Err(TLCError::VideoError(e)) => panic!(e),
-                Err(TLCError::ConfigIOError(s))
-                | Err(TLCError::DAQIOError(s))
-                | Err(TLCError::VideoIOError(s))
-                | Err(TLCError::NuIOError(s))
-                | Err(TLCError::PlotError(s))
-                | Err(TLCError::UnKnown(s)) => panic!(s),
+                Err(e) => {
+                    println!("{}", e);
+                    let error_code = match e {
+                        TLCError::ConfigError(_) => 0,
+                        TLCError::CreateDirError { .. } => 1,
+                        TLCError::VideoError { .. } => 2,
+                        TLCError::ConfigIOError { .. } => 3,
+                        TLCError::DAQIOError { .. } => 4,
+                        TLCError::DAQError { .. } => 5,
+                        TLCError::VideoIOError(_) => 6,
+                        TLCError::NuSaveError { .. } => 7,
+                        TLCError::NuReadError { .. } => 8,
+                        TLCError::PlotError(_) => 9,
+                        TLCError::UnKnown(_) => 10,
+                    };
+                    panic!("error_code: {}", error_code);
+                }
             };
             bm.insert(file_name, format!("{:.2}", nu));
         }
