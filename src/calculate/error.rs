@@ -46,58 +46,16 @@ pub enum TLCError {
 
 pub type TLCResult<T> = Result<T, TLCError>;
 
-/// 可以整个宏，先复制粘贴，以后再整活吧
-impl TLCError {
-    pub fn config_io_error<E: Debug, T: Debug>(raw_err: E, context: T) -> Self {
-        Self::ConfigIOError {
-            raw_err: format!("{:?}", raw_err),
-            context: format!("{:?}", context),
-        }
-    }
+#[macro_export]
+macro_rules! err {
+    ($member:tt,$context:expr$(,)*) => {
+        $crate::error::TLCError::$member(format!("{:?}", $context))
+    };
 
-    pub fn video_error<E: Debug, T: Debug>(raw_err: E, context: T) -> Self {
-        Self::VideoError {
-            raw_err: format!("{:?}", raw_err),
-            context: format!("{:?}", context),
+    ($member:tt,$raw_err:expr,$context:expr$(,)*) => {
+        $crate::error::TLCError::$member {
+            raw_err: format!("{:?}", $raw_err),
+            context: format!("{:?}", $context),
         }
-    }
-
-    pub fn daq_io_error<E: Debug, T: Debug>(raw_err: E, context: T) -> Self {
-        Self::DAQIOError {
-            raw_err: format!("{:?}", raw_err),
-            context: format!("{:?}", context),
-        }
-    }
-
-    pub fn daq_error<E: Debug, T: Debug>(raw_err: E, context: T) -> Self {
-        Self::DAQError {
-            raw_err: format!("{:?}", raw_err),
-            context: format!("{:?}", context),
-        }
-    }
-
-    pub fn create_dir_error<E: Debug, T: Debug>(raw_err: E, context: T) -> Self {
-        Self::CreateDirError {
-            raw_err: format!("{:?}", raw_err),
-            context: format!("{:?}", context),
-        }
-    }
-
-    pub fn video_io_error<T: Debug>(context: T) -> Self {
-        Self::VideoIOError(format!("{:?}", context))
-    }
-
-    pub fn nu_save_error<E: Debug, T: Debug>(raw_err: E, context: T) -> Self {
-        Self::NuSaveError {
-            raw_err: format!("{:?}", raw_err),
-            context: format!("{:?}", context),
-        }
-    }
-
-    pub fn nu_read_error<E: Debug, T: Debug>(raw_err: E, context: T) -> Self {
-        Self::NuReadError {
-            raw_err: format!("{:?}", raw_err),
-            context: format!("{:?}", context),
-        }
-    }
+    };
 }

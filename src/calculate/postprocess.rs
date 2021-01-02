@@ -4,8 +4,9 @@ use plotters::prelude::*;
 
 use ndarray::prelude::*;
 
+use super::super::err;
 use super::colormap::JET;
-use super::error::{TLCError, TLCResult};
+use super::error::TLCResult;
 
 pub fn cal_average<D: Dimension>(nus: ArrayView<f32, D>) -> (f32, f32) {
     let (sum, cnt) = nus.iter().fold((0., 0), |(s, cnt), &nu| {
@@ -30,17 +31,16 @@ pub fn plot_nu<P: AsRef<Path>>(
 ) -> TLCResult<()> {
     let (height, width) = nu2d.dim();
     let root = BitMapBackend::new(&plot_path, (width as u32, height as u32)).into_drawing_area();
-    root.fill(&WHITE)
-        .map_err(|err| TLCError::PlotError(err.to_string()))?;
+    root.fill(&WHITE).map_err(|err| err!(PlotError, err))?;
     let mut chart = ChartBuilder::on(&root)
         .build_cartesian_2d(0..width, 0..height)
-        .map_err(|err| TLCError::PlotError(err.to_string()))?;
+        .map_err(|err| err!(PlotError, err))?;
     chart
         .configure_mesh()
         .disable_x_mesh()
         .disable_y_mesh()
         .draw()
-        .map_err(|err| TLCError::PlotError(err.to_string()))?;
+        .map_err(|err| err!(PlotError, err))?;
     let pix_plotter = chart.plotting_area();
 
     let delta = vmax - vmin;
@@ -56,7 +56,7 @@ pub fn plot_nu<P: AsRef<Path>>(
                 let rgb: Vec<_> = JET[color_index].iter().map(|c| (c * 255.) as u8).collect();
                 pix_plotter
                     .draw_pixel((x, y), &RGBColor(rgb[0], rgb[1], rgb[2]))
-                    .map_err(|err| TLCError::PlotError(err.to_string()))?;
+                    .map_err(|err| err!(PlotError, err))?;
             }
         }
     }
@@ -66,32 +66,29 @@ pub fn plot_nu<P: AsRef<Path>>(
 
 pub fn simple_plot(arr: ArrayView1<f32>) -> TLCResult<()> {
     let len = arr.len();
-    let x0 = *arr
-        .first()
-        .ok_or(TLCError::PlotError("empty data".to_owned()))?;
+    let x0 = *arr.first().ok_or(err!(PlotError, "empty data"))?;
     let min = arr.into_iter().fold(x0, |m, &x| if x < m { x } else { m });
     let max = arr.into_iter().fold(x0, |m, &x| if x > m { x } else { m });
     let delta = max - min;
 
     let root = BitMapBackend::new("plotters/simple_plot.png", (640, 480)).into_drawing_area();
-    root.fill(&WHITE)
-        .map_err(|err| TLCError::PlotError(err.to_string()))?;
+    root.fill(&WHITE).map_err(|err| err!(PlotError, err))?;
     let mut chart = ChartBuilder::on(&root)
         .margin(30)
         .x_label_area_size(30)
         .y_label_area_size(30)
         .build_cartesian_2d(0..len, (min - delta * 0.1)..(max + delta * 0.1))
-        .map_err(|err| TLCError::PlotError(err.to_string()))?;
+        .map_err(|err| err!(PlotError, err))?;
     chart
         .configure_mesh()
         .draw()
-        .map_err(|err| TLCError::PlotError(err.to_string()))?;
+        .map_err(|err| err!(PlotError, err))?;
     chart
         .draw_series(LineSeries::new(
             arr.iter().enumerate().map(|(i, v)| (i, *v)),
             &RED,
         ))
-        .map_err(|err| TLCError::PlotError(err.to_string()))?;
+        .map_err(|err| err!(PlotError, err))?;
 
     Ok(())
 }

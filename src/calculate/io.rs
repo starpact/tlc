@@ -25,7 +25,8 @@ use calamine::{open_workbook, Reader, Xlsx};
 
 use csv::{ReaderBuilder, StringRecord, WriterBuilder};
 
-use super::error::{TLCError, TLCResult};
+use super::super::err;
+use super::error::TLCResult;
 use super::preprocess::{FilterMethod, InterpMethod};
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -52,7 +53,7 @@ pub struct ConfigParas {
 
 pub fn read_config<P: AsRef<Path>>(config_path: P) -> TLCResult<ConfigParas> {
     let file = File::open(config_path.as_ref())
-        .map_err(|err| TLCError::config_io_error(err, config_path.as_ref()))?;
+        .map_err(|err| err!(ConfigIOError, err, config_path.as_ref()))?;
     let reader = BufReader::new(file);
     let cfg = serde_json::from_reader(reader)?;
 
@@ -73,14 +74,14 @@ pub fn get_metadata<P: AsRef<Path>>(
 }
 
 fn get_frames_of_video<P: AsRef<Path>>(video_path: P) -> TLCResult<(usize, usize)> {
-    ffmpeg::init().map_err(|err| TLCError::video_error(err, "ffmpeg初始化错误，建议重装"))?;
+    ffmpeg::init().map_err(|err| err!(VideoError, err, "ffmpeg初始化错误，建议重装"))?;
 
-    let input =
-        input(&video_path).map_err(|err| TLCError::video_error(err, video_path.as_ref()))?;
-    let video_stream = input
-        .streams()
-        .best(Type::Video)
-        .ok_or(TLCError::video_error("找不到视频流", video_path.as_ref()))?;
+    let input = input(&video_path).map_err(|err| err!(VideoError, err, video_path.as_ref()))?;
+    let video_stream = input.streams().best(Type::Video).ok_or(err!(
+        VideoError,
+        "找不到视频流",
+        video_path.as_ref()
+    ))?;
     let rational = video_stream.avg_frame_rate();
     let frame_rate = (rational.numerator() as f32 / rational.denominator() as f32).round() as usize;
     let total_frame = input.duration() as usize * frame_rate / 1_000_000;
@@ -92,29 +93,26 @@ fn get_rows_of_daq<P: AsRef<Path>>(daq_path: P) -> TLCResult<usize> {
     match daq_path
         .as_ref()
         .extension()
-        .ok_or(TLCError::daq_io_error("路径有误", daq_path.as_ref()))?
+        .ok_or(err!(DAQIOError, "路径有误", daq_path.as_ref()))?
         .to_str()
-        .ok_or(TLCError::daq_io_error("路径有误", daq_path.as_ref()))?
+        .ok_or(err!(DAQIOError, "路径有误", daq_path.as_ref()))?
     {
         "lvm" => Ok(ReaderBuilder::new()
             .has_headers(false)
             .from_path(daq_path.as_ref())
-            .map_err(|err| TLCError::daq_io_error(err, daq_path.as_ref()))?
+            .map_err(|err| err!(DAQIOError, err, daq_path.as_ref()))?
             .records()
             .count()),
         "xlsx" => {
             let mut excel: Xlsx<_> = open_workbook(daq_path.as_ref())
-                .map_err(|err| TLCError::daq_io_error(err, daq_path.as_ref()))?;
+                .map_err(|err| err!(DAQIOError, err, daq_path.as_ref()))?;
             let sheet = excel
                 .worksheet_range_at(0)
-                .ok_or(TLCError::daq_error("找不到worksheet", daq_path.as_ref()))?
-                .map_err(|err| TLCError::daq_error(err, daq_path.as_ref()))?;
+                .ok_or(err!(DAQError, "找不到worksheet", daq_path.as_ref()))?
+                .map_err(|err| err!(DAQError, err, daq_path.as_ref()))?;
             Ok(sheet.height())
         }
-        _ => Err(TLCError::daq_io_error(
-            "只支持.lvm或.xlsx格式",
-            daq_path.as_ref(),
-        ))?,
+        _ => Err(err!(DAQIOError, "只支持.lvm或.xlsx格式", daq_path.as_ref()))?,
     }
 }
 
@@ -153,14 +151,14 @@ pub fn read_video<P: AsRef<Path>>(
     // total number of pixels in the calculation region
     let pix_num = cal_h * cal_w;
 
-    ffmpeg::init().map_err(|err| TLCError::video_error(err, "ffmpeg初始化错误，建议重装"))?;
+    ffmpeg::init().map_err(|err| err!(VideoError, err, "ffmpeg初始化错误，建议重装"))?;
 
-    let mut input =
-        input(&video_path).map_err(|err| TLCError::video_error(err, video_path.as_ref()))?;
-    let video_stream = input
-        .streams()
-        .best(Type::Video)
-        .ok_or(TLCError::video_error("找不到视频流", video_path.as_ref()))?;
+    let mut input = input(&video_path).map_err(|err| err!(VideoError, err, video_path.as_ref()))?;
+    let video_stream = input.streams().best(Type::Video).ok_or(err!(
+        VideoError,
+        "找不到视频流",
+        video_path.as_ref(),
+    ))?;
 
     let video_stream_index = video_stream.index();
     let ctx_mutex = &Mutex::new(video_stream.codec());
@@ -172,7 +170,7 @@ pub fn read_video<P: AsRef<Path>>(
 
     ThreadPoolBuilder::new()
         .build()
-        .map_err(|err| TLCError::UnKnown(err.to_string()))?
+        .map_err(|err| err!(UnKnown, err))?
         .install(|| {
             scope(|scp| {
                 for (frame_index, (_, packet)) in input
@@ -244,16 +242,13 @@ pub fn read_daq<P: AsRef<Path>>(
     match daq_path
         .as_ref()
         .extension()
-        .ok_or(TLCError::daq_io_error("路径有误", daq_path.as_ref()))?
+        .ok_or(err!(DAQIOError, "路径有误", daq_path.as_ref()))?
         .to_str()
-        .ok_or(TLCError::daq_io_error("路径有误", daq_path.as_ref()))?
+        .ok_or(err!(DAQIOError, "路径有误", daq_path.as_ref()))?
     {
         "lvm" => read_temp_from_lvm(temp_record),
         "xlsx" => read_temp_from_excel(temp_record),
-        _ => Err(TLCError::daq_io_error(
-            "只支持.lvm或.xlsx格式",
-            daq_path.as_ref(),
-        ))?,
+        _ => Err(err!(DAQIOError, "只支持.lvm或.xlsx格式", daq_path.as_ref()))?,
     }
 }
 
@@ -265,7 +260,7 @@ fn read_temp_from_lvm<P: AsRef<Path>>(
         .has_headers(false)
         .delimiter(b'\t')
         .from_path(daq_path.as_ref())
-        .map_err(|err| TLCError::daq_io_error(err, daq_path.as_ref()))?;
+        .map_err(|err| err!(DAQIOError, err, daq_path.as_ref()))?;
 
     let mut t2d = Array2::zeros((frame_num, columns.len()));
     for (csv_row_result, mut temp_row) in rdr
@@ -274,11 +269,14 @@ fn read_temp_from_lvm<P: AsRef<Path>>(
         .take(frame_num)
         .zip(t2d.axis_iter_mut(Axis(0)))
     {
-        let csv_row =
-            csv_row_result.map_err(|err| TLCError::daq_io_error(err, daq_path.as_ref()))?;
+        let csv_row = csv_row_result.map_err(|err| err!(DAQIOError, err, daq_path.as_ref()))?;
         for (&index, t) in columns.iter().zip(temp_row.iter_mut()) {
-            *t = csv_row[index].parse::<f32>().map_err(|_| {
-                TLCError::daq_error("数据采集文件中不应当有数字以外的格式", daq_path.as_ref())
+            *t = csv_row[index].parse::<f32>().map_err(|err| {
+                err!(
+                    DAQError,
+                    format!("数据采集文件中不应当有数字以外的格式{}", err),
+                    daq_path.as_ref(),
+                )
             })?;
         }
     }
@@ -290,12 +288,12 @@ fn read_temp_from_excel<P: AsRef<Path>>(
     temp_record: (usize, usize, &Vec<usize>, P),
 ) -> TLCResult<Array2<f32>> {
     let (start_line, frame_num, columns, daq_path) = temp_record;
-    let mut excel: Xlsx<_> = open_workbook(daq_path.as_ref())
-        .map_err(|err| TLCError::daq_io_error(err, daq_path.as_ref()))?;
+    let mut excel: Xlsx<_> =
+        open_workbook(daq_path.as_ref()).map_err(|err| err!(DAQIOError, err, daq_path.as_ref()))?;
     let sheet = excel
         .worksheet_range_at(0)
-        .ok_or(TLCError::daq_error("找不到worksheet", daq_path.as_ref()))?
-        .map_err(|err| TLCError::daq_io_error(err, daq_path.as_ref()))?;
+        .ok_or(err!(DAQError, "找不到worksheet", daq_path.as_ref()))?
+        .map_err(|err| err!(DAQIOError, err, daq_path.as_ref()))?;
 
     let mut t2d = Array2::zeros((frame_num, columns.len()));
     for (excel_row, mut temp_row) in sheet
@@ -305,7 +303,8 @@ fn read_temp_from_excel<P: AsRef<Path>>(
         .zip(t2d.axis_iter_mut(Axis(0)))
     {
         for (&index, t) in columns.iter().zip(temp_row.iter_mut()) {
-            *t = excel_row[index].get_float().ok_or(TLCError::daq_error(
+            *t = excel_row[index].get_float().ok_or(err!(
+                DAQError,
                 "数据采集文件中不应当有数字以外的格式",
                 daq_path.as_ref(),
             ))? as f32;
@@ -322,18 +321,26 @@ pub fn get_save_path<P: AsRef<Path>>(video_path: P, save_dir: P) -> TLCResult<(P
         .recursive(true)
         .create(&nu_dir)
         .map_err(|err| {
-            TLCError::create_dir_error(format!("创建/Nu失败。{}", err), save_dir.as_ref())
+            err!(
+                CreateDirError,
+                format!("创建/Nu失败。{}", err),
+                save_dir.as_ref(),
+            )
         })?;
     DirBuilder::new()
         .recursive(true)
         .create(&plot_dir)
         .map_err(|err| {
-            TLCError::create_dir_error(format!("创建/plots失败。{}", err), save_dir.as_ref())
+            err!(
+                CreateDirError,
+                format!("创建/plots失败。{}", err),
+                save_dir.as_ref(),
+            )
         })?;
     let file_name = video_path
         .as_ref()
         .file_stem()
-        .ok_or(TLCError::video_io_error(video_path.as_ref()))?;
+        .ok_or(err!(VideoIOError, video_path.as_ref()))?;
     let nu_path = nu_dir.join(file_name).with_extension("csv");
     let plot_path = plot_dir.join(file_name).with_extension("png");
 
@@ -344,12 +351,12 @@ pub fn save_nu<P: AsRef<Path>>(nu2d: ArrayView2<f32>, nu_path: P) -> TLCResult<(
     let mut wtr = WriterBuilder::new()
         .has_headers(false)
         .from_path(nu_path.as_ref())
-        .map_err(|err| TLCError::nu_save_error(err, nu_path.as_ref()))?;
+        .map_err(|err| err!(NuSaveError, err, nu_path.as_ref()))?;
 
     for row in nu2d.axis_iter(Axis(0)) {
         let v: Vec<_> = row.iter().map(|x| x.to_string()).collect();
         wtr.write_record(&StringRecord::from(v))
-            .map_err(|err| TLCError::nu_save_error(err, nu_path.as_ref()))?;
+            .map_err(|err| err!(NuSaveError, err, nu_path.as_ref()))?;
     }
 
     Ok(())
@@ -360,29 +367,28 @@ pub fn read_nu<P: AsRef<Path>>(nu_path: P) -> TLCResult<Array2<f32>> {
     let mut rdr = ReaderBuilder::new()
         .has_headers(false)
         .from_path(nu_path.as_ref())
-        .map_err(|err| TLCError::nu_read_error(err, nu_path.as_ref()))?;
+        .map_err(|err| err!(NuReadError, err, nu_path.as_ref()))?;
     let width = rdr
         .records()
         .next()
-        .ok_or(TLCError::nu_read_error("Nu矩阵为空", nu_path.as_ref()))?
-        .map_err(|err| TLCError::nu_read_error(err, nu_path.as_ref()))?
+        .ok_or(err!(NuReadError, "Nu矩阵为空", nu_path.as_ref()))?
+        .map_err(|err| err!(NuReadError, err, nu_path.as_ref()))?
         .len();
     let height = rdr.records().count() + 1;
 
     let mut rdr = ReaderBuilder::new()
         .has_headers(false)
         .from_path(nu_path.as_ref())
-        .map_err(|err| TLCError::nu_read_error(err, nu_path.as_ref()))?;
+        .map_err(|err| err!(NuReadError, err, nu_path.as_ref()))?;
     let mut nu2d = Array2::zeros((height, width));
 
     for (csv_row_result, mut nu_row) in rdr.records().zip(nu2d.axis_iter_mut(Axis(0))) {
-        let csv_row =
-            csv_row_result.map_err(|err| TLCError::nu_read_error(err, nu_path.as_ref()))?;
+        let csv_row = csv_row_result.map_err(|err| err!(NuReadError, err, nu_path.as_ref()))?;
 
         for (csv_val, nu) in csv_row.iter().zip(nu_row.iter_mut()) {
             *nu = csv_val
                 .parse::<f32>()
-                .map_err(|err| TLCError::nu_read_error(err, nu_path.as_ref()))?;
+                .map_err(|err| err!(NuReadError, err, nu_path.as_ref()))?;
         }
     }
 
