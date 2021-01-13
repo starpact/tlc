@@ -182,35 +182,41 @@ pub fn read_video<P: AsRef<Path>>(
                 {
                     let tls_arc = tls.clone();
                     scp.spawn(move |_| {
-                        let tls_paras = tls_arc.get_or(|| {
-                            let decoder =
-                                ctx_mutex.lock().unwrap().clone().decoder().video().unwrap();
-                            let sws_ctx = Context::get(
-                                decoder.format(),
-                                decoder.width(),
-                                decoder.height(),
-                                Pixel::RGB24,
-                                decoder.width(),
-                                decoder.height(),
-                                Flags::FAST_BILINEAR,
-                            )
-                            .unwrap();
-                            (
-                                RefCell::new(decoder),
-                                RefCell::new(SendableContext(sws_ctx)),
-                                RefCell::new(Video::empty()),
-                                RefCell::new(Video::empty()),
-                            )
-                        });
+                        let tls_paras = if let Ok(tlc_paras) =
+                            tls_arc.get_or_try(|| -> Result<_, Box<dyn std::error::Error>> {
+                                let decoder = ctx_mutex.lock()?.clone().decoder().video()?;
+                                let sws_ctx = Context::get(
+                                    decoder.format(),
+                                    decoder.width(),
+                                    decoder.height(),
+                                    Pixel::RGB24,
+                                    decoder.width(),
+                                    decoder.height(),
+                                    Flags::FAST_BILINEAR,
+                                )?;
+                                Ok((
+                                    RefCell::new(decoder),
+                                    RefCell::new(SendableContext(sws_ctx)),
+                                    RefCell::new(Video::empty()),
+                                    RefCell::new(Video::empty()),
+                                ))
+                            }) {
+                            tlc_paras
+                        } else {
+                            return;
+                        };
 
                         let mut decoder = tls_paras.0.borrow_mut();
                         let mut ctx = tls_paras.1.borrow_mut();
                         let mut src_frame = tls_paras.2.borrow_mut();
                         let mut dst_frame = tls_paras.3.borrow_mut();
 
-                        decoder.send_packet(&packet).unwrap(); // most time-consuming function
-                        decoder.receive_frame(&mut src_frame).unwrap();
-                        ctx.run(&src_frame, &mut dst_frame).unwrap();
+                        if decoder.send_packet(&packet).is_err()
+                            || decoder.receive_frame(&mut src_frame).is_err()
+                            || ctx.run(&src_frame, &mut dst_frame).is_err()
+                        {
+                            return;
+                        }
 
                         // the data of each frame stores in one u8 array:
                         // ||r g b r g b...r g b|......|r g b r g b...r g b||

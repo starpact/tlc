@@ -48,11 +48,11 @@ pub type TLCResult<T> = Result<T, TLCError>;
 
 #[macro_export]
 macro_rules! err {
-    ($member:tt,$context:expr$(,)*) => {
+    ($member:tt, $context:expr $(,)?) => {
         $crate::error::TLCError::$member(format!("{:?}", $context))
     };
 
-    ($member:tt,$raw_err:expr,$context:expr$(,)*) => {
+    ($member:tt, $raw_err:expr, $context:expr $(,)?) => {
         $crate::error::TLCError::$member {
             raw_err: format!("{:?}", $raw_err),
             context: format!("{:?}", $context),
