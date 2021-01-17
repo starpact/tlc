@@ -4,9 +4,9 @@ use plotters::prelude::*;
 
 use ndarray::prelude::*;
 
-use super::super::err;
-use super::colormap::JET;
-use super::error::TLCResult;
+use crate::colormap::JET;
+use crate::err;
+use crate::error::TLCResult;
 
 pub fn cal_average<D: Dimension>(nus: ArrayView<f32, D>) -> (f32, f32) {
     let (sum, cnt) = nus.iter().fold((0., 0), |(s, cnt), &nu| {

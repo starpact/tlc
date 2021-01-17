@@ -1,5 +1,3 @@
-use std::fmt::Debug;
-
 use thiserror::Error;
 
 /// Rust的std::io::Error不会包含错误路径，需要自己封装
@@ -48,11 +46,11 @@ pub type TLCResult<T> = Result<T, TLCError>;
 
 #[macro_export]
 macro_rules! err {
-    ($member:tt, $context:expr $(,)?) => {
+    ($member:tt, $context:expr $(,)*) => {
         $crate::error::TLCError::$member(format!("{:?}", $context))
     };
 
-    ($member:tt, $raw_err:expr, $context:expr $(,)?) => {
+    ($member:tt, $raw_err:expr, $context:expr $(,)*) => {
         $crate::error::TLCError::$member {
             raw_err: format!("{:?}", $raw_err),
             context: format!("{:?}", $context),

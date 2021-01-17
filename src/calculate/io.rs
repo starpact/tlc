@@ -25,9 +25,9 @@ use calamine::{open_workbook, Reader, Xlsx};
 
 use csv::{ReaderBuilder, StringRecord, WriterBuilder};
 
-use super::super::err;
-use super::error::TLCResult;
-use super::preprocess::{FilterMethod, InterpMethod};
+use crate::err;
+use crate::error::TLCResult;
+use crate::preprocess::{FilterMethod, InterpMethod};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ConfigParas {
