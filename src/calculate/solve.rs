@@ -1,13 +1,16 @@
+use std::cell::{Ref, RefCell};
 use std::f32::{consts::PI, NAN};
 
 use libm::erfcf;
 
 use ndarray::prelude::*;
+
 use rayon::prelude::*;
+use thread_local::ThreadLocal;
 
 use packed_simd::{f32x8, Simd};
 
-const NUM_TO_CAL_T0: usize = 4;
+const FIRST_FEW_TO_CAL_T0: usize = 4;
 
 /// temporary fake SIMD wrapper of erfcf
 fn erfcf_simd(arr: Simd<[f32; 8]>) -> Simd<[f32; 8]> {
@@ -26,9 +29,9 @@ fn erfcf_simd(arr: Simd<[f32; 8]>) -> Simd<[f32; 8]> {
 }
 
 /// struct that stores necessary information for solving the equation
-struct PointData {
+struct PointData<'a> {
     peak_frame: usize,
-    temps: Vec<f32>,
+    temps: Ref<'a, Vec<f32>>,
     peak_temp: f32,
     dt: f32,
     h0: f32,
@@ -37,7 +40,7 @@ struct PointData {
     solid_thermal_diffusivity: f32,
 }
 
-impl PointData {
+impl PointData<'_> {
     /// semi-infinite plate heat transfer equation of each pixel(simd)
     /// ### Return:
     /// equation and its derivative
@@ -50,7 +53,7 @@ impl PointData {
             self.peak_temp,
             self.peak_frame,
         );
-        let t0 = temps[..NUM_TO_CAL_T0].iter().sum::<f32>() / NUM_TO_CAL_T0 as f32;
+        let t0 = temps[..FIRST_FEW_TO_CAL_T0].iter().sum::<f32>() / FIRST_FEW_TO_CAL_T0 as f32;
         let (mut sum, mut diff_sum) = (f32x8::splat(0.), f32x8::splat(0.));
 
         let mut i = 1;
@@ -153,7 +156,8 @@ impl PointData {
 
 pub fn solve(
     peak_frames: &Vec<usize>,
-    interp_fn: Box<dyn Fn(usize, usize) -> Vec<f32> + Send + Sync + '_>,
+    interp_fn: Box<dyn Fn(&RefCell<Vec<f32>>, usize, usize) + Send + Sync + '_>,
+    frame_num: usize,
     solid_thermal_conductivity: f32,
     solid_thermal_diffusivity: f32,
     characteristic_length: f32,
@@ -165,16 +169,23 @@ pub fn solve(
 ) -> Array1<f32> {
     let mut nus = Vec::with_capacity(peak_frames.len());
 
+    let tls = ThreadLocal::new();
+
     peak_frames
         .par_iter()
         .enumerate()
         .map(|(pos, &peak_frame)| {
-            if peak_frame < NUM_TO_CAL_T0 {
+            if peak_frame < FIRST_FEW_TO_CAL_T0 {
                 return NAN;
             }
+            let temps = tls.get_or(|| {
+                let v = vec![0.; frame_num];
+                RefCell::new(v)
+            });
+            interp_fn(temps, pos, peak_frame);
             let point_data = PointData {
                 peak_frame,
-                temps: interp_fn(pos, peak_frame),
+                temps: temps.borrow(),
                 peak_temp,
                 dt,
                 h0,

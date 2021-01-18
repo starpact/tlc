@@ -77,6 +77,7 @@ pub fn cal<P: AsRef<Path>>(config_path: P) -> TLCResult<f32> {
     let nus = solve::solve(
         &peak_frames,
         interp_fn,
+        frame_num,
         solid_thermal_conductivity,
         solid_thermal_diffusivity,
         characteristic_length,
