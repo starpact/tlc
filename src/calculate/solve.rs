@@ -3,9 +3,11 @@ use std::f32::{consts::PI, NAN};
 use libm::erfcf;
 
 use ndarray::prelude::*;
-use ndarray::Zip;
+use rayon::prelude::*;
 
 use packed_simd::{f32x8, Simd};
+
+const NUM_TO_CAL_T0: usize = 4;
 
 /// temporary fake SIMD wrapper of erfcf
 fn erfcf_simd(arr: Simd<[f32; 8]>) -> Simd<[f32; 8]> {
@@ -24,9 +26,9 @@ fn erfcf_simd(arr: Simd<[f32; 8]>) -> Simd<[f32; 8]> {
 }
 
 /// struct that stores necessary information for solving the equation
-struct PointData<'a> {
+struct PointData {
     peak_frame: usize,
-    temps: ArrayView1<'a, f32>,
+    temps: Vec<f32>,
     peak_temp: f32,
     dt: f32,
     h0: f32,
@@ -35,7 +37,7 @@ struct PointData<'a> {
     solid_thermal_diffusivity: f32,
 }
 
-impl PointData<'_> {
+impl PointData {
     /// semi-infinite plate heat transfer equation of each pixel(simd)
     /// ### Return:
     /// equation and its derivative
@@ -44,11 +46,11 @@ impl PointData<'_> {
             self.solid_thermal_conductivity,
             self.solid_thermal_diffusivity,
             self.dt,
-            self.temps.as_slice_memory_order().unwrap(),
+            &self.temps,
             self.peak_temp,
             self.peak_frame,
         );
-        let t0 = temps[..4].iter().sum::<f32>() / 4.;
+        let t0 = temps[..NUM_TO_CAL_T0].iter().sum::<f32>() / NUM_TO_CAL_T0 as f32;
         let (mut sum, mut diff_sum) = (f32x8::splat(0.), f32x8::splat(0.));
 
         let mut i = 1;
@@ -150,9 +152,8 @@ impl PointData<'_> {
 }
 
 pub fn solve(
-    peak_frames: ArrayView1<usize>,
-    interp_temps: ArrayView2<f32>,
-    query_index: ArrayView1<usize>,
+    peak_frames: &Vec<usize>,
+    interp_fn: Box<dyn Fn(usize, usize) -> Vec<f32> + Send + Sync + '_>,
     solid_thermal_conductivity: f32,
     solid_thermal_diffusivity: f32,
     characteristic_length: f32,
@@ -162,15 +163,18 @@ pub fn solve(
     h0: f32,
     max_iter_num: usize,
 ) -> Array1<f32> {
-    let mut nus = Array1::zeros(query_index.len());
+    let mut nus = Vec::with_capacity(peak_frames.len());
 
-    Zip::from(&mut nus)
-        .and(query_index)
-        .and(peak_frames)
-        .par_apply(|nu, &index, &peak_frame| {
+    peak_frames
+        .par_iter()
+        .enumerate()
+        .map(|(pos, &peak_frame)| {
+            if peak_frame < NUM_TO_CAL_T0 {
+                return NAN;
+            }
             let point_data = PointData {
                 peak_frame,
-                temps: interp_temps.row(index),
+                temps: interp_fn(pos, peak_frame),
                 peak_temp,
                 dt,
                 h0,
@@ -178,8 +182,9 @@ pub fn solve(
                 solid_thermal_conductivity,
                 solid_thermal_diffusivity,
             };
-            *nu = point_data.newton_tangent() * characteristic_length / air_thermal_conductivity;
-        });
+            point_data.newton_tangent() * characteristic_length / air_thermal_conductivity
+        })
+        .collect_into_vec(&mut nus);
 
-    nus
+    Array1::from(nus)
 }

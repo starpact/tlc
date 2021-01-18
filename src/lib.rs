@@ -61,25 +61,22 @@ pub fn cal<P: AsRef<Path>>(config_path: P) -> TLCResult<f32> {
 
     println!("detect peak...");
     let peak_frames = preprocess::detect_peak(g2d.view());
+    drop(g2d);
     let t4 = Instant::now();
     println!("{:?}", t4.duration_since(t3));
 
-    println!("interpolate...");
-    let (interp_temps, query_index) = preprocess::interp(
+    let interp_fn = preprocess::interp(
         t2d.view(),
-        &thermocouple_pos,
         interp_method,
+        &thermocouple_pos,
         top_left_pos,
         region_shape,
     );
-    let t5 = Instant::now();
-    println!("{:?}", t5.duration_since(t4));
 
     println!("start solving...");
     let nus = solve::solve(
-        peak_frames.view(),
-        interp_temps.view(),
-        query_index.view(),
+        &peak_frames,
+        interp_fn,
         solid_thermal_conductivity,
         solid_thermal_diffusivity,
         characteristic_length,
@@ -89,9 +86,9 @@ pub fn cal<P: AsRef<Path>>(config_path: P) -> TLCResult<f32> {
         h0,
         max_iter_num,
     );
-    let t6 = Instant::now();
-    println!("{:?}", t6.duration_since(t5));
-    println!("\ntotal time cost: {:?}\n", t6.duration_since(t0));
+    let t5 = Instant::now();
+    println!("{:?}", t5.duration_since(t4));
+    println!("\ntotal time cost: {:?}\n", t5.duration_since(t0));
 
     let (nu_nan_mean, nan_ratio) = postprocess::cal_average(nus.view());
     println!("overall average Nu: {}", nu_nan_mean);

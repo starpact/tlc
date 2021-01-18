@@ -268,15 +268,15 @@ fn read_temp_from_lvm<P: AsRef<Path>>(
         .from_path(daq_path.as_ref())
         .map_err(|err| err!(DAQIOError, err, daq_path.as_ref()))?;
 
-    let mut t2d = Array2::zeros((frame_num, columns.len()));
-    for (csv_row_result, mut temp_row) in rdr
+    let mut t2d = Array2::zeros((columns.len(), frame_num));
+    for (csv_row_result, mut temp_col) in rdr
         .records()
         .skip(start_line)
         .take(frame_num)
-        .zip(t2d.axis_iter_mut(Axis(0)))
+        .zip(t2d.axis_iter_mut(Axis(1)))
     {
         let csv_row = csv_row_result.map_err(|err| err!(DAQIOError, err, daq_path.as_ref()))?;
-        for (&index, t) in columns.iter().zip(temp_row.iter_mut()) {
+        for (&index, t) in columns.iter().zip(temp_col.iter_mut()) {
             *t = csv_row[index].parse::<f32>().map_err(|err| {
                 err!(
                     DAQError,
@@ -301,14 +301,14 @@ fn read_temp_from_excel<P: AsRef<Path>>(
         .ok_or(err!(DAQError, "找不到worksheet", daq_path.as_ref()))?
         .map_err(|err| err!(DAQIOError, err, daq_path.as_ref()))?;
 
-    let mut t2d = Array2::zeros((frame_num, columns.len()));
-    for (excel_row, mut temp_row) in sheet
+    let mut t2d = Array2::zeros((columns.len(), frame_num));
+    for (excel_row, mut temp_col) in sheet
         .rows()
         .skip(start_line)
         .take(frame_num)
-        .zip(t2d.axis_iter_mut(Axis(0)))
+        .zip(t2d.axis_iter_mut(Axis(1)))
     {
-        for (&index, t) in columns.iter().zip(temp_row.iter_mut()) {
+        for (&index, t) in columns.iter().zip(temp_col.iter_mut()) {
             *t = excel_row[index].get_float().ok_or(err!(
                 DAQError,
                 "数据采集文件中不应当有数字以外的格式",

@@ -1,9 +1,11 @@
 use median::Filter;
-use nalgebra::DVector;
+
 use ndarray::parallel::prelude::*;
 use ndarray::prelude::*;
-use rbf_interp::{Basis, Scatter};
+
 use serde::{Deserialize, Serialize};
+
+use packed_simd::f32x8;
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 pub enum FilterMethod {
@@ -27,7 +29,7 @@ pub fn filtering(mut g2d: ArrayViewMut2<u8>, filter_method: FilterMethod) {
 }
 
 /// traverse along the timeline to detect the peak of green values and record that frame index
-pub fn detect_peak(g2d: ArrayView2<u8>) -> Array1<usize> {
+pub fn detect_peak(g2d: ArrayView2<u8>) -> Vec<usize> {
     let mut peak_frames = Vec::with_capacity(g2d.ncols());
 
     g2d.axis_iter(Axis(1))
@@ -50,121 +52,79 @@ pub fn detect_peak(g2d: ArrayView2<u8>) -> Array1<usize> {
         })
         .collect_into_vec(&mut peak_frames);
 
-    Array1::from(peak_frames)
+    peak_frames
 }
 
 #[derive(Debug, Serialize, Deserialize, Copy, Clone)]
 pub enum InterpMethod {
     Horizontal,
     Vertical,
-    Scatter,
+    Bilinear,
 }
 
 /// interpolation of temperature matrix
-pub fn interp(
-    t2d: ArrayView2<f32>,
-    tc_pos: &Vec<(i32, i32)>,
+pub fn interp<'a>(
+    t2d: ArrayView2<'a, f32>,
     interp_method: InterpMethod,
-    top_left_pos: (usize, usize),
+    tc_pos: &'a [(i32, i32)],
+    tl_pos: (usize, usize),
     region_shape: (usize, usize),
-) -> (Array2<f32>, Array1<usize>) {
+) -> Box<dyn Fn(usize, usize) -> Vec<f32> + Send + Sync + 'a> {
     match interp_method {
         InterpMethod::Horizontal | InterpMethod::Vertical => {
-            interp_1d(t2d, tc_pos, top_left_pos, interp_method, region_shape)
+            interp1d(t2d, interp_method, region_shape.1, tc_pos, tl_pos)
         }
-        InterpMethod::Scatter => interp_scatter(t2d, tc_pos, top_left_pos, region_shape),
+        InterpMethod::Bilinear => unimplemented!(),
     }
 }
 
-/// one dimension interpolation, along axis X or Y
-fn interp_1d(
-    t2d: ArrayView2<f32>,
-    thermocouple_pos: &Vec<(i32, i32)>,
-    top_left_pos: (usize, usize),
+fn interp1d<'a>(
+    t2d: ArrayView2<'a, f32>,
     interp_method: InterpMethod,
-    region_shape: (usize, usize),
-) -> (Array2<f32>, Array1<usize>) {
-    let (cal_h, cal_w) = region_shape;
+    cal_w: usize,
+    tc_pos: &'a [(i32, i32)],
+    tl_pos: (usize, usize),
+) -> Box<dyn Fn(usize, usize) -> Vec<f32> + Send + Sync + 'a> {
+    Box::new(move |pos, peak_frame| {
+        let (tc_pos, pos): (Vec<_>, _) = match interp_method {
+            InterpMethod::Horizontal => (
+                tc_pos.iter().map(|(_, x)| x - tl_pos.1 as i32).collect(),
+                (pos % cal_w) as i32,
+            ),
+            InterpMethod::Vertical => (
+                tc_pos.iter().map(|(y, _)| y - tl_pos.0 as i32).collect(),
+                (pos / cal_w) as i32,
+            ),
+            _ => unreachable!(),
+        };
 
-    let (len_of_interp_dimension, tc_pos_relative, query_index) = match interp_method {
-        InterpMethod::Horizontal => (
-            cal_w,
-            thermocouple_pos
-                .iter()
-                .map(|tc_pos_raw| tc_pos_raw.1 - top_left_pos.1 as i32)
-                .collect::<Vec<_>>(),
-            (0..cal_w).cycle().take(cal_h * cal_w).collect(),
-        ),
-        _ => (
-            cal_h,
-            thermocouple_pos
-                .iter()
-                .map(|tc_pos_raw| tc_pos_raw.0 - top_left_pos.0 as i32)
-                .collect::<Vec<_>>(),
-            (0..cal_h * cal_w).map(|x| x / cal_w).collect(),
-        ),
-    };
-
-    let mut interp_temps = Array2::zeros((len_of_interp_dimension, t2d.nrows()));
-
-    interp_temps
-        .axis_iter_mut(Axis(1))
-        .into_par_iter()
-        .zip(t2d.axis_iter(Axis(0)).into_par_iter())
-        .for_each(|(mut col, row_tc)| {
-            let mut iter = col.iter_mut();
-            let mut curr = 0;
-            for pos in 0..len_of_interp_dimension as i32 {
-                let (left_end, right_end) = (tc_pos_relative[curr], tc_pos_relative[curr + 1]);
-                if let Some(t) = iter.next() {
-                    *t = (row_tc[curr] * (right_end - pos) as f32
-                        + row_tc[curr + 1] * (pos - left_end) as f32)
-                        / (right_end - left_end) as f32;
-                }
-                if pos == right_end && curr + 2 < tc_pos_relative.len() {
-                    curr += 1;
-                }
-            }
-        });
-
-    (interp_temps, query_index)
-}
-
-/// scattered interpolation, using rbf
-fn interp_scatter(
-    t2d: ArrayView2<f32>,
-    thermocouple_pos: &Vec<(i32, i32)>,
-    upper_left_pos: (usize, usize),
-    region_shape: (usize, usize),
-) -> (Array2<f32>, Array1<usize>) {
-    let (cal_h, cal_w) = region_shape;
-    let pix_num = cal_h * cal_w;
-    let query_index: Array1<usize> = (0..pix_num).collect();
-
-    let datum_locs = thermocouple_pos
-        .iter()
-        .map(|(y, x)| {
-            DVector::from_vec(vec![
-                *y as f64 - upper_left_pos.0 as f64,
-                *x as f64 - upper_left_pos.1 as f64,
-            ])
-        })
-        .collect::<Vec<_>>();
-
-    let mut interp_temps = Array2::zeros((t2d.nrows(), pix_num));
-    par_azip!((row_tc in t2d.axis_iter(Axis(0)), mut row in interp_temps.axis_iter_mut(Axis(0))) {
-        let datum_temps = row_tc.iter().map(|temp| DVector::from_vec(vec![*temp as f64])).collect::<Vec<_>>();
-        let scatter = Scatter::create(datum_locs.clone(), datum_temps, Basis::PolyHarmonic(2) , 2);
-
-        let mut iter = row.iter_mut();
-        for y in 0..cal_h {
-            for x in 0..cal_w {
-                if let Some(t) = iter.next() {
-                    *t = scatter.eval(DVector::from_vec(vec![y as f64, x as f64]))[0] as f32;
-                }
-            }
+        let mut l_index = 0;
+        while pos > tc_pos[l_index + 1] && l_index < tc_pos.len() - 2 {
+            l_index += 1;
         }
-    });
+        let r_index = l_index + 1;
+        let (l, r) = (tc_pos[l_index], tc_pos[r_index]);
+        let (l_temps, r_temps) = (t2d.row(l_index), t2d.row(r_index));
+        let l_temps = l_temps.as_slice_memory_order().unwrap();
+        let r_temps = r_temps.as_slice_memory_order().unwrap();
 
-    (interp_temps, query_index)
+        let mut temps = Vec::with_capacity(peak_frame);
+        unsafe { temps.set_len(peak_frame) };
+
+        let mut frame = 0;
+        while frame + f32x8::lanes() < peak_frame {
+            let l_val = unsafe { f32x8::from_slice_unaligned_unchecked(&l_temps[frame..]) };
+            let r_val = unsafe { f32x8::from_slice_unaligned_unchecked(&r_temps[frame..]) };
+            let vec8 = (l_val * (r - pos) as f32 + r_val * (pos - l) as f32) / (r - l) as f32;
+            unsafe { vec8.write_to_slice_unaligned_unchecked(&mut temps[frame..]) };
+            frame += f32x8::lanes();
+        }
+        while frame < peak_frame {
+            let (l_val, r_val) = (l_temps[frame], r_temps[frame]);
+            temps[frame] = (l_val * (r - pos) as f32 + r_val * (pos - l) as f32) / (r - l) as f32;
+            frame += 1;
+        }
+
+        temps
+    })
 }
