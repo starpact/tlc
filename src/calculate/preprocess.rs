@@ -122,7 +122,10 @@ fn interp1d<'a>(
         }
         while frame < peak_frame {
             let (l_val, r_val) = (l_temps[frame], r_temps[frame]);
-            temps[frame] = (l_val * (r - pos) as f32 + r_val * (pos - l) as f32) / (r - l) as f32;
+            unsafe {
+                *temps.get_unchecked_mut(frame) =
+                    (l_val * (r - pos) as f32 + r_val * (pos - l) as f32) / (r - l) as f32;
+            }
             frame += 1;
         }
     })
