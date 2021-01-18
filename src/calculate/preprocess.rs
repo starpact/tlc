@@ -1,5 +1,3 @@
-use std::cell::RefCell;
-
 use median::Filter;
 
 use ndarray::parallel::prelude::*;
@@ -71,7 +69,7 @@ pub fn interp<'a>(
     tc_pos: &'a [(i32, i32)],
     tl_pos: (usize, usize),
     region_shape: (usize, usize),
-) -> Box<dyn Fn(&RefCell<Vec<f32>>, usize, usize) + Send + Sync + 'a> {
+) -> Box<dyn Fn(&Vec<f32>, usize, usize) + Send + Sync + 'a> {
     match interp_method {
         InterpMethod::Horizontal | InterpMethod::Vertical => {
             interp1d(t2d, interp_method, region_shape.1, tc_pos, tl_pos)
@@ -86,7 +84,7 @@ fn interp1d<'a>(
     cal_w: usize,
     tc_pos: &'a [(i32, i32)],
     tl_pos: (usize, usize),
-) -> Box<dyn Fn(&RefCell<Vec<f32>>, usize, usize) + Send + Sync + 'a> {
+) -> Box<dyn Fn(&Vec<f32>, usize, usize) + Send + Sync + 'a> {
     Box::new(move |temps, pos, peak_frame| {
         let (tc_pos, pos): (Vec<_>, _) = match interp_method {
             InterpMethod::Horizontal => (
@@ -110,7 +108,9 @@ fn interp1d<'a>(
         let l_temps = l_temps.as_slice_memory_order().unwrap();
         let r_temps = r_temps.as_slice_memory_order().unwrap();
 
-        let mut temps = temps.borrow_mut();
+        let ptr = temps.as_ptr() as *mut f32;
+        let temps = unsafe { Vec::from_raw_parts(ptr, peak_frame, t2d.ncols()) };
+        let mut temps = std::mem::ManuallyDrop::new(temps);
 
         let mut frame = 0;
         while frame + f32x8::lanes() < peak_frame {

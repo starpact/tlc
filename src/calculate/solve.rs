@@ -1,4 +1,3 @@
-use std::cell::{Ref, RefCell};
 use std::f32::{consts::PI, NAN};
 
 use libm::erfcf;
@@ -31,7 +30,7 @@ fn erfcf_simd(arr: Simd<[f32; 8]>) -> Simd<[f32; 8]> {
 /// struct that stores necessary information for solving the equation
 struct PointData<'a> {
     peak_frame: usize,
-    temps: Ref<'a, Vec<f32>>,
+    temps: &'a Vec<f32>,
     peak_temp: f32,
     dt: f32,
     h0: f32,
@@ -156,7 +155,7 @@ impl PointData<'_> {
 
 pub fn solve(
     peak_frames: &Vec<usize>,
-    interp_fn: Box<dyn Fn(&RefCell<Vec<f32>>, usize, usize) + Send + Sync + '_>,
+    interp_fn: Box<dyn Fn(&Vec<f32>, usize, usize) + Send + Sync + '_>,
     frame_num: usize,
     solid_thermal_conductivity: f32,
     solid_thermal_diffusivity: f32,
@@ -178,14 +177,11 @@ pub fn solve(
             if peak_frame < FIRST_FEW_TO_CAL_T0 {
                 return NAN;
             }
-            let temps = tls.get_or(|| {
-                let v = vec![0.; frame_num];
-                RefCell::new(v)
-            });
+            let temps = tls.get_or(|| vec![0.; frame_num]);
             interp_fn(temps, pos, peak_frame);
             let point_data = PointData {
                 peak_frame,
-                temps: temps.borrow(),
+                temps,
                 peak_temp,
                 dt,
                 h0,
