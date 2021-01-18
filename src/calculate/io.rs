@@ -218,7 +218,7 @@ pub fn read_video<P: AsRef<Path>>(
                             return;
                         }
 
-                        // the data of each frame stores in one u8 array:
+                        // the data of each frame store in one u8 array:
                         // ||r g b r g b...r g b|......|r g b r g b...r g b||
                         // ||.......row_0.......|......|.......row_n.......||
                         let rgb = dst_frame.data(0);
