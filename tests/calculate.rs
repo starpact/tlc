@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 #[cfg(test)]
 mod calculate {
     use std::time::Instant;
@@ -7,7 +8,7 @@ mod calculate {
 
     use tlc::calculate::*;
 
-    const CONFIG_PATH: &str = "./config/config.json";
+    const CONFIG_PATH: &str = "./tmp/config/config.json";
 
     static CONFIG_PARAS: Lazy<io::ConfigParas> =
         Lazy::new(|| io::read_config(CONFIG_PATH).unwrap());
@@ -80,10 +81,10 @@ mod calculate {
         let g2d = example_g2d();
 
         let t0 = Instant::now();
-        let peak = preprocess::detect_peak(g2d.view());
+        let peak = preprocess::detect_peak(g2d.view()).unwrap();
         println!("{:?}", Instant::now().duration_since(t0));
 
-        println!("{}", peak.slice(s![180000..180100]));
+        println!("{:?}", &peak[180000..180100]);
     }
 
     #[test]
@@ -91,71 +92,36 @@ mod calculate {
         let t2d = example_t2d();
 
         let t0 = Instant::now();
-        let interp_x_t2d = preprocess::interp(
+        let interp = preprocess::interp(
             t2d.view(),
-            *THERMOCOUPLE_POS,
             *INTERP_METHOD,
+            *THERMOCOUPLE_POS,
             *TOP_LEFT_POS,
             *REGION_SHAPE,
         )
-        .0;
+        .unwrap();
+        let pix_num = (*REGION_SHAPE).0 * (*REGION_SHAPE).1;
+        for i in 0..pix_num {
+            let _ = interp.interp_single_point(i);
+        }
         println!("{:?}", Instant::now().duration_since(t0));
-        postprocess::simple_plot(interp_x_t2d.row(1000)).unwrap();
+        postprocess::plot_line(interp.interp_single_point(1000)).unwrap();
     }
-
     #[test]
-    fn test_solve() {
-        let t0 = Instant::now();
+    fn test_bilinear() {
+        let t2d = array![[1.], [2.], [3.], [4.], [5.], [6.]];
+        println!("{:?}", t2d.shape());
+        let interp_method = preprocess::InterpMethod::BilinearExtra((2, 3));
+        let region_shape = (14, 14);
+        let tc_pos = &[(10, 10), (10, 15), (10, 20), (20, 10), (20, 15), (20, 20)];
+        let tl_pos = (8, 8);
 
-        println!("read video...");
-        let mut g2d = example_g2d();
-        let dt = 1. / *FRAME_RATE as f32;
+        let interp =
+            preprocess::interp(t2d.view(), interp_method, tc_pos, tl_pos, region_shape).unwrap();
 
-        println!("read excel...");
-        let t2d = example_t2d();
+        let res = interp.interp_single_frame(0).unwrap();
 
-        println!("filtering");
-        preprocess::filtering(g2d.view_mut(), *FILTER_METHOD);
-
-        println!("detect peak...");
-        let peak_frames = preprocess::detect_peak(g2d.view());
-
-        println!("interpolate...");
-        let (interp_temps, query_index) = preprocess::interp(
-            t2d.view(),
-            *THERMOCOUPLE_POS,
-            *INTERP_METHOD,
-            *TOP_LEFT_POS,
-            *REGION_SHAPE,
-        );
-
-        println!("start calculating...");
-        let nus = solve::solve(
-            peak_frames.view(),
-            interp_temps.view(),
-            query_index.view(),
-            *SOLID_THERMAL_CONDUCTIVITY,
-            *SOLID_THERMAL_DIFFUSIVITY,
-            *CHARACTERISTIC_LENGTH,
-            *AIR_THERMAL_CONDUCTIVITY,
-            dt,
-            *PEAK_TEMP,
-            *H0,
-            *MAX_ITER_NUM,
-        );
-
-        println!(
-            "\ntotal time cost: {:?}\n",
-            Instant::now().duration_since(t0)
-        );
-        let (valid_count, valid_sum) = nus.iter().fold((0, 0.), |(count, sum), &nu| {
-            if nu.is_finite() {
-                (count + 1, sum + nu)
-            } else {
-                (count, sum)
-            }
-        });
-        println!("overall average Nu: {}", valid_sum / valid_count as f32);
+        println!("{:#?}", res);
     }
 
     use plotters::prelude::*;
@@ -211,6 +177,7 @@ mod calculate {
             plot_path.set_file_name(file_stem);
             cnt += 1;
         }
-        postprocess::plot_nu(nu2d.view(), nu_nan_mean * 0.6, nu_nan_mean * 2., plot_path).unwrap();
+        postprocess::plot_area(nu2d.view(), nu_nan_mean * 0.6, nu_nan_mean * 2., plot_path)
+            .unwrap();
     }
 }

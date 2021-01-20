@@ -3,8 +3,6 @@ pub mod calculate;
 use std::path::Path;
 use std::time::Instant;
 
-use ndarray::prelude::*;
-
 use calculate::*;
 use error::TLCResult;
 use io::{read_config, ConfigParas};
@@ -33,12 +31,12 @@ pub fn cal<P: AsRef<Path>>(config_path: P) -> TLCResult<f32> {
         max_iter_num,
     } = read_config(config_path)?;
 
+    println!("region shape: {:?}", region_shape);
+
     let (frame_num, frame_rate, total_frames, total_rows) =
         io::get_metadata(&video_path, &daq_path, start_frame, start_row)?;
-    println!(
-        "frame_num: {}\nframe_rate: {}\ntotal_frames: {}\ttotal_rows: {}",
-        frame_num, frame_rate, total_frames, total_rows
-    );
+    println!("total frames: {}\ntotal rows: {}", total_frames, total_rows);
+    println!("frame rate: {}\nframe number: {}", frame_rate, frame_num);
 
     println!("read video...");
     let video_record = (start_frame, frame_num, &video_path);
@@ -60,24 +58,30 @@ pub fn cal<P: AsRef<Path>>(config_path: P) -> TLCResult<f32> {
     println!("{:?}", t3.duration_since(t2));
 
     println!("detect peak...");
-    let peak_frames = preprocess::detect_peak(g2d.view());
+    let peak_frames = preprocess::detect_peak(g2d.view())?;
     drop(g2d);
     let t4 = Instant::now();
     println!("{:?}", t4.duration_since(t3));
 
-    let interp_fn = preprocess::interp(
+    println!("interp...");
+    let interp = preprocess::interp(
         t2d.view(),
         interp_method,
         &thermocouple_pos,
         top_left_pos,
         region_shape,
-    );
+    )?;
+    let t5 = Instant::now();
+    println!("{:?}", t5.duration_since(t4));
+
+    let single_frame_temps = interp.interp_single_frame(1000)?;
+    postprocess::plot_area(single_frame_temps.view(), 35., 50., "./tmp/plot/temps.png")?;
+    // io::save_nu(single_frame_temps.view(), "./tmp/result/temps.csv")?;
 
     println!("start solving...");
     let nus = solve::solve(
         &peak_frames,
-        interp_fn,
-        frame_num,
+        &interp,
         solid_thermal_conductivity,
         solid_thermal_diffusivity,
         characteristic_length,
@@ -86,10 +90,10 @@ pub fn cal<P: AsRef<Path>>(config_path: P) -> TLCResult<f32> {
         peak_temp,
         h0,
         max_iter_num,
-    );
-    let t5 = Instant::now();
-    println!("{:?}", t5.duration_since(t4));
-    println!("\ntotal time cost: {:?}\n", t5.duration_since(t0));
+    )?;
+    let t6 = Instant::now();
+    println!("{:?}", t6.duration_since(t5));
+    println!("\ntotal time cost: {:?}\n", t6.duration_since(t0));
 
     let (nu_nan_mean, nan_ratio) = postprocess::cal_average(nus.view());
     println!("overall average Nu: {}", nu_nan_mean);
@@ -97,12 +101,11 @@ pub fn cal<P: AsRef<Path>>(config_path: P) -> TLCResult<f32> {
 
     println!("saving...");
     let (nu_path, plot_path) = io::get_save_path(&video_path, &save_dir)?;
-    let mut nu2d = nus
+    let nu2d = nus
         .into_shape(region_shape)
         .map_err(|err| err!(UnKnown, err))?;
-    nu2d.invert_axis(Axis(0));
 
-    postprocess::plot_nu(nu2d.view(), nu_nan_mean * 0.6, nu_nan_mean * 2., plot_path)?;
+    postprocess::plot_area(nu2d.view(), nu_nan_mean * 0.6, nu_nan_mean * 2., plot_path)?;
 
     io::save_nu(nu2d.view(), nu_path)?;
 

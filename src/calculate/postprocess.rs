@@ -23,7 +23,7 @@ pub fn cal_average<D: Dimension>(nus: ArrayView<f32, D>) -> (f32, f32) {
     (nan_mean, nan_ratio)
 }
 
-pub fn plot_nu<P: AsRef<Path>>(
+pub fn plot_area<P: AsRef<Path>>(
     nu2d: ArrayView2<f32>,
     vmin: f32,
     vmax: f32,
@@ -46,7 +46,7 @@ pub fn plot_nu<P: AsRef<Path>>(
     let delta = vmax - vmin;
 
     let mut it = nu2d.iter();
-    for y in 0..height {
+    for y in (0..height).rev() {
         for x in 0..width {
             if let Some(nu) = it.next() {
                 if nu.is_nan() {
@@ -64,11 +64,11 @@ pub fn plot_nu<P: AsRef<Path>>(
     Ok(())
 }
 
-pub fn simple_plot(arr: ArrayView1<f32>) -> TLCResult<()> {
+pub fn plot_line(arr: ArrayView1<f32>) -> TLCResult<()> {
     let len = arr.len();
     let x0 = *arr.first().ok_or(err!(PlotError, "empty data"))?;
-    let min = arr.into_iter().fold(x0, |m, &x| if x < m { x } else { m });
-    let max = arr.into_iter().fold(x0, |m, &x| if x > m { x } else { m });
+    let min = arr.iter().fold(x0, |m, &x| if x < m { x } else { m });
+    let max = arr.iter().fold(x0, |m, &x| if x > m { x } else { m });
     let delta = max - min;
 
     let root = BitMapBackend::new("plotters/simple_plot.png", (640, 480)).into_drawing_area();

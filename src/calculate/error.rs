@@ -46,6 +46,10 @@ pub type TLCResult<T> = Result<T, TLCError>;
 
 #[macro_export]
 macro_rules! err {
+    () => {
+        $crate::error::TLCError::UnKnown("".to_owned())
+    };
+    
     ($member:tt, $context:expr $(,)*) => {
         $crate::error::TLCError::$member(format!("{:?}", $context))
     };

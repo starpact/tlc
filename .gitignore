@@ -1,7 +1,4 @@
 /target
-/resource
-/output
+/tmp
 /.idea
-/.vscode
-/plotters
 /.VSCodeCounter

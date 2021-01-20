@@ -1,4 +1,3 @@
-use std::cell::{Ref, RefCell};
 use std::f32::{consts::PI, NAN};
 
 use libm::erfcf;
@@ -6,9 +5,12 @@ use libm::erfcf;
 use ndarray::prelude::*;
 
 use rayon::prelude::*;
-use thread_local::ThreadLocal;
 
 use packed_simd::{f32x8, Simd};
+
+use crate::err;
+
+use super::{error::TLCResult, preprocess::Interp};
 
 const FIRST_FEW_TO_CAL_T0: usize = 4;
 
@@ -31,7 +33,7 @@ fn erfcf_simd(arr: Simd<[f32; 8]>) -> Simd<[f32; 8]> {
 /// struct that stores necessary information for solving the equation
 struct PointData<'a> {
     peak_frame: usize,
-    temps: Ref<'a, Vec<f32>>,
+    temps: &'a [f32],
     peak_temp: f32,
     dt: f32,
     h0: f32,
@@ -49,7 +51,7 @@ impl PointData<'_> {
             self.solid_thermal_conductivity,
             self.solid_thermal_diffusivity,
             self.dt,
-            &self.temps,
+            self.temps,
             self.peak_temp,
             self.peak_frame,
         );
@@ -154,10 +156,9 @@ impl PointData<'_> {
     }
 }
 
-pub fn solve(
-    peak_frames: &Vec<usize>,
-    interp_fn: Box<dyn Fn(&RefCell<Vec<f32>>, usize, usize) + Send + Sync + '_>,
-    frame_num: usize,
+pub fn solve<'a>(
+    peak_frames: &[usize],
+    interp: &Interp,
     solid_thermal_conductivity: f32,
     solid_thermal_diffusivity: f32,
     characteristic_length: f32,
@@ -166,34 +167,35 @@ pub fn solve(
     peak_temp: f32,
     h0: f32,
     max_iter_num: usize,
-) -> Array1<f32> {
+) -> TLCResult<Array1<f32>> {
     let mut nus = Vec::with_capacity(peak_frames.len());
-
-    let tls = ThreadLocal::new();
+    unsafe { nus.set_len(peak_frames.len()) };
 
     peak_frames
-        .par_iter()
+        .into_par_iter()
         .enumerate()
-        .map(|(pos, &peak_frame)| {
-            if peak_frame < FIRST_FEW_TO_CAL_T0 {
-                return NAN;
-            }
-            let temps = tls.get_or(|| RefCell::new(vec![0.; frame_num]));
-            interp_fn(temps, pos, peak_frame);
-            let temps = temps.borrow();
-            let point_data = PointData {
-                peak_frame,
-                temps,
-                peak_temp,
-                dt,
-                h0,
-                max_iter_num,
-                solid_thermal_conductivity,
-                solid_thermal_diffusivity,
+        .zip(nus.par_iter_mut())
+        .try_for_each(|((pos, &peak_frame), nu)| -> TLCResult<()> {
+            *nu = if peak_frame > FIRST_FEW_TO_CAL_T0 {
+                let temps = interp.interp_single_point(pos);
+                let temps = temps.as_slice_memory_order().ok_or(err!())?;
+                let point_data = PointData {
+                    peak_frame,
+                    temps,
+                    peak_temp,
+                    dt,
+                    h0,
+                    max_iter_num,
+                    solid_thermal_conductivity,
+                    solid_thermal_diffusivity,
+                };
+                point_data.newton_tangent() * characteristic_length / air_thermal_conductivity
+            } else {
+                NAN
             };
-            point_data.newton_tangent() * characteristic_length / air_thermal_conductivity
-        })
-        .collect_into_vec(&mut nus);
 
-    Array1::from(nus)
+            Ok(())
+        })?;
+
+    Ok(Array1::from(nus))
 }
