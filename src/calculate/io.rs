@@ -242,7 +242,7 @@ pub fn read_video<P: AsRef<Path>>(
 
 /// read reference temperatures from data acquisition file(.lvm or .xlsx)
 pub fn read_daq<P: AsRef<Path>>(
-    temp_record: (usize, usize, &Vec<usize>, P),
+    temp_record: (usize, usize, &[usize], P),
 ) -> TLCResult<Array2<f32>> {
     let daq_path = &temp_record.3;
     match daq_path
@@ -259,7 +259,7 @@ pub fn read_daq<P: AsRef<Path>>(
 }
 
 fn read_temp_from_lvm<P: AsRef<Path>>(
-    temp_record: (usize, usize, &Vec<usize>, P),
+    temp_record: (usize, usize, &[usize], P),
 ) -> TLCResult<Array2<f32>> {
     let (start_line, frame_num, columns, daq_path) = temp_record;
     let mut rdr = ReaderBuilder::new()
@@ -291,7 +291,7 @@ fn read_temp_from_lvm<P: AsRef<Path>>(
 }
 
 fn read_temp_from_excel<P: AsRef<Path>>(
-    temp_record: (usize, usize, &Vec<usize>, P),
+    temp_record: (usize, usize, &[usize], P),
 ) -> TLCResult<Array2<f32>> {
     let (start_line, frame_num, columns, daq_path) = temp_record;
     let mut excel: Xlsx<_> =

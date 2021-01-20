@@ -47,7 +47,7 @@ pub fn cal<P: AsRef<Path>>(config_path: P) -> TLCResult<f32> {
     println!("{:?}", t1.duration_since(t0));
 
     println!("read daq...");
-    let temp_record = (start_row, frame_num, &temp_column_num, &daq_path);
+    let temp_record = (start_row, frame_num, &temp_column_num[..], &daq_path);
     let t2d = io::read_daq(temp_record)?;
     let t2 = Instant::now();
     println!("{:?}", t2.duration_since(t1));

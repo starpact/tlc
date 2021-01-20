@@ -52,7 +52,7 @@ mod calculate {
     }
 
     fn example_t2d() -> Array2<f32> {
-        let temp_record = (*START_ROW, *FRAME_NUM, *TEMP_COLUMN_NUM, *DAQ_PATH);
+        let temp_record = (*START_ROW, *FRAME_NUM, &(*TEMP_COLUMN_NUM)[..], *DAQ_PATH);
         io::read_daq(temp_record).unwrap()
     }
 
@@ -111,7 +111,7 @@ mod calculate {
     fn test_bilinear() {
         let t2d = array![[1.], [2.], [3.], [4.], [5.], [6.]];
         println!("{:?}", t2d.shape());
-        let interp_method = preprocess::InterpMethod::BilinearExtra((2, 3));
+        let interp_method = preprocess::InterpMethod::Bilinear((2, 3));
         let region_shape = (14, 14);
         let tc_pos = &[(10, 10), (10, 15), (10, 20), (20, 10), (20, 15), (20, 20)];
         let tl_pos = (8, 8);
@@ -121,7 +121,7 @@ mod calculate {
 
         let res = interp.interp_single_frame(0).unwrap();
 
-        println!("{:#?}", res);
+        println!("{:?}", res);
     }
 
     use plotters::prelude::*;
