@@ -4,23 +4,21 @@ use plotters::prelude::*;
 
 use ndarray::prelude::*;
 
-use crate::colormap::JET;
+use super::colormap::JET;
 use crate::err;
 use crate::error::TLCResult;
 
-pub fn cal_average<D: Dimension>(nus: ArrayView<f32, D>) -> (f32, f32) {
-    let (sum, cnt) = nus.iter().fold((0., 0), |(s, cnt), &nu| {
-        if nu.is_nan() {
+pub fn cal_average<D: Dimension>(data: ArrayView<f32, D>) -> f32 {
+    let (sum, cnt) = data.iter().fold((0., 0), |(s, cnt), &x| {
+        if x.is_nan() {
             (s, cnt)
         } else {
-            (s + nu, cnt + 1)
+            (s + x, cnt + 1)
         }
     });
-    let nan_cnt = nus.len() - cnt;
-    let nan_ratio = nan_cnt as f32 / cnt as f32;
     let nan_mean = sum / cnt as f32;
 
-    (nan_mean, nan_ratio)
+    nan_mean
 }
 
 pub fn plot_area<P: AsRef<Path>>(
