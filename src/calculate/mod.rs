@@ -99,7 +99,7 @@ pub struct TLCConfig {
 #[derive(Debug)]
 pub struct TLCData {
     /// 配置信息
-    cfg: TLCConfig,
+    config: TLCConfig,
     /// 未滤波的Green值二维矩阵，排列方式如下：
     ///
     /// 第一帧: | X1Y1 X2Y1 ... XnY1 X1Y2 X2Y2 ... XnY2 ... |
@@ -146,7 +146,7 @@ impl TLCData {
 
     pub fn from_path<P: AsRef<Path>>(config_path: P) -> TLCResult<Self> {
         Ok(Self {
-            cfg: TLCConfig::from_path(config_path)?,
+            config: TLCConfig::from_path(config_path)?,
             raw_g2d: None,
             filtered_g2d: None,
             peak_frames: None,
@@ -157,8 +157,8 @@ impl TLCData {
         })
     }
 
-    pub fn get_cfg<'a>(&'a self) -> &'a TLCConfig {
-        &self.cfg
+    pub fn get_config<'a>(&'a self) -> &'a TLCConfig {
+        &self.config
     }
 
     pub fn get_raw_g2d<'a>(&'a self) -> Option<ArrayView2<'a, u8>> {
@@ -186,41 +186,41 @@ impl TLCData {
     }
 
     pub fn set_save_dir(&mut self, save_dir: String) -> TLCResult<&mut Self> {
-        self.cfg.set_save_dir(save_dir)?;
+        self.config.set_save_dir(save_dir)?;
 
         Ok(self)
     }
 
     pub fn set_video_path(&mut self, video_path: String) -> TLCResult<&mut Self> {
-        self.cfg.set_video_path(video_path)?;
+        self.config.set_video_path(video_path)?;
         delete!(self @ raw_g2d, filtered_g2d, peak_frames, nu2d, nu_ave);
 
         Ok(self)
     }
 
     pub fn set_daq_path(&mut self, daq_path: String) -> TLCResult<&mut Self> {
-        self.cfg.set_daq_path(daq_path)?;
+        self.config.set_daq_path(daq_path)?;
         delete!(self @ t2d, interp, nu2d, nu_ave);
 
         Ok(self)
     }
 
     pub fn set_filter_method(&mut self, filter_method: FilterMethod) -> &mut Self {
-        self.cfg.filter_method = filter_method;
+        self.config.filter_method = filter_method;
         delete!(self @ filtered_g2d, peak_frames, nu2d, nu_ave);
 
         self
     }
 
     pub fn set_interp_method(&mut self, interp_method: InterpMethod) -> &mut Self {
-        self.cfg.interp_method = interp_method;
+        self.config.interp_method = interp_method;
         delete!(self @ interp, nu2d, nu_ave);
 
         self
     }
 
     pub fn set_iteration_method(&mut self, iteration_method: IterationMethod) -> &mut Self {
-        self.cfg.iteration_method = iteration_method;
+        self.config.iteration_method = iteration_method;
         delete!(self @ nu2d, nu_ave);
 
         self
@@ -231,97 +231,97 @@ impl TLCData {
         top_left_pos: (usize, usize),
         region_shape: (usize, usize),
     ) -> &mut Self {
-        self.cfg.top_left_pos = top_left_pos;
-        self.cfg.region_shape = region_shape;
+        self.config.top_left_pos = top_left_pos;
+        self.config.region_shape = region_shape;
         delete!(self @ all);
 
         self
     }
 
     pub fn set_regulator(&mut self, regulator: Vec<f32>) -> &mut Self {
-        self.cfg.regulator = regulator;
+        self.config.regulator = regulator;
         delete!(self @ t2d, interp, nu2d, nu_ave);
 
         self
     }
 
     pub fn set_solid_thermal_conductivity(&mut self, solid_thermal_conductivity: f32) -> &mut Self {
-        self.cfg.solid_thermal_conductivity = solid_thermal_conductivity;
+        self.config.solid_thermal_conductivity = solid_thermal_conductivity;
         delete!(self @ nu2d, nu_ave);
 
         self
     }
 
     pub fn set_solid_thermal_diffusivity(&mut self, solid_thermal_diffusivity: f32) -> &mut Self {
-        self.cfg.solid_thermal_diffusivity = solid_thermal_diffusivity;
+        self.config.solid_thermal_diffusivity = solid_thermal_diffusivity;
         delete!(self @ nu2d, nu_ave);
 
         self
     }
 
     pub fn set_air_thermal_conductivity(&mut self, air_thermal_conductivity: f32) -> &mut Self {
-        self.cfg.air_thermal_conductivity = air_thermal_conductivity;
+        self.config.air_thermal_conductivity = air_thermal_conductivity;
         delete!(self @ nu2d, nu_ave);
 
         self
     }
 
     pub fn set_characteristic_length(&mut self, characteristic_length: f32) -> &mut Self {
-        self.cfg.characteristic_length = characteristic_length;
+        self.config.characteristic_length = characteristic_length;
         delete!(self @ nu2d, nu_ave);
 
         self
     }
 
     pub fn set_start_frame(&mut self, start_frame: usize) -> &mut Self {
-        self.cfg.start_frame = start_frame;
+        self.config.start_frame = start_frame;
         delete!(self @ all);
 
         self
     }
 
     pub fn set_start_row(&mut self, start_row: usize) -> &mut Self {
-        self.cfg.start_row = start_row;
+        self.config.start_row = start_row;
         delete!(self @ all);
 
         self
     }
 
     pub fn set_temp_column_num(&mut self, temp_column_num: Vec<usize>) -> &mut Self {
-        self.cfg.temp_column_num = temp_column_num;
+        self.config.temp_column_num = temp_column_num;
         delete!(self @ t2d, interp, nu2d, nu_ave);
 
         self
     }
 
     pub fn set_thermocouple_pos(&mut self, thermocouple_pos: Vec<(i32, i32)>) -> &mut Self {
-        self.cfg.thermocouple_pos = thermocouple_pos;
+        self.config.thermocouple_pos = thermocouple_pos;
         delete!(self @ interp, nu2d, nu_ave);
 
         self
     }
 
     pub fn read_video(&mut self) -> TLCResult<&mut Self> {
-        self.raw_g2d.get_or_insert(self.cfg.read_video()?);
+        self.raw_g2d.get_or_insert(self.config.read_video()?);
 
         Ok(self)
     }
 
     pub fn read_daq(&mut self) -> TLCResult<&mut Self> {
-        self.t2d.get_or_insert(self.cfg.read_daq()?);
+        self.t2d.get_or_insert(self.config.read_daq()?);
 
         Ok(self)
     }
 
     pub fn save_config(&self) -> TLCResult<&Self> {
-        self.cfg.save()?;
+        self.config.save()?;
 
         Ok(self)
     }
 
     pub fn save_nu(&self) -> TLCResult<&Self> {
         let nu2d = self.nu2d.as_ref().ok_or(err!())?.view();
-        io::save_data(nu2d, &self.cfg.data_path)?;
+        io::save_data(nu2d, &self.config.data_path)?;
 
         Ok(self)
     }
@@ -332,7 +332,7 @@ impl TLCData {
             self.nu2d.as_ref().ok_or(err!())?.view(),
             nu_nan_mean * 0.6,
             nu_nan_mean * 2.,
-            &self.cfg.plots_path,
+            &self.config.plots_path,
         )?;
 
         Ok(self)

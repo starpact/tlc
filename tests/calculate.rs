@@ -17,7 +17,7 @@ mod calculate {
     fn show_config() -> Res {
         let tlc_data = init();
         let t = Instant::now();
-        println!("{:#?}", tlc_data.get_cfg());
+        println!("{:#?}", tlc_data.get_config());
         println!("{:?}", t.elapsed());
 
         Ok(())

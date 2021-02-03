@@ -255,7 +255,7 @@ impl TLCConfig {
                             let rgb = dst_frame.data(0);
                             let real_w = (decoder.width() * 3) as usize;
 
-                            let ptr = g2d_view.view().as_ptr() as *mut u8;
+                            let ptr = g2d_view.as_ptr() as *mut u8;
                             let mut index = (pix_num * frame_index) as isize;
                             for i in (0..).step_by(real_w).skip(tl_y).take(cal_h) {
                                 for j in (i..).skip(1).step_by(3).skip(tl_x).take(cal_w) {

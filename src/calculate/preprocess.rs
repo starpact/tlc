@@ -27,7 +27,7 @@ impl TLCData {
         }
         let mut filtered_g2d = self.raw_g2d.as_ref().ok_or(err!())?.clone();
 
-        match self.cfg.filter_method {
+        match self.config.filter_method {
             FilterMethod::Median(window_size) => {
                 filtered_g2d
                     .axis_iter_mut(Axis(1))
@@ -79,7 +79,7 @@ impl TLCData {
         Some(
             self.interp
                 .as_ref()?
-                .interp_single_point(pos, self.cfg.region_shape),
+                .interp_single_point(pos, self.config.region_shape),
         )
     }
 
@@ -87,7 +87,7 @@ impl TLCData {
         self.interp
             .as_ref()
             .ok_or(err!())?
-            .interp_single_frame(frame, self.cfg.region_shape)
+            .interp_single_frame(frame, self.config.region_shape)
     }
 
     /// interpolation of reference temperature matrix
@@ -105,7 +105,7 @@ impl TLCData {
             top_left_pos,
             region_shape,
             ..
-        } = self.cfg;
+        } = self.config;
 
         self.interp = Some(Interp::new(
             t2d,

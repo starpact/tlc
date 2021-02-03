@@ -14,25 +14,28 @@ use crate::err;
 
 use super::{error::TLCResult, postprocess, TLCConfig, TLCData};
 
-/// 用热电偶温度历史的**前4个**数计算初始温度
-const FIRST_FEW_TO_CAL_T0: usize = 4;
-
 /// 默认初始对流换热系数
 const DEFAULT_H0: f32 = 50.;
 
 /// 默认最大迭代步数
 const DEFAULT_MAX_ITER_NUM: usize = 10;
 
+/// 用热电偶温度历史的**前4个**数计算初始温度
+const FIRST_FEW_TO_CAL_T0: usize = 4;
+
 /// 迭代方法（初值，最大迭代步数）
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 pub enum IterationMethod {
-    NewtonTangent(f32, usize),
-    NewtonDown(f32, usize),
+    NewtonTangent { h0: f32, max_iter_num: usize },
+    NewtonDown { h0: f32, max_iter_num: usize },
 }
 
 impl Default for IterationMethod {
     fn default() -> Self {
-        Self::NewtonTangent(DEFAULT_H0, DEFAULT_MAX_ITER_NUM)
+        Self::NewtonTangent {
+            h0: DEFAULT_H0,
+            max_iter_num: DEFAULT_MAX_ITER_NUM,
+        }
     }
 }
 
@@ -128,8 +131,8 @@ impl PointData<'_> {
     fn solve(&self) -> f32 {
         use IterationMethod::*;
         match self.iteration_method {
-            NewtonTangent(h0, max_iter_num) => self.newton_tangent(h0, max_iter_num),
-            NewtonDown(h0, max_iter_num) => self.newton_down(h0, max_iter_num),
+            NewtonTangent { h0, max_iter_num } => self.newton_tangent(h0, max_iter_num),
+            NewtonDown { h0, max_iter_num } => self.newton_down(h0, max_iter_num),
         }
     }
 
@@ -207,7 +210,7 @@ impl TLCData {
             air_thermal_conductivity,
             iteration_method,
             ..
-        } = self.cfg;
+        } = self.config;
         let dt = 1. / frame_rate as f32;
 
         let mut nus = Vec::with_capacity(peak_frames.len());
