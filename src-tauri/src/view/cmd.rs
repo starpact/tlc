@@ -1,3 +1,7 @@
+use serde::Deserialize;
+
+#[derive(Deserialize)]
+#[serde(tag = "cmd", rename_all = "camelCase")]
 pub enum Cmd {
     GetConfig,
     GetRawG2d,
@@ -25,8 +29,10 @@ pub enum Cmd {
 
     ReadVideo,
     ReadDaq,
+
     SaveConfig,
     SaveNu,
+
     PlotNu,
     PlotTempsSingleFrame,
 }

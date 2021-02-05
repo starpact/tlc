@@ -24,7 +24,7 @@ use csv::{ReaderBuilder, StringRecord, WriterBuilder};
 
 use crate::err;
 use crate::error::TLCResult;
-use crate::TLCConfig;
+use super::TLCConfig;
 
 use super::error::TLCError::VideoError;
 

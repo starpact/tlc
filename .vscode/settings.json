@@ -1,7 +1,9 @@
 {
     "cSpell.words": [
-        "DAQIO",
-        "simd",
-        "usizex"
+        "allowlist",
+        "browserslist",
+        "colormap",
+        "fullscreen",
+        "winres"
     ]
 }

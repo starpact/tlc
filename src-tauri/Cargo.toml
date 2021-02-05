@@ -1,0 +1,36 @@
+[package]
+name = "tlc"
+version = "0.1.0"
+description = "A Tauri App"
+authors = [ "Starpact <sjtu_yhj@outlook.com>" ]
+license = ""
+repository = ""
+default-run = "tlc"
+edition = "2018"
+build = "src/build.rs"
+
+[dependencies]
+ffmpeg-next = "4.3.8"
+ndarray = { version = "0.14.0", features = [ "rayon" ] }
+rayon = "1.5.0"
+calamine = "0.17.0"
+csv = "1.1.5"
+libm = "0.2.1"
+serde_json = "1.0"
+serde = { version = "1.0", features = [ "derive" ] }
+median = "0.3.1"
+plotters = "0.3.0"
+thread_local = "1.0.2"
+packed_simd = { version = "0.3.4", package = "packed_simd_2" }
+thiserror = "1.0"
+tauri = { version = "0.11", features = [ "all-api" ] }
+
+[target."cfg(windows)".build-dependencies]
+winres = "0.1"
+
+[features]
+embedded-server = [ "tauri/embedded-server" ]
+
+[[bin]]
+name = "tlc"
+path = "src/main.rs"

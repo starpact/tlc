@@ -1,0 +1,7 @@
+/target
+/tmp
+/.idea
+/.VSCodeCounter
+WixTools
+config.json
+bundle.json

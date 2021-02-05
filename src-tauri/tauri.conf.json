@@ -1,0 +1,45 @@
+{
+  "build": {
+    "distDir": "../build",
+    "devPath": "http://localhost:3000",
+    "beforeDevCommand": "yarn start",
+    "beforeBuildCommand": "yarn build"
+  },
+  "ctx": {},
+  "tauri": {
+    "embeddedServer": {
+      "active": true
+    },
+    "bundle": {
+      "active": true,
+      "targets": "msi",
+      "identifier": "com.sjtu.tlc.gui",
+      "icon": [
+        "icons/icon.ico"
+      ],
+      "resources": [],
+      "externalBin": [],
+      "copyright": "",
+      "category": "Utility",
+      "shortDescription": "",
+      "longDescription": "",
+      "exceptionDomain": ""
+    },
+    "allowlist": {
+      "all": true
+    },
+    "window": {
+      "title": "TLC Helper",
+      "width": 1600,
+      "height": 800,
+      "resizable": true,
+      "fullscreen": false
+    },
+    "security": {
+      "csp": "default-src blob: data: filesystem: ws: http: https: 'unsafe-eval' 'unsafe-inline'"
+    },
+    "inliner": {
+      "active": true
+    }
+  }
+}

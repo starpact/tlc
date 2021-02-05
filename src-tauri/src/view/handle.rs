@@ -1,14 +1,11 @@
-pub mod calculate;
-
-use std::path::Path;
 use std::sync::mpsc::Receiver;
 use std::thread;
 use std::time::Instant;
 
-use calculate::*;
-use error::TLCResult;
+use crate::calculate::error::TLCResult;
+use crate::*;
 
-const CFG_PATH: &str = "./tmp/config/config.json";
+const CFG_PATH: &str = "./cache/config.json";
 
 pub fn init(rx: Receiver<u8>) -> TLCResult<()> {
     thread::spawn(move || -> TLCResult<()> {
@@ -48,14 +45,5 @@ pub fn init(rx: Receiver<u8>) -> TLCResult<()> {
         }
     });
 
-    Ok(())
-}
-
-pub fn cal_batch<P: AsRef<Path>>(config_path: P) -> TLCResult<()> {
-    let mut tlc_data = TLCData::from_path(config_path)?;
-
-    tlc_data.solve()?.save_nu()?.plot_nu()?;
-
-    println!("{}", tlc_data.get_nu_ave().ok_or(err!())?);
     Ok(())
 }
