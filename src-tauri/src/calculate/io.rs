@@ -22,9 +22,9 @@ use calamine::{open_workbook, Reader, Xlsx};
 
 use csv::{ReaderBuilder, StringRecord, WriterBuilder};
 
-use crate::err;
-use crate::error::TLCResult;
+use super::error::TLCResult;
 use super::TLCConfig;
+use crate::err;
 
 use super::error::TLCError::VideoError;
 
@@ -52,7 +52,8 @@ impl TLCConfig {
         let file = File::open(config_path.as_ref())
             .map_err(|err| err!(ConfigIOError, err, config_path.as_ref()))?;
         let reader = BufReader::new(file);
-        let mut cfg: TLCConfig = serde_json::from_reader(reader)?;
+        let mut cfg: TLCConfig =
+            serde_json::from_reader(reader).map_err(|err| err!(ConfigError, err))?;
 
         if let Err(err @ VideoError { .. }) = cfg.init_video_metadata() {
             return Err(err);
@@ -213,8 +214,8 @@ impl TLCConfig {
                     {
                         let tls_arc = tls.clone();
                         scp.spawn(move |_| {
-                            let tls_paras = if let Ok(tlc_paras) =
-                                tls_arc.get_or_try(|| -> Result<_, Box<dyn std::error::Error>> {
+                            let tls_paras = match tls_arc.get_or_try(
+                                || -> Result<_, Box<dyn std::error::Error>> {
                                     let decoder = ctx_mutex.lock()?.clone().decoder().video()?;
                                     let sws_ctx = Context::get(
                                         decoder.format(),
@@ -231,10 +232,10 @@ impl TLCConfig {
                                         RefCell::new(Video::empty()),
                                         RefCell::new(Video::empty()),
                                     ))
-                                }) {
-                                tlc_paras
-                            } else {
-                                return;
+                                },
+                            ) {
+                                Ok(tls_paras) => tls_paras,
+                                Err(_) => return,
                             };
 
                             let mut decoder = tls_paras.0.borrow_mut();
@@ -354,7 +355,7 @@ impl TLCConfig {
         let file = File::create(&self.config_path)
             .map_err(|err| err!(ConfigIOError, err, self.config_path))?;
         let writer = BufWriter::new(file);
-        serde_json::to_writer_pretty(writer, self)?;
+        serde_json::to_writer_pretty(writer, self).map_err(|err| err!(ConfigError, err))?;
 
         Ok(())
     }

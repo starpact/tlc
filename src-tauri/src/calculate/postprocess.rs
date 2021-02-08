@@ -5,8 +5,8 @@ use plotters::prelude::*;
 use ndarray::prelude::*;
 
 use super::colormap::JET;
+use super::error::TLCResult;
 use crate::err;
-use crate::error::TLCResult;
 
 pub fn cal_average<D: Dimension>(data: ArrayView<f32, D>) -> f32 {
     let (sum, cnt) = data.iter().fold((0., 0), |(s, cnt), &x| {

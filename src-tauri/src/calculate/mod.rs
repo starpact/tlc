@@ -19,10 +19,10 @@ use solve::IterationMethod;
 use crate::err;
 
 /// 默认配置文件路径
-const DEFAULT_CONFIG_PATH: &'static str = "./tmp/config/config.json";
+const DEFAULT_CONFIG_PATH: &'static str = "./cache/config.json";
 
 /// 所有配置信息，与case一一对应
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TLCConfig {
     /// 实验组名称（与视频文件名一致）
     #[serde(skip)]
@@ -157,27 +157,27 @@ impl TLCData {
         })
     }
 
-    pub fn get_config<'a>(&'a self) -> &'a TLCConfig {
+    pub fn get_config(&self) -> &'_ TLCConfig {
         &self.config
     }
 
-    pub fn get_raw_g2d<'a>(&'a self) -> Option<ArrayView2<'a, u8>> {
+    pub fn get_raw_g2d(&self) -> Option<ArrayView2<'_, u8>> {
         Some(self.raw_g2d.as_ref()?.view())
     }
 
-    pub fn get_filtered_g2d<'a>(&'a self) -> Option<ArrayView2<'a, u8>> {
+    pub fn get_filtered_g2d(&self) -> Option<ArrayView2<'_, u8>> {
         Some(self.filtered_g2d.as_ref()?.view())
     }
 
-    pub fn get_peak_frames<'a>(&'a self) -> Option<&'a Vec<usize>> {
+    pub fn get_peak_frames(&self) -> Option<&'_ Vec<usize>> {
         self.peak_frames.as_ref()
     }
 
-    pub fn get_t2d<'a>(&'a self) -> Option<ArrayView2<'a, f32>> {
+    pub fn get_t2d(&self) -> Option<ArrayView2<'_, f32>> {
         Some(self.t2d.as_ref()?.view())
     }
 
-    pub fn get_nu2d<'a>(&'a self) -> Option<ArrayView2<'a, f32>> {
+    pub fn get_nu2d(&self) -> Option<ArrayView2<'_, f32>> {
         Some(self.nu2d.as_ref()?.view())
     }
 

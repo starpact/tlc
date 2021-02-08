@@ -3,36 +3,138 @@ use serde::Deserialize;
 #[derive(Deserialize)]
 #[serde(tag = "cmd", rename_all = "camelCase")]
 pub enum Cmd {
-    GetConfig,
-    GetRawG2d,
-    GetFilterG2d,
-    GetT2d,
-    GetNu2d,
-    GetNuAve,
+    GetConfig {
+        callback: String,
+        error: String,
+    },
+    LoadConfig {
+        config_path: String,
+        callback: String,
+        error: String,
+    },
+    GetRawG2d {
+        callback: String,
+        error: String,
+    },
+    GetFilterG2d {
+        callback: String,
+        error: String,
+    },
+    GetT2d {
+        callback: String,
+        error: String,
+    },
+    GetNu2d {
+        callback: String,
+        error: String,
+    },
+    GetNuAve {
+        callback: String,
+        error: String,
+    },
+    SetSaveDir {
+        save_dir: String,
+        callback: String,
+        error: String,
+    },
+    SetVideoPath {
+        video_path: String,
+        callback: String,
+        error: String,
+    },
+    SetDAQPath {
+        daq_path: String,
+        callback: String,
+        error: String,
+    },
+    SetFilterMethod {
+        filter_method: String,
+        callback: String,
+        error: String,
+    },
+    SetInterpMethod {
+        interp_method: String,
+        callback: String,
+        error: String,
+    },
+    SetIterationMethod {
+        iteration_method: String,
+        callback: String,
+        error: String,
+    },
+    SetRegion {
+        region: [usize; 4],
+        callback: String,
+        error: String,
+    },
+    SetRegulator {
+        regulator: Vec<f32>,
+        callback: String,
+        error: String,
+    },
+    SetSolidThermalConductivity {
+        solid_thermal_conductivity: f32,
+        callback: String,
+        error: String,
+    },
+    SetSolidThermalDiffusivity {
+        solid_thermal_diffusivity: f32,
+        callback: String,
+        error: String,
+    },
+    SetAirThermalConductivity {
+        air_thermal_conductivity: f32,
+        callback: String,
+        error: String,
+    },
+    SetCharacteristicLength {
+        characteristic_length: f32,
+        callback: String,
+        error: String,
+    },
+    SetStartFrame {
+        start_frame: usize,
+        callback: String,
+        error: String,
+    },
+    SetStartRow {
+        start_row: usize,
+        callback: String,
+        error: String,
+    },
+    SetTempColumnNum {
+        temp_column_num: Vec<usize>,
+        callback: String,
+        error: String,
+    },
+    SetThermocouplePos {
+        thermocouple_pos: Vec<(i32, i32)>,
+        callback: String,
+        error: String,
+    },
+    ReadVideo {
+        callback: String,
+        error: String,
+    },
+    ReadDAQ {
+        callback: String,
+        error: String,
+    },
 
-    SetSaveDir,
-    SetVideoPath,
-    SetDaqPath,
-    SetFilterMethod,
-    SetInterpMethod,
-    SetIterationMethod,
-    SetRegion,
-    SetRegulator,
-    SetSolidThermalConductivity,
-    SetSolidThermalDiffusivity,
-    SetAirThermalConductivity,
-    SetCharacteristicLength,
-    SetStartFrame,
-    SetStartRow,
-    SetTempColumnNum,
-    SetThermocouple,
-
-    ReadVideo,
-    ReadDaq,
-
-    SaveConfig,
-    SaveNu,
-
-    PlotNu,
-    PlotTempsSingleFrame,
+    SaveConfig {
+        callback: String,
+        error: String,
+    },
+    SaveNu {
+        callback: String,
+        error: String,
+    },
+    PlotNu {
+        callback: String,
+        error: String,
+    },
+    PlotTempsSingleFrame {
+        callback: String,
+        error: String,
+    },
 }

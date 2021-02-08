@@ -1,3 +1,4 @@
+use serde::Serialize;
 use thiserror::Error;
 
 /// Rust的std::io::Error不会包含错误路径，需要自己封装
@@ -13,7 +14,7 @@ pub enum TLCError {
     ConfigIOError { raw_err: String, context: String },
 
     #[error("配置文件错误: {0}")]
-    ConfigError(#[from] serde_json::error::Error),
+    ConfigError(String),
 
     #[error("请检查视频文件路径：{0}")]
     VideoIOError(String),
@@ -48,19 +49,19 @@ pub type TLCResult<T> = Result<T, TLCError>;
 #[macro_export]
 macro_rules! err {
     () => {
-        $crate::error::TLCError::UnKnown("bakana!".to_owned())
+        $crate::calculate::error::TLCError::UnKnown("bakana!".to_owned())
     };
 
     ($context:expr) => {
-        $crate::error::TLCError::UnKnown(format!("可能原因：{:?}", $context))
+        $crate::calculate::error::TLCError::UnKnown(format!("可能原因：{:?}", $context))
     };
 
     ($member:tt, $context:expr $(,)*) => {
-        $crate::error::TLCError::$member(format!("{:?}", $context))
+        $crate::calculate::error::TLCError::$member(format!("{:?}", $context))
     };
 
     ($member:tt, $raw_err:expr, $context:expr $(,)*) => {
-        $crate::error::TLCError::$member {
+        $crate::calculate::error::TLCError::$member {
             raw_err: format!("{:?}", $raw_err),
             context: format!("{:?}", $context),
         }

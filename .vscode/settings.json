@@ -1,9 +1,16 @@
 {
     "cSpell.words": [
+        "DAQIO",
         "allowlist",
+        "bakana",
         "browserslist",
         "colormap",
         "fullscreen",
+        "libm",
+        "promisified",
+        "thiserror",
+        "vmax",
+        "vmin",
         "winres"
     ]
 }

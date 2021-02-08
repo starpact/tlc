@@ -4,56 +4,21 @@
 )]
 
 use std::sync::mpsc;
-use tlc::view::cmd::Cmd::*;
+
+use tlc::view::{cmd::Cmd, handle::init};
 
 fn main() {
     let (tx, rx) = mpsc::channel();
-    tlc::view::handle::init(rx).unwrap();
+    init(rx);
 
-    let app = tauri::AppBuilder::new();
+    tauri::AppBuilder::new()
+        .invoke_handler(move |webview, arg| {
+            let cmd: Cmd = serde_json::from_str(arg).map_err(|err| err.to_string())?;
+            tx.send((webview.as_mut(), cmd))
+                .map_err(|err| err.to_string())?;
 
-    app.invoke_handler(move |webview, arg| {
-        let webview_mut = webview.as_mut();
-
-        match serde_json::from_str(arg) {
-            Err(e) => Err(e.to_string()),
-            Ok(command) => {
-                match command {
-                    GetConfig => {
-                        tx.send(1).unwrap();
-                    }
-                    GetRawG2d => {}
-                    GetFilterG2d => {}
-                    GetT2d => {}
-                    GetNu2d => {}
-                    GetNuAve => {}
-                    SetSaveDir => {}
-                    SetVideoPath => {}
-                    SetDaqPath => {}
-                    SetFilterMethod => {}
-                    SetInterpMethod => {}
-                    SetIterationMethod => {}
-                    SetRegion => {}
-                    SetRegulator => {}
-                    SetSolidThermalConductivity => {}
-                    SetSolidThermalDiffusivity => {}
-                    SetAirThermalConductivity => {}
-                    SetCharacteristicLength => {}
-                    SetStartFrame => {}
-                    SetStartRow => {}
-                    SetTempColumnNum => {}
-                    SetThermocouple => {}
-                    ReadVideo => {}
-                    ReadDaq => {}
-                    SaveConfig => {}
-                    SaveNu => {}
-                    PlotNu => {}
-                    PlotTempsSingleFrame => {}
-                }
-                Ok(())
-            }
-        }
-    })
-    .build()
-    .run();
+            Ok(())
+        })
+        .build()
+        .run();
 }
