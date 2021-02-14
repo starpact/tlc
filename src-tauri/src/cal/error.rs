@@ -1,4 +1,3 @@
-use serde::Serialize;
 use thiserror::Error;
 
 /// Rust的std::io::Error不会包含错误路径，需要自己封装
@@ -49,19 +48,19 @@ pub type TLCResult<T> = Result<T, TLCError>;
 #[macro_export]
 macro_rules! err {
     () => {
-        $crate::calculate::error::TLCError::UnKnown("bakana!".to_owned())
+        $crate::cal::error::TLCError::UnKnown("bakana!".to_owned())
     };
 
     ($context:expr) => {
-        $crate::calculate::error::TLCError::UnKnown(format!("可能原因：{:?}", $context))
+        $crate::cal::error::TLCError::UnKnown(format!("可能原因：{:?}", $context))
     };
 
     ($member:tt, $context:expr $(,)*) => {
-        $crate::calculate::error::TLCError::$member(format!("{:?}", $context))
+        $crate::cal::error::TLCError::$member(format!("{:?}", $context))
     };
 
     ($member:tt, $raw_err:expr, $context:expr $(,)*) => {
-        $crate::calculate::error::TLCError::$member {
+        $crate::cal::error::TLCError::$member {
             raw_err: format!("{:?}", $raw_err),
             context: format!("{:?}", $context),
         }

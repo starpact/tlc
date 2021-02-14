@@ -1,17 +1,19 @@
-import { Button } from "@chakra-ui/react";
+import { Button, Tooltip } from "@chakra-ui/react";
 
-function IButton({ text, onClick }) {
+function IButton({ text, onClick, hover }) {
   return (
-    <Button
-      size="md"
-      boxShadow="dark-lg"
-      backgroundColor="#458588"
-      color="#fbf1c7"
-      onClick={onClick}
-      whiteSpace="nowrap"
-    >
-      {text}
-    </Button>
+    <Tooltip label={hover} backgroundColor="#3c3836" color="#fbf1c7">
+      <Button
+        size="md"
+        boxShadow="dark-lg"
+        backgroundColor="#458588"
+        color="#fbf1c7"
+        onClick={onClick}
+        whiteSpace="nowrap"
+      >
+        {text}
+      </Button>
+    </Tooltip>
   )
 }
 

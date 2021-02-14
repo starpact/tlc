@@ -1,9 +1,14 @@
 use serde::Deserialize;
 
+use crate::cal::{
+    preprocess::{FilterMethod, InterpMethod},
+    solve::IterationMethod,
+};
+
 #[derive(Deserialize)]
-#[serde(tag = "cmd", rename_all = "camelCase")]
+#[serde(tag = "cmd")]
 pub enum Cmd {
-    GetConfig {
+    LoadDefaultConfig {
         callback: String,
         error: String,
     },
@@ -48,17 +53,17 @@ pub enum Cmd {
         error: String,
     },
     SetFilterMethod {
-        filter_method: String,
+        filter_method: FilterMethod,
         callback: String,
         error: String,
     },
     SetInterpMethod {
-        interp_method: String,
+        interp_method: InterpMethod,
         callback: String,
         error: String,
     },
     SetIterationMethod {
-        iteration_method: String,
+        iteration_method: IterationMethod,
         callback: String,
         error: String,
     },
@@ -69,6 +74,11 @@ pub enum Cmd {
     },
     SetRegulator {
         regulator: Vec<f32>,
+        callback: String,
+        error: String,
+    },
+    SetPeakTemp {
+        peak_temp: f32,
         callback: String,
         error: String,
     },

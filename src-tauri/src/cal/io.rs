@@ -22,8 +22,8 @@ use calamine::{open_workbook, Reader, Xlsx};
 
 use csv::{ReaderBuilder, StringRecord, WriterBuilder};
 
-use super::error::TLCResult;
 use super::TLCConfig;
+use super::{error::TLCResult, DEFAULT_CONFIG_PATH};
 use crate::err;
 
 use super::error::TLCError::VideoError;
@@ -114,7 +114,7 @@ impl TLCConfig {
     fn init_frame_num(&mut self) -> &mut Self {
         if self.total_frames > 0 && self.total_rows > 0 {
             self.frame_num =
-                (self.total_frames - self.start_frame).min(self.total_rows - self.start_row) - 1;
+                (self.total_frames - self.start_frame).min(self.total_rows - self.start_row);
         }
 
         self
@@ -353,6 +353,11 @@ impl TLCConfig {
     /// 保存配置
     pub fn save(&self) -> TLCResult<()> {
         let file = File::create(&self.config_path)
+            .map_err(|err| err!(ConfigIOError, err, self.config_path))?;
+        let writer = BufWriter::new(file);
+        serde_json::to_writer_pretty(writer, self).map_err(|err| err!(ConfigError, err))?;
+
+        let file = File::create(DEFAULT_CONFIG_PATH)
             .map_err(|err| err!(ConfigIOError, err, self.config_path))?;
         let writer = BufWriter::new(file);
         serde_json::to_writer_pretty(writer, self).map_err(|err| err!(ConfigError, err))?;

@@ -1,9 +1,9 @@
 [package]
 name = "tlc"
 version = "0.1.0"
-description = "A Tauri App"
+description = "transient liquid crystal data processing"
 authors = [ "Starpact <sjtu_yhj@outlook.com>" ]
-license = ""
+license = "MIT"
 repository = ""
 default-run = "tlc"
 edition = "2018"
@@ -34,3 +34,7 @@ embedded-server = [ "tauri/embedded-server" ]
 [[bin]]
 name = "tlc"
 path = "src/main.rs"
+
+[profile.dev]
+debug = false
+opt-level = 3

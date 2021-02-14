@@ -19,13 +19,13 @@ use solve::IterationMethod;
 use crate::err;
 
 /// 默认配置文件路径
-const DEFAULT_CONFIG_PATH: &'static str = "./cache/config.json";
+const DEFAULT_CONFIG_PATH: &'static str = "./cache/default_config.json";
 
 /// 所有配置信息，与case一一对应
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TLCConfig {
+    #[serde(default)]
     /// 实验组名称（与视频文件名一致）
-    #[serde(skip)]
     case_name: String,
 
     /// 保存配置信息和所有结果的根目录
@@ -35,7 +35,7 @@ pub struct TLCConfig {
     /// 数采文件路径
     daq_path: String,
     /// 配置文件保存路径（仅运行时使用）
-    #[serde(skip)]
+    #[serde(default)]
     config_path: String,
     /// 图片保存路径
     #[serde(default)]
@@ -241,6 +241,13 @@ impl TLCData {
     pub fn set_regulator(&mut self, regulator: Vec<f32>) -> &mut Self {
         self.config.regulator = regulator;
         delete!(self @ t2d, interp, nu2d, nu_ave);
+
+        self
+    }
+
+    pub fn set_peak_temp(&mut self, peak_temp: f32) -> &mut Self {
+        self.config.peak_temp = peak_temp;
+        delete!(self @ nu2d, nu_ave);
 
         self
     }

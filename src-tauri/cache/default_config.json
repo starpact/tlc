@@ -1,0 +1,83 @@
+{
+  "case_name": "imp_40000_1_up",
+  "save_dir": "D:\\research\\exp_20201206\\result",
+  "video_path": "D:\\research\\exp_20201206\\imp\\videos\\imp_40000_1_up.avi",
+  "daq_path": "D:\\research\\exp_20201206\\imp\\daq\\imp_40000_1.lvm",
+  "config_path": "D:\\research\\exp_20201206\\result\\config\\imp_40000_1_up.json",
+  "plots_path": "D:\\research\\exp_20201206\\result\\plots\\imp_40000_1_up.png",
+  "data_path": "D:\\research\\exp_20201206\\result\\data\\imp_40000_1_up.csv",
+  "start_frame": 84,
+  "total_frames": 1564,
+  "frame_rate": 25,
+  "start_row": 143,
+  "total_rows": 1699,
+  "frame_num": 1480,
+  "top_left_pos": [
+    720,
+    200
+  ],
+  "region_shape": [
+    260,
+    800
+  ],
+  "temp_column_num": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6
+  ],
+  "thermocouple_pos": [
+    [
+      720,
+      166
+    ],
+    [
+      760,
+      355
+    ],
+    [
+      820,
+      543
+    ],
+    [
+      880,
+      731
+    ],
+    [
+      940,
+      922
+    ],
+    [
+      1000,
+      1116
+    ]
+  ],
+  "interp_method": {
+    "Bilinear": [
+      2,
+      3
+    ]
+  },
+  "filter_method": "No",
+  "iteration_method": {
+    "NewtonTangent": {
+      "h0": 50.0,
+      "max_iter_num": 10
+    }
+  },
+  "peak_temp": 35.48,
+  "solid_thermal_conductivity": 0.19,
+  "solid_thermal_diffusivity": 1.091e-7,
+  "characteristic_length": 0.015,
+  "air_thermal_conductivity": 0.0276,
+  "regulator": [
+    0.9,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+  ]
+}

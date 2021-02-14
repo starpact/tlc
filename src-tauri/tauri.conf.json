@@ -5,7 +5,9 @@
     "beforeDevCommand": "yarn start",
     "beforeBuildCommand": "yarn build"
   },
-  "ctx": {},
+  "ctx": {
+    "debug": false
+  },
   "tauri": {
     "embeddedServer": {
       "active": true
@@ -13,11 +15,13 @@
     "bundle": {
       "active": true,
       "targets": "msi",
-      "identifier": "com.sjtu.tlc.gui",
+      "identifier": "com.sjtu.tlc",
       "icon": [
         "icons/icon.ico"
       ],
-      "resources": [],
+      "resources": [
+        "./cache"
+      ],
       "externalBin": [],
       "copyright": "",
       "category": "Utility",

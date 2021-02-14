@@ -1,9 +1,9 @@
 #![allow(dead_code)]
 #[cfg(test)]
-mod calculate {
+mod cal {
     use std::time::Instant;
 
-    use tlc::calculate::*;
+    use tlc::cal::*;
 
     const CONFIG_PATH: &str = "./tmp/config/config.json";
 

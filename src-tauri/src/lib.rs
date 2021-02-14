@@ -1,4 +1,4 @@
 #![feature(option_insert)]
 
-pub mod calculate;
+pub mod cal;
 pub mod view;
