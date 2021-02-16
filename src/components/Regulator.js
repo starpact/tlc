@@ -19,7 +19,7 @@ function ISlider({ value, onChange }) {
         defaultValue={100}
         min={50}
         max={150}
-        onChange={(v) => onChange(v / 100)}
+        onChange={v => onChange(v / 100)}
         orientation="vertical"
         value={value * 100}
         h="100px"
@@ -48,8 +48,8 @@ function Regulator({ regulator, onSubmit }) {
           <ISlider
             key={i}
             value={v}
-            onChange={(v) => {
-              let arr = innerRegulator.concat();
+            onChange={v => {
+              const arr = innerRegulator.concat();
               arr[i] = v;
               setInnerRegulator(arr);
             }}
@@ -57,8 +57,8 @@ function Regulator({ regulator, onSubmit }) {
         )}
       </Center>
       <Stack>
-        <IButton text="提交" onClick={() => onSubmit(innerRegulator)} />
         <IButton text="重置" onClick={() => setInnerRegulator(innerRegulator.map(() => 1.0))} />
+        <IButton text="提交" onClick={() => onSubmit(innerRegulator)} />
       </Stack>
     </HStack>
   )

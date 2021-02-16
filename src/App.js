@@ -1,11 +1,11 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect } from "react"
 import {
   ChakraProvider,
   Center,
   Heading,
   Box,
   Stack,
-} from "@chakra-ui/react";
+} from "@chakra-ui/react"
 import { FaFileVideo, FaFileCsv, FaFileImport } from "react-icons/fa"
 import * as tauri from 'tauri/api/tauri'
 import * as dialog from 'tauri/api/dialog'
@@ -15,6 +15,9 @@ import IIConButton from "./components/IconButton"
 import IInput from "./components/Input"
 import IAlert from "./components/Alert";
 import Regulator from "./components/Regulator";
+import SelectFilter from "./components/SelectFilter";
+import SelectInterp from "./components/SelectInterp";
+import SelectIteration from "./components/SelectIteration"
 
 function App() {
   const [errMsg, setErrMsg] = useState("");
@@ -91,63 +94,70 @@ function App() {
   }
 
   function setStartFrame(start_frame) {
+    if (start_frame === config.start_frame) return;
     tauri.promisified({
       cmd: "SetStartFrame",
-      start_frame: parseInt(start_frame),
+      start_frame: start_frame,
     })
       .then(ok => setConfig(ok))
       .catch(err => setErrMsg(err));
   }
 
   function setStartRow(start_row) {
+    if (start_row === config.start_row) return;
     tauri.promisified({
       cmd: "SetStartRow",
-      start_row: parseInt(start_row),
+      start_row,
     })
       .then(ok => setConfig(ok))
       .catch(err => setErrMsg(err));
   }
 
   function setPeakTemp(peak_temp) {
+    if (peak_temp === config.peak_temp) return;
     tauri.promisified({
       cmd: "SetPeakTemp",
-      peak_temp: parseFloat(peak_temp),
+      peak_temp,
     })
       .then(ok => setConfig(ok))
       .catch(err => setErrMsg(err));
   }
 
   function setSolidThermalConductivity(solid_thermal_conductivity) {
+    if (solid_thermal_conductivity === config.solid_thermal_conductivity) return;
     tauri.promisified({
       cmd: "SetSolidThermalConductivity",
-      solid_thermal_conductivity: parseFloat(solid_thermal_conductivity),
+      solid_thermal_conductivity,
     })
       .then(ok => setConfig(ok))
       .catch(err => setErrMsg(err));
   }
 
   function setSolidThermalDiffusivity(solid_thermal_diffusivity) {
+    if (solid_thermal_diffusivity === config.solid_thermal_diffusivity) return;
     tauri.promisified({
       cmd: "SetSolidThermalDiffusivity",
-      solid_thermal_diffusivity: parseFloat(solid_thermal_diffusivity),
+      solid_thermal_diffusivity,
     })
       .then(ok => setConfig(ok))
       .catch(err => setErrMsg(err));
   }
 
   function setAirThermalConductivity(air_thermal_conductivity) {
+    if (air_thermal_conductivity === config.air_thermal_conductivity) return;
     tauri.promisified({
       cmd: "SetAirThermalConductivity",
-      air_thermal_conductivity: parseFloat(air_thermal_conductivity),
+      air_thermal_conductivity,
     })
       .then(ok => setConfig(ok))
       .catch(err => setErrMsg(err));
   }
 
   function setCharacteristicLength(characteristic_length) {
+    if (characteristic_length === config.characteristic_length) return;
     tauri.promisified({
       cmd: "SetCharacteristicLength",
-      characteristic_length: parseFloat(characteristic_length),
+      characteristic_length,
     })
       .then(ok => setConfig(ok))
       .catch(err => setErrMsg(err));
@@ -156,14 +166,43 @@ function App() {
   function setRegulator(regulator) {
     tauri.promisified({
       cmd: "SetRegulator",
-      regulator
+      regulator,
     })
+      .then(ok => setConfig(ok))
       .catch(err => setErrMsg(err));
+  }
+
+
+  function setFilterMethod(filter_method) {
+    tauri.promisified({
+      cmd: "SetFilterMethod",
+      filter_method,
+    })
+      .then(ok => setConfig(ok))
+      .catch(err => setErrMsg(err));
+  }
+
+  function setInterpMethod(interp_method) {
+    tauri.promisified({
+      cmd: "SetInterpMethod",
+      interp_method,
+    })
+      .then(ok => setConfig(ok))
+      .catch(err => setErrMsg(err));
+  }
+
+  function setIterationMethod(iteration_method) {
+    tauri.promisified({
+      cmd: "SetIterationMethod",
+      iteration_method,
+    })
+      .then(ok => setConfig(ok))
+      .catch(err => setErrMsg(err))
   }
 
   return (
     <ChakraProvider>
-      <Box h="800px" bg="#282828">
+      <Box h="1600px" bg="#282828">
         <IAlert errMsg={errMsg} onClose={() => setErrMsg("")} />
         <IButton text="重置配置" onClick={loadDefaultConfig} hover="重置为您上一次保存的配置" />
         <IButton text="导入配置" onClick={loadConfig} />
@@ -193,14 +232,14 @@ function App() {
             leftTag="起始帧数"
             value={config.frame_num > 0 ? config.start_frame : ""}
             mutable
-            onBlur={setStartFrame}
+            onBlur={v => setStartFrame(parseInt(v))}
             rightTag={config.frame_num > 0 ?
               `[${config.start_frame}, ${config.start_frame + config.frame_num}] / ${config.total_frames}` : ""}
           />
           <IInput
             leftTag="起始行数"
             value={config.frame_num > 0 ? config.start_row : ""}
-            onBlur={setStartRow}
+            onBlur={v => setStartRow(parseInt(v))}
             mutable
             rightTag={config.frame_num > 0 ?
               `[${config.start_row}, ${config.start_row + config.frame_num}] / ${config.total_rows}` : ""}
@@ -213,14 +252,14 @@ function App() {
           <IInput
             leftTag="峰值温度"
             value={!!config.peak_temp ? config.peak_temp.toPrecision(4) : ""}
-            onBlur={setPeakTemp}
+            onBlur={v => setPeakTemp(parseFloat(v))}
             mutable
             rightTag="°C"
           />
           <IInput
             leftTag="固体导热系数"
             value={!!config.solid_thermal_conductivity ? config.solid_thermal_conductivity.toPrecision(3) : ""}
-            onBlur={setSolidThermalConductivity}
+            onBlur={v => setSolidThermalConductivity(parseFloat(v))}
             mutable
             rightTag="W/(m·K)"
           />
@@ -228,24 +267,28 @@ function App() {
             leftTag="固体热扩散系数"
             value={!!config.solid_thermal_diffusivity ? config.solid_thermal_diffusivity.toPrecision(4) : ""}
             rightTag="m2/s"
-            onBlur={setSolidThermalDiffusivity}
+            onBlur={v => setSolidThermalDiffusivity(parseFloat(v))}
             mutable
           />
           <IInput
             leftTag="气体导热系数"
             value={!!config.air_thermal_conductivity ? config.air_thermal_conductivity.toPrecision(3) : ""}
-            onBlur={setAirThermalConductivity}
+            onBlur={v => setAirThermalConductivity(parseFloat(v))}
             mutable
             rightTag="W/(m·K)"
           />
           <IInput
             leftTag="特征长度"
             value={!!config.characteristic_length ? config.characteristic_length.toFixed(4) : ""}
-            onBlur={setCharacteristicLength}
+            onBlur={v => setCharacteristicLength(parseFloat(v))}
             mutable
             rightTag="m"
           />
           <Regulator regulator={config.regulator} onSubmit={setRegulator} />
+          <SelectFilter value={config.filter_method} onSubmit={setFilterMethod} />
+          <SelectInterp value={config.interp_method} onSubmit={setInterpMethod} />
+          <SelectIteration value={config.iteration_method} onSubmit={setIterationMethod} />
+          <IButton text="read" onClick={() => tauri.promisified({ cmd: "ReadVideo" })} />
         </Stack>
       </Box>
     </ChakraProvider >

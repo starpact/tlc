@@ -131,7 +131,7 @@ pub struct TLCData {
 /// 当某项数据所依赖的配置信息发生变化时，清空数据
 macro_rules! delete {
     ($v:ident @ all) => {
-        delete!($v @ raw_g2d, filtered_g2d, t2d, interp, nu2d, nu_ave);
+        delete!($v @ raw_g2d, filtered_g2d, peak_frames, t2d, interp, nu2d, nu_ave);
     };
 
     ($v:ident @ $($member:tt),* $(,)*) => {

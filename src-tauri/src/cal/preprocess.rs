@@ -14,6 +14,7 @@ use crate::err;
 pub enum FilterMethod {
     No,
     Median(usize),
+    Wavelet(f32),
 }
 
 impl TLCData {

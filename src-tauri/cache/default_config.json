@@ -60,7 +60,9 @@
       3
     ]
   },
-  "filter_method": "No",
+  "filter_method": {
+    "Median": 20
+  },
   "iteration_method": {
     "NewtonTangent": {
       "h0": 50.0,

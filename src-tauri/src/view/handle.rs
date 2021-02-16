@@ -186,11 +186,9 @@ fn execute(tlc_data: &mut Option<TLCData>, wm: WebviewMut, cmd: Cmd) -> TLCResul
 
 trait Handle {
     fn get(&mut self) -> TLCResult<&mut TLCData>;
-
     fn load_config(&mut self, config_path: String) -> TLCResult<&TLCConfig>;
     fn load_default_config(&mut self) -> TLCResult<&TLCConfig>;
     fn save_config(&mut self) -> TLCResult<()>;
-
     fn set_save_dir(&mut self, save_dir: String) -> TLCResult<&TLCConfig>;
     fn set_video_path(&mut self, video_path: String) -> TLCResult<&TLCConfig>;
     fn set_daq_path(&mut self, daq_path: String) -> TLCResult<&TLCConfig>;
@@ -210,14 +208,15 @@ trait Handle {
         air_thermal_conductivity: f32,
     ) -> TLCResult<&TLCConfig>;
     fn set_characteristic_length(&mut self, characteristic_length: f32) -> TLCResult<&TLCConfig>;
-    fn set_regulator(&mut self, regulator: Vec<f32>) -> TLCResult<()>;
-    fn set_filter_method(&mut self, filter_method: FilterMethod) -> TLCResult<()>;
-    fn set_interp_method(&mut self, interp_method: InterpMethod) -> TLCResult<()>;
-    fn set_iteration_method(&mut self, iteration_method: IterationMethod) -> TLCResult<()>;
-    fn set_region(&mut self, region: [usize; 4]) -> TLCResult<()>;
-    fn set_temp_column_num(&mut self, temp_column_num: Vec<usize>) -> TLCResult<()>;
-    fn set_thermocouple_pos(&mut self, thermocouple: Vec<(i32, i32)>) -> TLCResult<()>;
+    fn set_regulator(&mut self, regulator: Vec<f32>) -> TLCResult<&TLCConfig>;
+    fn set_filter_method(&mut self, filter_method: FilterMethod) -> TLCResult<&TLCConfig>;
+    fn set_interp_method(&mut self, interp_method: InterpMethod) -> TLCResult<&TLCConfig>;
+    fn set_iteration_method(&mut self, iteration_method: IterationMethod) -> TLCResult<&TLCConfig>;
 
+    /// todo
+    fn set_region(&mut self, region: [usize; 4]) -> TLCResult<&TLCConfig>;
+    fn set_temp_column_num(&mut self, temp_column_num: Vec<usize>) -> TLCResult<&TLCConfig>;
+    fn set_thermocouple_pos(&mut self, thermocouple: Vec<(i32, i32)>) -> TLCResult<&TLCConfig>;
     fn read_video(&mut self) -> TLCResult<()>;
     fn read_daq(&mut self) -> TLCResult<()>;
 }
@@ -242,17 +241,11 @@ impl Handle for Option<TLCData> {
     }
 
     fn set_save_dir(&mut self, save_dir: String) -> TLCResult<&TLCConfig> {
-        Ok(self
-            .get_or_insert(TLCData::new()?)
-            .set_save_dir(save_dir)?
-            .get_config())
+        Ok(self.get()?.set_save_dir(save_dir)?.get_config())
     }
 
     fn set_video_path(&mut self, video_path: String) -> TLCResult<&TLCConfig> {
-        Ok(self
-            .get_or_insert(TLCData::new()?)
-            .set_video_path(video_path)?
-            .get_config())
+        Ok(self.get()?.set_video_path(video_path)?.get_config())
     }
 
     fn set_daq_path(&mut self, daq_path: String) -> TLCResult<&TLCConfig> {
@@ -308,51 +301,55 @@ impl Handle for Option<TLCData> {
             .get_config())
     }
 
-    fn set_regulator(&mut self, regulator: Vec<f32>) -> TLCResult<()> {
-        self.get()?.set_regulator(regulator);
-
-        Ok(())
+    fn set_regulator(&mut self, regulator: Vec<f32>) -> TLCResult<&TLCConfig> {
+        Ok(self.get()?.set_regulator(regulator).get_config())
     }
 
-    fn set_filter_method(&mut self, filter_method: FilterMethod) -> TLCResult<()> {
-        self.get()?.set_filter_method(filter_method);
-
-        Ok(())
+    fn set_filter_method(&mut self, filter_method: FilterMethod) -> TLCResult<&TLCConfig> {
+        Ok(self.get()?.set_filter_method(filter_method).get_config())
     }
 
-    fn set_interp_method(&mut self, interp_method: InterpMethod) -> TLCResult<()> {
-        self.get()?.set_interp_method(interp_method);
-
-        Ok(())
+    fn set_interp_method(&mut self, interp_method: InterpMethod) -> TLCResult<&TLCConfig> {
+        Ok(self.get()?.set_interp_method(interp_method).get_config())
     }
 
-    fn set_iteration_method(&mut self, iteration_method: IterationMethod) -> TLCResult<()> {
-        self.get()?.set_iteration_method(iteration_method);
-
-        Ok(())
+    fn set_iteration_method(&mut self, iteration_method: IterationMethod) -> TLCResult<&TLCConfig> {
+        Ok(self
+            .get()?
+            .set_iteration_method(iteration_method)
+            .get_config())
     }
 
-    fn set_region(&mut self, region: [usize; 4]) -> TLCResult<()> {
-        self.get()?
-            .set_region((region[0], region[1]), (region[2], region[3]));
-
-        Ok(())
+    fn set_region(&mut self, region: [usize; 4]) -> TLCResult<&TLCConfig> {
+        Ok(self
+            .get()?
+            .set_region((region[0], region[1]), (region[2], region[3]))
+            .get_config())
     }
 
-    fn set_temp_column_num(&mut self, temp_column_num: Vec<usize>) -> TLCResult<()> {
-        self.get()?.set_temp_column_num(temp_column_num);
-
-        Ok(())
+    fn set_temp_column_num(&mut self, temp_column_num: Vec<usize>) -> TLCResult<&TLCConfig> {
+        Ok(self
+            .get()?
+            .set_temp_column_num(temp_column_num)
+            .get_config())
     }
 
-    fn set_thermocouple_pos(&mut self, thermocouple: Vec<(i32, i32)>) -> TLCResult<()> {
-        self.get()?.set_thermocouple_pos(thermocouple);
-
-        Ok(())
+    fn set_thermocouple_pos(&mut self, thermocouple: Vec<(i32, i32)>) -> TLCResult<&TLCConfig> {
+        Ok(self.get()?.set_thermocouple_pos(thermocouple).get_config())
     }
 
     fn read_video(&mut self) -> TLCResult<()> {
-        self.get()?.read_video()?;
+        self.get()?
+            .read_video()?
+            .set_start_frame(84)
+            .read_video()?
+            .set_start_frame(84)
+            .read_video()?
+            .set_start_frame(84)
+            .read_video()?
+            .set_start_frame(84)
+            .read_video()?
+            .set_start_frame(84);
 
         Ok(())
     }

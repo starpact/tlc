@@ -1,7 +1,7 @@
 [package]
 name = "tlc"
 version = "0.1.0"
-description = "transient liquid crystal data processing"
+description = "Transient Liquid Crystal Data Processing"
 authors = [ "Starpact <sjtu_yhj@outlook.com>" ]
 license = "MIT"
 repository = ""
