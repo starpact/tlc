@@ -1,11 +1,11 @@
 #![allow(dead_code)]
 #[cfg(test)]
 mod cal {
-    use std::time::Instant;
+    use std::time::{Duration, Instant};
 
     use tlc::cal::*;
 
-    const CONFIG_PATH: &str = "./tmp/config/config.json";
+    const CONFIG_PATH: &str = "./cache/default_config.json";
 
     type Res = Result<(), Box<dyn std::error::Error>>;
 
@@ -27,9 +27,13 @@ mod cal {
     fn read_video() -> Res {
         let mut tlc_data = init();
         let t = Instant::now();
-        tlc_data.read_video()?;
+        // tlc_data.read_video()?;
+        // println!("{}", tlc_data.get_raw_g2d().unwrap());
+
+        tlc_data.read_video()?.set_start_frame(84);
+
         println!("{:?}", t.elapsed());
-        println!("{}", tlc_data.get_raw_g2d().unwrap());
+        std::thread::sleep(Duration::from_secs(1000));
 
         Ok(())
     }

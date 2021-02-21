@@ -345,10 +345,6 @@ impl Handle for Option<TLCData> {
             .read_video()?
             .set_start_frame(84)
             .read_video()?
-            .set_start_frame(84)
-            .read_video()?
-            .set_start_frame(84)
-            .read_video()?
             .set_start_frame(84);
 
         Ok(())

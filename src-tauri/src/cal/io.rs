@@ -269,6 +269,10 @@ impl TLCConfig {
                 })
             });
 
+        if let Ok(tls) = Arc::try_unwrap(tls) {
+            tls.into_iter().for_each(|v| drop(v));
+        }
+
         Ok(g2d)
     }
 
