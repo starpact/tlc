@@ -2,7 +2,7 @@ use std::sync::mpsc::Receiver;
 use std::thread;
 
 use serde::Serialize;
-use solve::IterationMethod;
+
 use tauri::api::rpc::format_callback_result;
 use tauri::WebviewMut;
 
@@ -10,6 +10,7 @@ use super::cmd::{Cmd, Cmd::*};
 use crate::cal::{error::TLCResult, *};
 use crate::err;
 use preprocess::{FilterMethod, InterpMethod};
+use solve::IterationMethod;
 
 pub fn init(rx: Receiver<(WebviewMut, Cmd)>) {
     thread::spawn(move || {
@@ -178,6 +179,16 @@ fn execute(tlc_data: &mut Option<TLCData>, wm: WebviewMut, cmd: Cmd) -> TLCResul
 
         ReadDAQ { callback, error } => tlc_data.read_daq().dispatch(wm, callback, error)?,
 
+        GetFrame {
+            callback,
+            error,
+            frame_index,
+        } => {
+            tlc_data
+                .get_frame(frame_index)
+                .dispatch(wm, callback, error)?;
+        }
+
         _ => {}
     }
 
@@ -217,13 +228,17 @@ trait Handle {
     fn set_region(&mut self, region: [usize; 4]) -> TLCResult<&TLCConfig>;
     fn set_temp_column_num(&mut self, temp_column_num: Vec<usize>) -> TLCResult<&TLCConfig>;
     fn set_thermocouple_pos(&mut self, thermocouple: Vec<(i32, i32)>) -> TLCResult<&TLCConfig>;
+    fn get_frame(&mut self, frame_index: usize) -> TLCResult<String>;
     fn read_video(&mut self) -> TLCResult<()>;
     fn read_daq(&mut self) -> TLCResult<()>;
 }
 
 impl Handle for Option<TLCData> {
     fn get(&mut self) -> TLCResult<&mut TLCData> {
-        Ok(self.get_or_insert(TLCData::new()?))
+        match self {
+            Some(data) => Ok(data),
+            None => Ok(self.insert(TLCData::new()?)),
+        }
     }
 
     fn load_default_config(&mut self) -> TLCResult<&TLCConfig> {
@@ -235,7 +250,7 @@ impl Handle for Option<TLCData> {
     }
 
     fn save_config(&mut self) -> TLCResult<()> {
-        self.get_or_insert(TLCData::new()?).save_config()?;
+        self.get()?.save_config()?;
 
         Ok(())
     }
@@ -338,18 +353,12 @@ impl Handle for Option<TLCData> {
         Ok(self.get()?.set_thermocouple_pos(thermocouple).get_config())
     }
 
+    fn get_frame(&mut self, frame_index: usize) -> TLCResult<String> {
+        Ok(self.get()?.get_config().get_frame(frame_index)?)
+    }
+
     fn read_video(&mut self) -> TLCResult<()> {
-        self.get()?
-            .read_video()?
-            .set_start_frame(84)
-            .read_video()?
-            .set_start_frame(84)
-            .read_video()?
-            .set_start_frame(84)
-            .read_video()?
-            .set_start_frame(84)
-            .read_video()?
-            .set_start_frame(84);
+        self.get()?.read_video()?;
 
         Ok(())
     }
@@ -367,10 +376,14 @@ trait Dispatch {
 
 impl<T: Serialize> Dispatch for TLCResult<T> {
     fn dispatch(self, mut wm: WebviewMut, callback: String, error: String) -> TLCResult<()> {
+        let t0 = std::time::Instant::now();
         let callback_string =
             format_callback_result(self.map_err(|err| err.to_string()), callback, error)
                 .map_err(|err| err!(err))?;
-        println!("{}", callback_string);
+        println!("{:?}", t0.elapsed());
+        if callback_string.len() < 1000 {
+            println!("{}", callback_string);
+        }
         wm.dispatch(move |w| w.eval(callback_string.as_str()))
             .map_err(|err| err!(err))?;
 

@@ -309,13 +309,17 @@ impl TLCData {
     }
 
     pub fn read_video(&mut self) -> TLCResult<&mut Self> {
-        self.raw_g2d.get_or_insert(self.config.read_video()?);
+        if self.raw_g2d.is_none() {
+            self.raw_g2d.insert(self.config.read_video()?);
+        }
 
         Ok(self)
     }
 
     pub fn read_daq(&mut self) -> TLCResult<&mut Self> {
-        self.t2d.get_or_insert(self.config.read_daq()?);
+        if self.t2d.is_none() {
+            self.t2d.insert(self.config.read_daq()?);
+        }
 
         Ok(self)
     }

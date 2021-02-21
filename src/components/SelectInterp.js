@@ -4,25 +4,36 @@ import IButton from "./Button";
 import IInput from "./Input";
 
 function SelectInterp({ value, onSubmit }) {
-  const [innerValue, setInnerValue] = useState(value || "");
+  const [type, setType] = useState(() => {
+    if (!!value.Horizontal) return "Horizontal";
+    if (!!value.HorizontalExtra) return "HorizontalExtra";
+    if (!!value.Vertical) return "Vertical";
+    if (!!value.VerticalExtra) return "VerticalExtra";
+    if (!!value.Bilinear) return "Bilinear";
+    if (!!value.BilinearExtra) return "BilinearExtra";
+    return "";
+  });
 
-  const onSelectChange = v => {
-    if (v.target.value === "Bilinear") setInnerValue({ Bilinear: ["", ""] })
-    else if (v.target.value === "BilinearExtra") setInnerValue({ BilinearExtra: ["", ""] });
-    else setInnerValue(v.target.value);
-  }
+  const [shape, setShape] = useState(() => {
+    if (!!value.Horizontal) return value.Horizontal;
+    if (!!value.HorizontalExtra) return value.HorizontalExtra
+    if (!!value.Vertical) return value.Vertical;
+    if (!!value.VerticalExtra) return value.VerticalExtra;
+    if (!!value.Bilinear) return value.Bilinear;
+    if (!!value.BilinearExtra) return value.BilinearExtra;
+    return ["", ""];
+  });
 
   return (
     <HStack w="600px">
       <Select
         w="200px"
-        value={!!innerValue.Bilinear ? "Bilinear" : !!innerValue.BilinearExtra ?
-          "BilinearExtra" : innerValue}
+        value={type}
         bg="#689d6a"
-        color="#282828"
+        color="#32302f"
         border="unset"
         fontWeight="bold"
-        onChange={onSelectChange}
+        onChange={e => setType(e.target.value)}
       >
         <option value="Horizontal">水平</option>
         <option value="HorizontalExtra">水平（外插）</option>
@@ -31,54 +42,34 @@ function SelectInterp({ value, onSubmit }) {
         <option value="Bilinear">双线性</option>
         <option value="BilinearExtra">双线性（外插）</option>
       </Select>
-      {!!innerValue.Bilinear &&
+      {(type === "Bilinear" || type === "BilinearExtra") &&
         <Stack>
           <IInput
             leftTag="热电偶行数"
-            value={innerValue.Bilinear[0]}
+            value={shape[0]}
             onBlur={v => {
-              const arr = innerValue.Bilinear.concat();
+              const arr = shape;
               arr[0] = parseInt(v);
-              setInnerValue({ Bilinear: arr });
+              setShape(shape);
             }}
             mutable
           />
           <IInput
             leftTag="热电偶列数"
-            value={innerValue.Bilinear[1]}
+            value={shape[1]}
             onBlur={v => {
-              const arr = innerValue.Bilinear.concat();
+              const arr = shape;
               arr[1] = parseInt(v);
-              setInnerValue({ Bilinear: arr });
+              setShape(shape);
             }}
             mutable
           />
         </Stack>}
-      {!!innerValue.BilinearExtra &&
-        <Stack>
-          <IInput
-            leftTag="热电偶行数"
-            value={innerValue.BilinearExtra[0]}
-            onBlur={v => {
-              const arr = innerValue.BilinearExtra.concat();
-              arr[0] = parseInt(v);
-              setInnerValue({ BilinearExtra: arr });
-            }}
-            mutable
-          />
-          <IInput
-            leftTag="热电偶列数"
-            value={innerValue.BilinearExtra[1]}
-            onBlur={v => {
-              const arr = innerValue.BilinearExtra.concat();
-              arr[1] = parseInt(v);
-              setInnerValue({ BilinearExtra: arr });
-            }}
-            mutable
-          />
-        </Stack>}
-      <IButton text="提交" onClick={() => onSubmit(innerValue)} />
-    </HStack>
+      <IButton text="提交" onClick={() => {
+        if (type === "Bilinear") onSubmit({ Bilinear: shape })
+        else onSubmit({ BilinearExtra: shape })
+      }} />
+    </HStack >
   )
 }
 

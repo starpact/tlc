@@ -5,7 +5,7 @@ mod cal {
 
     use tlc::cal::*;
 
-    const CONFIG_PATH: &str = "./tmp/config/config.json";
+    const CONFIG_PATH: &str = "./cache/default_config.json";
 
     type Res = Result<(), Box<dyn std::error::Error>>;
 

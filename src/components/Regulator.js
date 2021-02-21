@@ -30,7 +30,7 @@ function ISlider({ value, onChange }) {
         <SliderThumb bgColor="#928374" />
       </Slider>
       <Tag size="lg" bgColor="#98971a">
-        <Text color="#3c3836" fontWeight="bold">
+        <Text color="#32302f" fontWeight="bold">
           {value.toFixed(2)}
         </Text>
       </Tag>

@@ -18,6 +18,8 @@ use ffmpeg::media::Type;
 use ffmpeg::software::scaling::{flag::Flags, Context};
 use ffmpeg::util::frame::video::Video;
 
+use serde_json::json;
+
 use calamine::{open_workbook, Reader, Xlsx};
 
 use csv::{ReaderBuilder, StringRecord, WriterBuilder};
@@ -174,6 +176,73 @@ impl TLCConfig {
     }
 
     /// 线程池解码视频读取Green值
+    pub fn get_frame(&self, frame_index: usize) -> TLCResult<String> {
+        let t0 = std::time::Instant::now();
+        ffmpeg::init().map_err(|err| err!(VideoError, err, "ffmpeg初始化错误，建议重装"))?;
+
+        let mut input =
+            input(&self.video_path).map_err(|_| err!(VideoIOError, &self.video_path))?;
+        let video_stream = input.streams().best(Type::Video).ok_or(err!(
+            VideoError,
+            "找不到视频流",
+            &self.video_path,
+        ))?;
+
+        let video_stream_index = video_stream.index();
+        let mut decoder = video_stream
+            .codec()
+            .decoder()
+            .video()
+            .map_err(|err| err!(VideoError, err, ""))?;
+
+        let (dst_w, dst_h) = (decoder.width() >> 1, decoder.height() >> 1);
+
+        let mut ctx = Context::get(
+            decoder.format(),
+            decoder.width(),
+            decoder.height(),
+            Pixel::RGB24,
+            dst_w,
+            dst_h,
+            Flags::FAST_BILINEAR,
+        )
+        .map_err(|err| err!(VideoError, err, ""))?;
+        let mut src_frame = Video::empty();
+        let mut dst_frame = Video::empty();
+
+        let packet = input
+            .packets()
+            .filter(|(stream, _)| stream.index() == video_stream_index)
+            .nth(frame_index)
+            .ok_or(err!())?
+            .1;
+        println!("{:?}", t0.elapsed());
+        decoder
+            .send_packet(&packet)
+            .map_err(|err| err!(VideoError, err, ""))?;
+        decoder
+            .receive_frame(&mut src_frame)
+            .map_err(|err| err!(VideoError, err, ""))?;
+        ctx.run(&src_frame, &mut dst_frame)
+            .map_err(|err| err!(VideoError, err, ""))?;
+
+        // println!("{:?}", t0.elapsed());
+        // let mut buf = Vec::with_capacity(2000000);
+
+        // let png_encoder = image::png::PngEncoder::new(&mut buf);
+        // png_encoder
+        //     .encode(dst_frame.data(0), dst_w, dst_h, image::ColorType::Rgb8)
+        //     .map_err(|err| err!(err))?;
+        // let base64_string = base64::encode(&buf);
+        println!("{:?}", t0.elapsed());
+
+        // Ok(base64_string)
+        let res = serde_json::to_string(dst_frame.data(0)).map_err(|err| err!(err))?;
+        Ok(res)
+        // Ok((&dst_frame.data(0)[..10]).to_owned())
+    }
+
+    /// 线程池解码视频读取Green值
     pub fn read_video(&self) -> TLCResult<Array2<u8>> {
         // 左上角坐标
         let (tl_y, tl_x) = self.top_left_pos;
@@ -195,7 +264,7 @@ impl TLCConfig {
         let video_stream_index = video_stream.index();
         let ctx_mutex = &Mutex::new(video_stream.codec());
 
-        let g2d = Array2::zeros((self.frame_num, pix_num));
+        let g2d = Array2::<u8>::zeros((self.frame_num, pix_num));
         let g2d_view = g2d.view();
 
         let tls = Arc::new(ThreadLocal::new());
@@ -268,6 +337,10 @@ impl TLCConfig {
                     }
                 })
             });
+
+        if let Ok(tls) = Arc::try_unwrap(tls) {
+            tls.into_iter().for_each(|v| drop(v));
+        }
 
         Ok(g2d)
     }
