@@ -46,6 +46,17 @@ mod cal {
     }
 
     #[test]
+    fn preload_packets() {
+        let tlc_data = init();
+        let t = Instant::now();
+
+        tlc_data.get_config().preload_packets().unwrap();
+
+        println!("{:?}", t.elapsed());
+        std::thread::sleep(Duration::from_secs(1000));
+    }
+
+    #[test]
     fn read_daq() -> Res {
         let mut tlc_data = init();
         let t = Instant::now();

@@ -122,19 +122,7 @@ pub enum Cmd {
         callback: String,
         error: String,
     },
-    ReadVideo {
-        callback: String,
-        error: String,
-    },
-    ReadDAQ {
-        callback: String,
-        error: String,
-    },
     SaveConfig {
-        callback: String,
-        error: String,
-    },
-    PreloadFrames {
         callback: String,
         error: String,
     },

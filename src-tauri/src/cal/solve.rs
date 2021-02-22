@@ -10,9 +10,9 @@ use rayon::prelude::*;
 
 use packed_simd::{f32x8, Simd};
 
-use crate::err;
+use crate::awsl;
 
-use super::{error::TLCResult, postprocess, TLCConfig, TLCData};
+use super::{error::TLCResult, TLCConfig, TLCData};
 
 /// 默认初始对流换热系数
 const DEFAULT_H0: f32 = 50.;
@@ -187,18 +187,9 @@ impl PointData<'_> {
 }
 
 impl TLCData {
-    pub fn solve(&mut self) -> TLCResult<&mut Self> {
-        if self.nu2d.is_some() {
-            return Ok(self);
-        }
-        if self.peak_frames.is_none() {
-            self.detect_peak()?;
-        }
-        if self.interp.is_none() {
-            self.interp()?;
-        }
-
-        let peak_frames = self.peak_frames.as_ref().ok_or(err!())?;
+    pub fn solve(&mut self) -> TLCResult<Array2<f32>> {
+        let peak_frames = self.get_peak_frames()?;
+        let interp = self.get_interp()?;
 
         let TLCConfig {
             region_shape,
@@ -222,7 +213,7 @@ impl TLCData {
             .zip(nus.par_iter_mut())
             .try_for_each(|((pos, &peak_frame), nu)| -> Option<()> {
                 *nu = if peak_frame > FIRST_FEW_TO_CAL_T0 {
-                    let temps = self.interp_single_point(pos)?;
+                    let temps = interp.interp_single_point(pos, region_shape);
                     let temps = temps.as_slice_memory_order()?;
                     let point_data = PointData {
                         peak_frame,
@@ -240,16 +231,12 @@ impl TLCData {
 
                 Some(())
             })
-            .ok_or(err!())?;
+            .ok_or(awsl!())?;
 
         let nu2d = Array1::from(nus)
             .into_shape(region_shape)
-            .map_err(|err| err!(err))?;
+            .map_err(|err| awsl!(err))?;
 
-        let nu_nan_mean = postprocess::cal_average(nu2d.view());
-        self.nu2d = Some(nu2d);
-        self.nu_ave = Some(nu_nan_mean);
-
-        Ok(self)
+        Ok(nu2d)
     }
 }

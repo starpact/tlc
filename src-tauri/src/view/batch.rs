@@ -7,7 +7,7 @@ use crate::cal::{error::TLCResult, TLCData};
 pub fn cal_batch<P: AsRef<Path>>(config_path: P) -> TLCResult<()> {
     let mut tlc_data = TLCData::from_path(config_path)?;
 
-    tlc_data.solve()?.save_nu()?.plot_nu()?;
+    tlc_data.save_nu()?.plot_nu()?;
 
     println!("{}", tlc_data.get_nu_ave().unwrap());
     Ok(())

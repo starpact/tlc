@@ -13,7 +13,7 @@
       "active": true
     },
     "bundle": {
-      "active": true,
+      "active": false,
       "targets": "msi",
       "identifier": "com.sjtu.tlc",
       "icon": [

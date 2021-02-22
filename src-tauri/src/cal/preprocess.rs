@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use packed_simd::f32x8;
 
 use super::{error::TLCResult, TLCConfig, TLCData};
-use crate::err;
+use crate::awsl;
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 pub enum FilterMethod {
@@ -19,14 +19,8 @@ pub enum FilterMethod {
 
 impl TLCData {
     /// 对Green值矩阵沿时间轴滤波
-    pub fn filtering(&mut self) -> TLCResult<&mut Self> {
-        if self.filtered_g2d.is_some() {
-            return Ok(self);
-        }
-        if self.raw_g2d.is_none() {
-            self.read_video()?;
-        }
-        let mut filtered_g2d = self.raw_g2d.as_ref().ok_or(err!())?.clone();
+    pub fn filtering(&mut self) -> TLCResult<Array2<u8>> {
+        let mut filtered_g2d = self.get_raw_g2d()?.to_owned();
 
         match self.config.filter_method {
             FilterMethod::Median(window_size) => {
@@ -37,23 +31,16 @@ impl TLCData {
                         let mut filter = Filter::new(window_size);
                         col.iter_mut().for_each(|g| *g = filter.consume(*g))
                     });
-                self.filtered_g2d = Some(filtered_g2d);
-            }
-            _ => self.filtered_g2d = Some(filtered_g2d),
-        }
 
-        Ok(self)
+                Ok(filtered_g2d)
+            }
+            _ => Ok(filtered_g2d),
+        }
     }
 
     /// 峰值检测
-    pub fn detect_peak(&mut self) -> TLCResult<&mut Self> {
-        if self.peak_frames.is_some() {
-            return Ok(self);
-        }
-        if self.filtered_g2d.is_none() {
-            self.filtering()?;
-        }
-        let filtered_g2d = self.filtered_g2d.as_ref().ok_or(err!())?.view();
+    pub fn detect_peak(&mut self) -> TLCResult<Vec<usize>> {
+        let filtered_g2d = self.get_filtered_g2d()?;
         let mut peak_frames = Vec::with_capacity(filtered_g2d.ncols());
         unsafe { peak_frames.set_len(filtered_g2d.ncols()) };
 
@@ -66,57 +53,40 @@ impl TLCData {
                     .iter()
                     .enumerate()
                     .max_by_key(|(_, g)| *g)
-                    .ok_or(err!("峰值检测出错"))?
+                    .ok_or(awsl!("峰值检测出错"))?
                     .0;
 
                 Ok(())
             })?;
-        self.peak_frames = Some(peak_frames);
 
-        Ok(self)
-    }
-
-    pub fn interp_single_point<'a>(&'a self, pos: usize) -> Option<ArrayView1<'a, f32>> {
-        Some(
-            self.interp
-                .as_ref()?
-                .interp_single_point(pos, self.config.region_shape),
-        )
+        Ok(peak_frames)
     }
 
     pub fn interp_single_frame(&self, frame: usize) -> TLCResult<Array2<f32>> {
         self.interp
             .as_ref()
-            .ok_or(err!())?
+            .ok_or(awsl!())?
             .interp_single_frame(frame, self.config.region_shape)
     }
 
     /// interpolation of reference temperature matrix
-    pub fn interp(&mut self) -> TLCResult<&mut Self> {
-        if self.interp.is_some() {
-            return Ok(self);
-        }
-        if self.t2d.is_none() {
-            self.read_daq()?;
-        }
-        let t2d = self.t2d.as_ref().ok_or(err!("插值错误"))?.view();
+    pub fn interp(&mut self) -> TLCResult<Interp> {
         let TLCConfig {
             interp_method,
-            ref thermocouple_pos,
             top_left_pos,
             region_shape,
             ..
         } = self.config;
+        let thermocouple_pos = &self.config.thermocouple_pos.clone();
+        let t2d = self.get_t2d()?;
 
-        self.interp = Some(Interp::new(
+        Ok(Interp::new(
             t2d,
             interp_method,
             thermocouple_pos,
             top_left_pos,
             region_shape,
-        )?);
-
-        Ok(self)
+        )?)
     }
 }
 
@@ -158,10 +128,10 @@ impl Interp {
                 top_left_pos,
             ),
         }
-        .ok_or(err!("参考温度插值错误"))
+        .ok_or(awsl!("参考温度插值错误"))
     }
 
-    fn interp_single_point<'a>(
+    pub fn interp_single_point<'a>(
         &'a self,
         pos: usize,
         region_shape: (usize, usize),
@@ -185,19 +155,19 @@ impl Interp {
         let single_frame = match self.0.nrows() {
             h if h == cal_w => col
                 .broadcast((cal_h, cal_w))
-                .ok_or(err!("参考温度矩阵形状转换失败"))?
+                .ok_or(awsl!("参考温度矩阵形状转换失败"))?
                 .to_owned(),
             h if h == cal_h => col
                 .to_owned()
                 .into_shape((cal_h, 1))
-                .map_err(|err| err!(err))?
+                .map_err(|err| awsl!(err))?
                 .broadcast((cal_h, cal_w))
-                .ok_or(err!("参考温度矩阵形状转换失败"))?
+                .ok_or(awsl!("参考温度矩阵形状转换失败"))?
                 .to_owned(),
             _ => col
                 .to_owned()
                 .into_shape(region_shape)
-                .map_err(|err| err!(err))?
+                .map_err(|err| awsl!(err))?
                 .to_owned(),
         };
 

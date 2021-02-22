@@ -1,6 +1,5 @@
 import { useState, useEffect } from "react"
 import {
-  Center,
   HStack,
   Slider,
   SliderTrack,
@@ -135,7 +134,7 @@ function BasicSettings({ config, setConfig, setErrMsg }) {
 
   return (
     <Stack>
-      <Grid templateColumns="repeat(8, 1fr)" gap={2} marginX="30px">
+      <Grid templateColumns="repeat(12, 1fr)" gap={2} marginX="30px">
         <GridItem colSpan={1}>
           <Stack spacing="10px">
             <IButton text="重置配置" onClick={loadDefaultConfig} hover="重置为您上一次保存的配置" />
@@ -143,7 +142,7 @@ function BasicSettings({ config, setConfig, setErrMsg }) {
             <IButton text="保存配置" onClick={saveConfig} />
           </Stack>
         </GridItem>
-        <GridItem colSpan={5}>
+        <GridItem colSpan={8}>
           <Stack spacing="10px">
             <IInput
               leftTag="保存根目录"
@@ -164,7 +163,7 @@ function BasicSettings({ config, setConfig, setErrMsg }) {
             />
           </Stack>
         </GridItem>
-        <GridItem colSpan={2}>
+        <GridItem colSpan={3}>
           <Stack spacing="10px">
             <IInput
               leftTag="起始帧数"
@@ -192,6 +191,13 @@ function BasicSettings({ config, setConfig, setErrMsg }) {
       </Grid>
       <HStack>
         <Stack>
+          {/* <Box
+            backgroundImage={`url(data:image/jpeg;base64,${frame})`}
+            backgroundSize="640px 512px"
+            w="640px"
+            h="512px"
+          >
+          </Box> */}
           <Image src={`data:image/jpeg;base64,${frame}`} htmlWidth="640" htmlHeight="512" />
           <HStack>
             <Box w="7px"></Box>

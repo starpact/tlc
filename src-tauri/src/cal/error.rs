@@ -46,7 +46,7 @@ pub enum TLCError {
 pub type TLCResult<T> = Result<T, TLCError>;
 
 #[macro_export]
-macro_rules! err {
+macro_rules! awsl {
     () => {
         $crate::cal::error::TLCError::UnKnown("bakana!".to_owned())
     };
