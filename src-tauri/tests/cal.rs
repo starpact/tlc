@@ -27,15 +27,22 @@ mod cal {
     fn read_video() -> Res {
         let mut tlc_data = init();
         let t = Instant::now();
-        // tlc_data.read_video()?;
-        // println!("{}", tlc_data.get_raw_g2d().unwrap());
 
-        tlc_data.read_video()?.set_start_frame(84);
+        tlc_data.read_video()?;
 
         println!("{:?}", t.elapsed());
-        std::thread::sleep(Duration::from_secs(1000));
 
         Ok(())
+    }
+
+    #[test]
+    fn preload_frames() {
+        let tlc_data = init();
+        let t = Instant::now();
+
+        tlc_data.get_config().preload_frames().unwrap();
+
+        println!("{:?}", t.elapsed());
     }
 
     #[test]

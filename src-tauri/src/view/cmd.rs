@@ -130,10 +130,18 @@ pub enum Cmd {
         callback: String,
         error: String,
     },
-
     SaveConfig {
         callback: String,
         error: String,
+    },
+    PreloadFrames {
+        callback: String,
+        error: String,
+    },
+    GetFrame {
+        callback: String,
+        error: String,
+        frame_index: usize,
     },
     SaveNu {
         callback: String,

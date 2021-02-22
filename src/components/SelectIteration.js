@@ -9,11 +9,13 @@ function SelectIteration({ value, onSubmit }) {
     if (!!value.NewtonTangent) return "NewtonTangent";
     return "NewtonDown";
   });
+
   const [h0, setH0] = useState(() => {
     if (!value) return 50;
     if (!!value.NewtonTangent) return value.NewtonTangent.h0;
     return value.NewtonDown.h0;
   });
+
   const [maxIterNum, setMaxIterNum] = useState(() => {
     if (!value) return 10;
     if (!!value.NewtonTangent) return value.NewtonTangent.max_iter_num;
@@ -26,7 +28,7 @@ function SelectIteration({ value, onSubmit }) {
         w="200px"
         value={type}
         bg="#689d6a"
-        color="#282828"
+        color="#32302f"
         border="unset"
         fontWeight="bold"
         onChange={e => setType(e.target.value)}

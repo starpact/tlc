@@ -2,7 +2,7 @@ use std::sync::mpsc::Receiver;
 use std::thread;
 
 use serde::Serialize;
-use solve::IterationMethod;
+
 use tauri::api::rpc::format_callback_result;
 use tauri::WebviewMut;
 
@@ -10,6 +10,7 @@ use super::cmd::{Cmd, Cmd::*};
 use crate::cal::{error::TLCResult, *};
 use crate::err;
 use preprocess::{FilterMethod, InterpMethod};
+use solve::IterationMethod;
 
 pub fn init(rx: Receiver<(WebviewMut, Cmd)>) {
     thread::spawn(move || {
@@ -178,6 +179,20 @@ fn execute(tlc_data: &mut Option<TLCData>, wm: WebviewMut, cmd: Cmd) -> TLCResul
 
         ReadDAQ { callback, error } => tlc_data.read_daq().dispatch(wm, callback, error)?,
 
+        PreloadFrames { callback, error } => {
+            tlc_data.preload_frames().dispatch(wm, callback, error)?
+        }
+
+        GetFrame {
+            callback,
+            error,
+            frame_index,
+        } => {
+            tlc_data
+                .get_frame(frame_index)
+                .dispatch(wm, callback, error)?;
+        }
+
         _ => {}
     }
 
@@ -214,6 +229,8 @@ trait Handle {
     fn set_iteration_method(&mut self, iteration_method: IterationMethod) -> TLCResult<&TLCConfig>;
 
     /// todo
+    fn preload_frames(&mut self) -> TLCResult<()>;
+    fn get_frame(&mut self, frame_index: usize) -> TLCResult<String>;
     fn set_region(&mut self, region: [usize; 4]) -> TLCResult<&TLCConfig>;
     fn set_temp_column_num(&mut self, temp_column_num: Vec<usize>) -> TLCResult<&TLCConfig>;
     fn set_thermocouple_pos(&mut self, thermocouple: Vec<(i32, i32)>) -> TLCResult<&TLCConfig>;
@@ -223,7 +240,10 @@ trait Handle {
 
 impl Handle for Option<TLCData> {
     fn get(&mut self) -> TLCResult<&mut TLCData> {
-        Ok(self.get_or_insert(TLCData::new()?))
+        match self {
+            Some(data) => Ok(data),
+            None => Ok(self.insert(TLCData::new()?)),
+        }
     }
 
     fn load_default_config(&mut self) -> TLCResult<&TLCConfig> {
@@ -235,7 +255,7 @@ impl Handle for Option<TLCData> {
     }
 
     fn save_config(&mut self) -> TLCResult<()> {
-        self.get_or_insert(TLCData::new()?).save_config()?;
+        self.get()?.save_config()?;
 
         Ok(())
     }
@@ -338,14 +358,21 @@ impl Handle for Option<TLCData> {
         Ok(self.get()?.set_thermocouple_pos(thermocouple).get_config())
     }
 
+    fn preload_frames(&mut self) -> TLCResult<()> {
+        self.get()?.preload_frames()?;
+
+        Ok(())
+    }
+
+    fn get_frame(&mut self, frame_index: usize) -> TLCResult<String> {
+        let t0 = std::time::Instant::now();
+        let a = self.get()?.get_frame(frame_index)?;
+        println!("{:?}", t0.elapsed());
+        Ok(a)
+    }
+
     fn read_video(&mut self) -> TLCResult<()> {
-        self.get()?
-            .read_video()?
-            .set_start_frame(84)
-            .read_video()?
-            .set_start_frame(84)
-            .read_video()?
-            .set_start_frame(84);
+        self.get()?.read_video()?;
 
         Ok(())
     }
@@ -366,7 +393,7 @@ impl<T: Serialize> Dispatch for TLCResult<T> {
         let callback_string =
             format_callback_result(self.map_err(|err| err.to_string()), callback, error)
                 .map_err(|err| err!(err))?;
-        println!("{}", callback_string);
+        println!("{}", &callback_string[..233]);
         wm.dispatch(move |w| w.eval(callback_string.as_str()))
             .map_err(|err| err!(err))?;
 

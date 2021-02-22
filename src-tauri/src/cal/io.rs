@@ -28,6 +28,8 @@ use crate::err;
 
 use super::error::TLCError::VideoError;
 
+pub const PRELOAD_FRAME_NUM: usize = 200;
+
 /// wrap `Context` to pass between threads(because of raw pointer)
 struct SendableContext(Context);
 
@@ -173,6 +175,126 @@ impl TLCConfig {
         Ok(self)
     }
 
+    pub fn preload_frames(&self) -> TLCResult<Vec<String>> {
+        ffmpeg::init().map_err(|err| err!(VideoError, err, "ffmpeg初始化错误，建议重装"))?;
+        let mut input =
+            input(&self.video_path).map_err(|_| err!(VideoIOError, &self.video_path))?;
+        let video_stream = input.streams().best(Type::Video).ok_or(err!(
+            VideoError,
+            "找不到视频流",
+            &self.video_path,
+        ))?;
+
+        let video_stream_index = video_stream.index();
+        let mut decoder = video_stream
+            .codec()
+            .decoder()
+            .video()
+            .map_err(|err| err!(VideoError, err, ""))?;
+
+        let (dst_h, dst_w) = (decoder.height() >> 2, decoder.width() >> 2);
+
+        let mut buf = Vec::with_capacity((dst_h * dst_w * 3) as usize);
+        let mut res = Vec::with_capacity(self.total_frames);
+
+        let mut ctx = Context::get(
+            decoder.format(),
+            decoder.width(),
+            decoder.height(),
+            Pixel::RGB24,
+            dst_w,
+            dst_h,
+            Flags::FAST_BILINEAR,
+        )
+        .map_err(|err| err!(VideoError, err, ""))?;
+        let mut src_frame = Video::empty();
+        let mut dst_frame = Video::empty();
+
+        for (_, packet) in input
+            .packets()
+            .filter(|(stream, _)| stream.index() == video_stream_index)
+            .take(PRELOAD_FRAME_NUM)
+        {
+            decoder
+                .send_packet(&packet)
+                .map_err(|err| err!(VideoError, err, ""))?;
+            decoder
+                .receive_frame(&mut src_frame)
+                .map_err(|err| err!(VideoError, err, ""))?;
+            ctx.run(&src_frame, &mut dst_frame)
+                .map_err(|err| err!(VideoError, err, ""))?;
+
+            let mut jpeg_encoder = image::jpeg::JpegEncoder::new(&mut buf);
+            jpeg_encoder
+                .encode(dst_frame.data(0), dst_w, dst_h, image::ColorType::Rgb8)
+                .map_err(|err| err!(err))?;
+            let base64_string = base64::encode(&buf);
+            res.push(base64_string);
+            buf.clear();
+        }
+
+        Ok(res)
+    }
+
+    pub fn get_unloaded_frame(&self, frame_index: usize) -> TLCResult<String> {
+        ffmpeg::init().map_err(|err| err!(VideoError, err, "ffmpeg初始化错误，建议重装"))?;
+
+        let mut input =
+            input(&self.video_path).map_err(|_| err!(VideoIOError, &self.video_path))?;
+        let video_stream = input.streams().best(Type::Video).ok_or(err!(
+            VideoError,
+            "找不到视频流",
+            &self.video_path,
+        ))?;
+
+        let video_stream_index = video_stream.index();
+        let mut decoder = video_stream
+            .codec()
+            .decoder()
+            .video()
+            .map_err(|err| err!(VideoError, err, ""))?;
+
+        let (dst_w, dst_h) = (decoder.width() >> 2, decoder.height() >> 2);
+
+        let mut ctx = Context::get(
+            decoder.format(),
+            decoder.width(),
+            decoder.height(),
+            Pixel::RGB24,
+            dst_w,
+            dst_h,
+            Flags::FAST_BILINEAR,
+        )
+        .map_err(|err| err!(VideoError, err, ""))?;
+        let mut src_frame = Video::empty();
+        let mut dst_frame = Video::empty();
+
+        let packet = input
+            .packets()
+            .filter(|(stream, _)| stream.index() == video_stream_index)
+            .nth(frame_index)
+            .ok_or(err!())?
+            .1;
+        decoder
+            .send_packet(&packet)
+            .map_err(|err| err!(VideoError, err, ""))?;
+        decoder
+            .receive_frame(&mut src_frame)
+            .map_err(|err| err!(VideoError, err, ""))?;
+        ctx.run(&src_frame, &mut dst_frame)
+            .map_err(|err| err!(VideoError, err, ""))?;
+
+        let mut buf = Vec::with_capacity((dst_h * dst_w * 3) as usize);
+
+        let mut jpeg_encoder = image::jpeg::JpegEncoder::new(&mut buf);
+        jpeg_encoder
+            .encode(dst_frame.data(0), dst_w, dst_h, image::ColorType::Rgb8)
+            .map_err(|err| err!(err))?;
+        let base64_string = base64::encode(&buf);
+
+        Ok(base64_string)
+    }
+
     /// 线程池解码视频读取Green值
     pub fn read_video(&self) -> TLCResult<Array2<u8>> {
         // 左上角坐标
@@ -195,7 +317,7 @@ impl TLCConfig {
         let video_stream_index = video_stream.index();
         let ctx_mutex = &Mutex::new(video_stream.codec());
 
-        let g2d = Array2::zeros((self.frame_num, pix_num));
+        let g2d = Array2::<u8>::zeros((self.frame_num, pix_num));
         let g2d_view = g2d.view();
 
         let tls = Arc::new(ThreadLocal::new());

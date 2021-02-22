@@ -20,7 +20,7 @@ function SelectFilter({ value, onSubmit }) {
         w="200px"
         value={!!innerValue.Median ? "Median" : !!innerValue.Wavelet ? "Wavelet" : innerValue}
         bg="#689d6a"
-        color="#282828"
+        color="#32302f"
         border="unset"
         fontWeight="bold"
         onChange={onSelectChange}

@@ -27,7 +27,6 @@ pub struct TLCConfig {
     #[serde(default)]
     /// 实验组名称（与视频文件名一致）
     case_name: String,
-
     /// 保存配置信息和所有结果的根目录
     save_dir: String,
     /// 视频文件路径
@@ -100,6 +99,8 @@ pub struct TLCConfig {
 pub struct TLCData {
     /// 配置信息
     config: TLCConfig,
+
+    preload_frames: Option<Vec<String>>,
     /// 未滤波的Green值二维矩阵，排列方式如下：
     ///
     /// 第一帧: | X1Y1 X2Y1 ... XnY1 X1Y2 X2Y2 ... XnY2 ... |
@@ -131,7 +132,7 @@ pub struct TLCData {
 /// 当某项数据所依赖的配置信息发生变化时，清空数据
 macro_rules! delete {
     ($v:ident @ all) => {
-        delete!($v @ raw_g2d, filtered_g2d, peak_frames, t2d, interp, nu2d, nu_ave);
+        delete!($v @ preload_frames, raw_g2d, filtered_g2d, peak_frames, t2d, interp, nu2d, nu_ave);
     };
 
     ($v:ident @ $($member:tt),* $(,)*) => {
@@ -147,6 +148,7 @@ impl TLCData {
     pub fn from_path<P: AsRef<Path>>(config_path: P) -> TLCResult<Self> {
         Ok(Self {
             config: TLCConfig::from_path(config_path)?,
+            preload_frames: None,
             raw_g2d: None,
             filtered_g2d: None,
             peak_frames: None,
@@ -193,7 +195,7 @@ impl TLCData {
 
     pub fn set_video_path(&mut self, video_path: String) -> TLCResult<&mut Self> {
         self.config.set_video_path(video_path)?;
-        delete!(self @ raw_g2d, filtered_g2d, peak_frames, nu2d, nu_ave);
+        delete!(self @ preload_frames, raw_g2d, filtered_g2d, peak_frames, nu2d, nu_ave);
 
         Ok(self)
     }
@@ -308,14 +310,33 @@ impl TLCData {
         self
     }
 
+    pub fn preload_frames(&mut self) -> TLCResult<&mut Self> {
+        if self.preload_frames.is_none() {
+            self.preload_frames.insert(self.config.preload_frames()?);
+        }
+
+        Ok(self)
+    }
+
+    pub fn get_frame(&self, frame_index: usize) -> TLCResult<String> {
+        match self.preload_frames {
+            Some(ref p) if frame_index < io::PRELOAD_FRAME_NUM => Ok(p[frame_index].clone()),
+            _ => self.config.get_unloaded_frame(frame_index),
+        }
+    }
+
     pub fn read_video(&mut self) -> TLCResult<&mut Self> {
-        self.raw_g2d.get_or_insert(self.config.read_video()?);
+        if self.raw_g2d.is_none() {
+            self.raw_g2d.insert(self.config.read_video()?);
+        }
 
         Ok(self)
     }
 
     pub fn read_daq(&mut self) -> TLCResult<&mut Self> {
-        self.t2d.get_or_insert(self.config.read_daq()?);
+        if self.t2d.is_none() {
+            self.t2d.insert(self.config.read_daq()?);
+        }
 
         Ok(self)
     }

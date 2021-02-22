@@ -22,12 +22,12 @@ pub fn cal_average<D: Dimension>(data: ArrayView<f32, D>) -> f32 {
 }
 
 pub fn plot_area<P: AsRef<Path>>(
-    nu2d: ArrayView2<f32>,
+    area: ArrayView2<f32>,
     vmin: f32,
     vmax: f32,
     plot_path: P,
 ) -> TLCResult<()> {
-    let (height, width) = nu2d.dim();
+    let (height, width) = area.dim();
     let root = BitMapBackend::new(&plot_path, (width as u32, height as u32)).into_drawing_area();
     root.fill(&WHITE).map_err(|err| err!(PlotError, err))?;
     let mut chart = ChartBuilder::on(&root)
@@ -43,7 +43,7 @@ pub fn plot_area<P: AsRef<Path>>(
 
     let delta = vmax - vmin;
 
-    let mut it = nu2d.iter();
+    let mut it = area.iter();
     for y in (0..height).rev() {
         for x in 0..width {
             if let Some(nu) = it.next() {
