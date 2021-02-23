@@ -11,6 +11,7 @@ import {
   Grid,
   Stack,
   GridItem,
+  Img,
 } from "@chakra-ui/react"
 import { FaFileVideo, FaFileCsv, FaFileImport } from "react-icons/fa"
 import * as tauri from 'tauri/api/tauri'
@@ -23,12 +24,13 @@ import IInput from "../components/Input"
 function BasicSettings({ config, setConfig, setErrMsg }) {
   const [frame, setFrame] = useState("");
   const [frameIndex, setFrameIndex] = useState(0);
+  const [lastRenderFrame, setLastRenderFrame] = useState(-1);
+
 
   useEffect(() => {
     if (config === "") loadDefaultConfig();
     if (!!config) {
       getFrame(0);
-      preloadFrames();
     };
   }, []);
 
@@ -119,10 +121,6 @@ function BasicSettings({ config, setConfig, setErrMsg }) {
       .catch(err => setErrMsg(err));
   }
 
-  function preloadFrames() {
-    tauri.promisified({ cmd: "PreloadFrames" }).catch(err => setErrMsg(err));
-  }
-
   function getFrame(frame_index) {
     tauri.promisified({
       cmd: "GetFrame",
@@ -198,7 +196,12 @@ function BasicSettings({ config, setConfig, setErrMsg }) {
             h="512px"
           >
           </Box> */}
-          <Image src={`data:image/jpeg;base64,${frame}`} htmlWidth="640" htmlHeight="512" />
+          <Image
+            src={`data:image/jpeg;base64,${frame}`}
+            htmlWidth="640"
+            htmlHeight="512"
+            alt="fuck"
+          />
           <HStack>
             <Box w="7px"></Box>
             <Box textAlign="center" rounded="md" w="60px" bgColor="#98971a">
@@ -211,11 +214,12 @@ function BasicSettings({ config, setConfig, setErrMsg }) {
               defaultValue={0}
               min={0}
               max={config.total_frames - 1}
+              onChange={v => setFrameIndex(parseInt(v))}
               onChangeEnd={v => {
                 const vv = parseInt(v);
-                if (vv === frameIndex) return;
+                if (vv === lastRenderFrame) return;
+                setLastRenderFrame(vv);
                 getFrame(vv);
-                setFrameIndex(vv);
               }}
             >
               <SliderTrack bgColor="#665c54">
