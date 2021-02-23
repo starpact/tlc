@@ -26,6 +26,7 @@ mod cal {
     #[test]
     fn read_video() -> Res {
         let mut tlc_data = init();
+        tlc_data.get_frame(0)?;
         let t = Instant::now();
 
         tlc_data.read_video()?;
@@ -36,21 +37,11 @@ mod cal {
     }
 
     #[test]
-    fn preload_frames() {
-        let tlc_data = init();
+    fn init_decoder_tool() {
+        let mut tlc_data = init();
         let t = Instant::now();
 
-        tlc_data.get_config().preload_frames().unwrap();
-
-        println!("{:?}", t.elapsed());
-    }
-
-    #[test]
-    fn preload_packets() {
-        let tlc_data = init();
-        let t = Instant::now();
-
-        tlc_data.get_config().preload_packets().unwrap();
+        tlc_data.get_frame(0).unwrap();
 
         println!("{:?}", t.elapsed());
         std::thread::sleep(Duration::from_secs(1000));
@@ -79,18 +70,6 @@ mod cal {
         Ok(())
     }
 
-    #[test]
-    fn interp() -> Res {
-        let mut tlc_data = init();
-        tlc_data.read_daq()?;
-        let t = Instant::now();
-        tlc_data.interp()?;
-        println!("{:?}", t.elapsed());
-        postprocess::plot_line(tlc_data.interp_single_point(1000).unwrap())?;
-
-        Ok(())
-    }
-
     use plotters::prelude::*;
 
     #[test]
@@ -99,11 +78,9 @@ mod cal {
         let mut raw = Vec::new();
         let mut filtered = Vec::new();
 
-        tlc_data.read_video()?;
         tlc_data.filtering()?;
 
-        let tlc_data = tlc_data;
-        let g2d = tlc_data.get_raw_g2d().unwrap();
+        let g2d = tlc_data.get_raw_g2d()?;
         let column_num: usize = 180000;
         for g in g2d.column(column_num) {
             raw.push(*g as usize);

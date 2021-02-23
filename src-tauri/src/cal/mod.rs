@@ -18,6 +18,8 @@ use solve::IterationMethod;
 
 use io::{DecoderTool, DecoderToolBuilder};
 
+use crate::awsl;
+
 /// 默认配置文件路径
 const DEFAULT_CONFIG_PATH: &'static str = "./cache/default_config.json";
 
@@ -162,75 +164,44 @@ impl TLCData {
         })
     }
 
-    pub fn get_config(&self) -> &'_ TLCConfig {
+    pub fn get_config(&self) -> &TLCConfig {
         &self.config
     }
 
-    pub fn get_raw_g2d(&mut self) -> TLCResult<ArrayView2<u8>> {
-        match self.raw_g2d {
-            Some(ref raw_g2d) => Ok(raw_g2d.view()),
-            None => {
-                let raw_g2d = self.read_video()?;
-                Ok(self.raw_g2d.insert(raw_g2d).view())
-            }
-        }
+    pub fn get_decoder_tool_builder(&self) -> TLCResult<&DecoderToolBuilder> {
+        self.decoder_tool_builder.as_ref().ok_or(awsl!())
     }
 
-    pub fn get_filtered_g2d(&mut self) -> TLCResult<ArrayView2<u8>> {
-        match self.filtered_g2d {
-            Some(ref filtered_g2d) => Ok(filtered_g2d.view()),
-            None => {
-                let filtered_g2d = self.filtering()?;
-                Ok(self.filtered_g2d.insert(filtered_g2d).view())
-            }
-        }
+    pub fn get_decoder_tool(&self) -> TLCResult<&DecoderTool> {
+        self.decoder_tool.as_ref().ok_or(awsl!())
     }
 
-    pub fn get_peak_frames(&mut self) -> TLCResult<&Vec<usize>> {
-        match self.peak_frames {
-            Some(ref peak_frames) => Ok(peak_frames),
-            None => {
-                let peak_frames = self.detect_peak()?;
-                Ok(self.peak_frames.insert(peak_frames))
-            }
-        }
+    pub fn get_raw_g2d(&self) -> TLCResult<ArrayView2<u8>> {
+        self.raw_g2d.as_ref().map(|v| v.view()).ok_or(awsl!())
     }
 
-    pub fn get_t2d(&mut self) -> TLCResult<ArrayView2<f32>> {
-        match self.t2d {
-            Some(ref t2d) => Ok(t2d.view()),
-            None => Ok(self.t2d.insert(self.config.read_daq()?).view()),
-        }
+    pub fn get_filtered_g2d(&self) -> TLCResult<ArrayView2<u8>> {
+        self.filtered_g2d.as_ref().map(|v| v.view()).ok_or(awsl!())
     }
 
-    pub fn get_interp(&mut self) -> TLCResult<&Interp> {
-        match self.interp {
-            Some(ref interp) => Ok(interp),
-            None => {
-                let interp = self.interp()?;
-                Ok(self.interp.insert(interp))
-            }
-        }
+    pub fn get_peak_frames(&self) -> TLCResult<&Vec<usize>> {
+        self.peak_frames.as_ref().ok_or(awsl!())
     }
 
-    pub fn get_nu2d(&mut self) -> TLCResult<ArrayView2<f32>> {
-        match self.nu2d {
-            Some(ref nu2d) => Ok(nu2d.view()),
-            None => {
-                let nu2d = self.solve()?;
-                Ok(self.nu2d.insert(nu2d).view())
-            }
-        }
+    pub fn get_t2d(&self) -> TLCResult<ArrayView2<f32>> {
+        self.t2d.as_ref().map(|v| v.view()).ok_or(awsl!())
     }
 
-    pub fn get_nu_ave(&mut self) -> TLCResult<f32> {
-        match self.nu_ave {
-            Some(nu_ave) => Ok(nu_ave),
-            None => {
-                let nu_ave = postprocess::cal_average(self.get_nu2d()?);
-                Ok(*self.nu_ave.insert(nu_ave))
-            }
-        }
+    pub fn get_interp(&self) -> TLCResult<&Interp> {
+        self.interp.as_ref().ok_or(awsl!())
+    }
+
+    pub fn get_nu2d(&self) -> TLCResult<ArrayView2<f32>> {
+        self.nu2d.as_ref().map(|v| v.view()).ok_or(awsl!())
+    }
+
+    pub fn get_nu_ave(&self) -> TLCResult<f32> {
+        self.nu_ave.ok_or(awsl!())
     }
 
     pub fn set_save_dir(&mut self, save_dir: String) -> TLCResult<&mut Self> {
@@ -362,28 +333,33 @@ impl TLCData {
         Ok(self)
     }
 
-    pub fn save_nu(&mut self) -> TLCResult<&Self> {
-        let data_path = &self.config.data_path.clone();
-        let nu2d = self.get_nu2d()?;
-        io::save_data(nu2d, data_path)?;
+    pub fn save_nu(&mut self) -> TLCResult<&mut Self> {
+        if self.nu2d.is_none() {
+            self.solve()?;
+        }
+
+        io::save_data(self.get_nu2d()?, &self.config.data_path)?;
 
         Ok(self)
     }
 
-    pub fn plot_nu(&mut self) -> TLCResult<&Self> {
-        let plots_path = &self.config.plots_path.clone();
+    pub fn plot_nu(&mut self) -> TLCResult<&mut Self> {
+        if self.nu2d.is_none() {
+            self.solve()?;
+        }
+
         let nu_nan_mean = self.get_nu_ave()?;
         postprocess::plot_area(
             self.get_nu2d()?,
             nu_nan_mean * 0.6,
             nu_nan_mean * 2.,
-            plots_path,
+            &self.config.plots_path,
         )?;
 
         Ok(self)
     }
 
-    pub fn plot_temps_single_frame(&self, frame_index: usize) -> TLCResult<()> {
+    pub fn plot_temps_single_frame(&mut self, frame_index: usize) -> TLCResult<()> {
         let path = format!("./cache/{}_{}.png", self.config.case_name, frame_index);
         let temps_single_frame = self.interp_single_frame(frame_index)?;
         let mean = postprocess::cal_average(temps_single_frame.view());

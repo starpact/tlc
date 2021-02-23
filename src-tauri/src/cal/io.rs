@@ -13,9 +13,9 @@ use thread_local::ThreadLocal;
 
 use ffmpeg_next as ffmpeg;
 
-use ffmpeg::media::Type;
-use ffmpeg::software::scaling::{flag::Flags, Context};
+use ffmpeg::software::scaling::flag::Flags;
 use ffmpeg::util::frame::video::Video;
+use ffmpeg::{codec::Context, media::Type};
 use ffmpeg::{
     format::{input, Pixel},
     Packet,
@@ -31,15 +31,15 @@ use crate::awsl;
 
 use super::error::TLCError::VideoError;
 
-pub const PRELOAD_FRAME_NUM: usize = 200;
+const COMPRESSION_RATIO: u32 = 4;
 
 /// wrap `Context` to pass between threads(because of the raw pointer)
-struct SendableContext(Context);
+struct SendableContext(ffmpeg::software::scaling::Context);
 
 unsafe impl Send for SendableContext {}
 
 impl Deref for SendableContext {
-    type Target = Context;
+    type Target = ffmpeg::software::scaling::Context;
 
     fn deref(&self) -> &Self::Target {
         &self.0
@@ -54,11 +54,11 @@ impl DerefMut for SendableContext {
 
 pub struct DecoderToolBuilder {
     packets: Vec<Packet>,
-    ctx_mutex: Mutex<ffmpeg::codec::Context>,
+    ctx_mutex: Mutex<Context>,
 }
 
 impl DecoderToolBuilder {
-    pub fn new(packets: Vec<Packet>, ctx_mutex: Mutex<ffmpeg::codec::Context>) -> Self {
+    pub fn new(packets: Vec<Packet>, ctx_mutex: Mutex<Context>) -> Self {
         Self { packets, ctx_mutex }
     }
 }
@@ -71,11 +71,7 @@ pub struct DecoderTool {
 }
 
 impl DecoderTool {
-    pub fn new(
-        ctx_mutex: &Mutex<ffmpeg::codec::Context>,
-        dst_h: Option<u32>,
-        dst_w: Option<u32>,
-    ) -> TLCResult<Self> {
+    pub fn new(ctx_mutex: &Mutex<Context>, is_pressed: bool) -> TLCResult<Self> {
         let decoder = ctx_mutex
             .lock()
             .map_err(|err| awsl!(err))?
@@ -83,13 +79,14 @@ impl DecoderTool {
             .decoder()
             .video()
             .map_err(|err| awsl!(VideoError, err, ""))?;
-        let sws_ctx = Context::get(
+        let (h, w) = (decoder.height(), decoder.width());
+        let sws_ctx = ffmpeg::software::scaling::Context::get(
             decoder.format(),
-            decoder.width(),
-            decoder.height(),
+            w,
+            h,
             Pixel::RGB24,
-            dst_w.unwrap_or(decoder.width()),
-            dst_h.unwrap_or(decoder.height()),
+            if is_pressed { w / COMPRESSION_RATIO } else { w },
+            if is_pressed { h / COMPRESSION_RATIO } else { h },
             Flags::FAST_BILINEAR,
         )
         .map_err(|err| awsl!(VideoError, err, ""))?;
@@ -104,23 +101,25 @@ impl DecoderTool {
 }
 
 impl TLCData {
-    fn get_decoder_tool_builder(&mut self) -> TLCResult<&DecoderToolBuilder> {
-        match self.decoder_tool_builder.as_ref() {
-            Some(decoder_tool_builder) => Ok(decoder_tool_builder),
-            None => Ok(self
-                .decoder_tool_builder
-                .insert(self.config.get_decoder_tool_builder()?)),
-        }
-    }
-
     pub fn get_frame(&mut self, frame_index: usize) -> TLCResult<String> {
+        if self.decoder_tool_builder.is_none() {
+            self.decoder_tool_builder
+                .insert(self.config.create_decoder_tool_builder()?);
+        }
+        if self.decoder_tool.is_none() {
+            self.decoder_tool.insert(DecoderTool::new(
+                &self.get_decoder_tool_builder()?.ctx_mutex,
+                true,
+            )?);
+        }
+
         let packets = &self.get_decoder_tool_builder()?.packets;
         let DecoderTool {
             decoder,
             sws_ctx,
             src_frame,
             dst_frame,
-        } = self.decoder_tool.unwrap();
+        } = self.get_decoder_tool()?;
 
         let mut decoder = decoder.borrow_mut();
         let mut sws_ctx = sws_ctx.borrow_mut();
@@ -137,7 +136,8 @@ impl TLCData {
             .run(&src_frame, &mut dst_frame)
             .map_err(|err| awsl!(VideoError, err, ""))?;
 
-        let (dst_h, dst_w) = (decoder.height() >> 2, decoder.width() >> 2);
+        let dst_h = decoder.height() / COMPRESSION_RATIO;
+        let dst_w = decoder.width() / COMPRESSION_RATIO;
         let mut buf = Vec::with_capacity((dst_h * dst_w * 3) as usize);
 
         let mut jpeg_encoder = image::jpeg::JpegEncoder::new(&mut buf);
@@ -150,7 +150,12 @@ impl TLCData {
     }
 
     /// 线程池解码视频读取Green值
-    pub fn read_video(&mut self) -> TLCResult<Array2<u8>> {
+    pub fn read_video(&mut self) -> TLCResult<&mut Self> {
+        if self.decoder_tool_builder.is_none() {
+            self.decoder_tool_builder
+                .insert(self.config.create_decoder_tool_builder()?);
+        }
+
         let TLCConfig {
             top_left_pos,
             region_shape,
@@ -171,7 +176,7 @@ impl TLCData {
             ref ctx_mutex,
         } = self.get_decoder_tool_builder()?;
 
-        let g2d = Array2::<u8>::zeros((frame_num, pix_num));
+        let g2d = Array2::zeros((frame_num, pix_num));
         let g2d_view = g2d.view();
 
         let tls = Arc::new(ThreadLocal::new());
@@ -187,7 +192,7 @@ impl TLCData {
                         let tls_arc = tls.clone();
                         scp.spawn(move |_| {
                             if let Ok(tls_paras) =
-                                tls_arc.get_or_try(|| DecoderTool::new(ctx_mutex, None, None))
+                                tls_arc.get_or_try(|| DecoderTool::new(ctx_mutex, false))
                             {
                                 let mut decoder = tls_paras.decoder.borrow_mut();
                                 let mut sws_ctx = tls_paras.sws_ctx.borrow_mut();
@@ -225,7 +230,15 @@ impl TLCData {
             tls.into_iter().for_each(|v| drop(v));
         }
 
-        Ok(g2d)
+        self.raw_g2d.insert(g2d);
+
+        Ok(self)
+    }
+
+    pub fn read_daq(&mut self) -> TLCResult<&mut Self> {
+        self.t2d.insert(self.config.read_daq()?);
+
+        Ok(self)
     }
 }
 
@@ -303,6 +316,10 @@ impl TLCConfig {
     }
 
     fn init_path(&mut self) -> TLCResult<&mut Self> {
+        if self.save_dir == "" {
+            return Ok(self);
+        }
+
         self.case_name = Path::new(&self.video_path)
             .file_stem()
             .ok_or(awsl!(VideoIOError, &self.video_path))?
@@ -355,7 +372,7 @@ impl TLCConfig {
         Ok(self)
     }
 
-    pub fn get_decoder_tool_builder(&self) -> TLCResult<DecoderToolBuilder> {
+    pub fn create_decoder_tool_builder(&self) -> TLCResult<DecoderToolBuilder> {
         ffmpeg::init().map_err(|err| awsl!(VideoError, err, "ffmpeg初始化错误，建议重装"))?;
         let mut input =
             input(&self.video_path).map_err(|_| awsl!(VideoIOError, &self.video_path))?;

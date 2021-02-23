@@ -19,7 +19,14 @@ pub enum FilterMethod {
 
 impl TLCData {
     /// 对Green值矩阵沿时间轴滤波
-    pub fn filtering(&mut self) -> TLCResult<Array2<u8>> {
+    pub fn filtering(&mut self) -> TLCResult<&mut Self> {
+        if self.filtered_g2d.is_some() {
+            return Ok(self);
+        }
+        if self.raw_g2d.is_none() {
+            self.read_video()?;
+        }
+
         let mut filtered_g2d = self.get_raw_g2d()?.to_owned();
 
         match self.config.filter_method {
@@ -32,14 +39,23 @@ impl TLCData {
                         col.iter_mut().for_each(|g| *g = filter.consume(*g))
                     });
 
-                Ok(filtered_g2d)
+                self.filtered_g2d.insert(filtered_g2d);
             }
-            _ => Ok(filtered_g2d),
+            _ => {}
         }
+
+        Ok(self)
     }
 
     /// 峰值检测
-    pub fn detect_peak(&mut self) -> TLCResult<Vec<usize>> {
+    pub fn detect_peak(&mut self) -> TLCResult<&mut Self> {
+        if self.peak_frames.is_some() {
+            return Ok(self);
+        }
+        if self.filtered_g2d.is_none() {
+            self.filtering()?;
+        }
+
         let filtered_g2d = self.get_filtered_g2d()?;
         let mut peak_frames = Vec::with_capacity(filtered_g2d.ncols());
         unsafe { peak_frames.set_len(filtered_g2d.ncols()) };
@@ -58,35 +74,44 @@ impl TLCData {
 
                 Ok(())
             })?;
+        self.peak_frames.insert(peak_frames);
 
-        Ok(peak_frames)
+        Ok(self)
     }
 
-    pub fn interp_single_frame(&self, frame: usize) -> TLCResult<Array2<f32>> {
-        self.interp
-            .as_ref()
-            .ok_or(awsl!())?
+    pub fn interp_single_frame(&mut self, frame: usize) -> TLCResult<Array2<f32>> {
+        if self.interp.is_none() {
+            self.interp()?;
+        }
+        self.get_interp()?
             .interp_single_frame(frame, self.config.region_shape)
     }
 
     /// interpolation of reference temperature matrix
-    pub fn interp(&mut self) -> TLCResult<Interp> {
+    pub fn interp(&mut self) -> TLCResult<&mut Self> {
+        if self.t2d.is_none() {
+            self.read_daq()?;
+        }
+
         let TLCConfig {
             interp_method,
             top_left_pos,
             region_shape,
+            ref thermocouple_pos,
             ..
         } = self.config;
-        let thermocouple_pos = &self.config.thermocouple_pos.clone();
         let t2d = self.get_t2d()?;
 
-        Ok(Interp::new(
+        let interp = Interp::new(
             t2d,
             interp_method,
             thermocouple_pos,
             top_left_pos,
             region_shape,
-        )?)
+        )?;
+        self.interp.insert(interp);
+
+        Ok(self)
     }
 }
 
@@ -131,17 +156,14 @@ impl Interp {
         .ok_or(awsl!("参考温度插值错误"))
     }
 
-    pub fn interp_single_point<'a>(
-        &'a self,
-        pos: usize,
-        region_shape: (usize, usize),
-    ) -> ArrayView1<'a, f32> {
+    pub fn interp_single_point(&self, pos: usize, region_shape: (usize, usize)) -> ArrayView1<f32> {
         let (cal_h, cal_w) = region_shape;
         let pos = match self.0.nrows() {
             h if h == cal_w => pos % cal_w,
             h if h == cal_h => pos / cal_w,
             _ => pos,
         };
+
         self.0.row(pos)
     }
 
@@ -355,6 +377,23 @@ fn interp_bilinear() -> Result<(), Box<dyn std::error::Error>> {
 
     let res = interp.interp_single_frame(0, region_shape)?;
     println!("{:?}", res);
+
+    Ok(())
+}
+
+#[test]
+fn interp() -> Result<(), Box<dyn std::error::Error>> {
+    const CONFIG_PATH: &str = "./cache/default_config.json";
+    let mut tlc_data = TLCData::from_path(CONFIG_PATH).unwrap();
+    tlc_data.read_daq()?;
+    let t = std::time::Instant::now();
+    tlc_data.interp()?;
+    println!("{:?}", t.elapsed());
+    super::postprocess::plot_line(
+        tlc_data
+            .get_interp()?
+            .interp_single_point(1000, tlc_data.get_config().region_shape),
+    )?;
 
     Ok(())
 }

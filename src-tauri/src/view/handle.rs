@@ -17,12 +17,8 @@ pub fn init(rx: Receiver<(WebviewMut, Cmd)>) {
         let mut tlc_data = None;
 
         loop {
-            let t0 = std::time::Instant::now();
             let (wm, cmd) = rx.recv().unwrap();
-            println!("aaa  {:?}", t0.elapsed());
-            let t0 = std::time::Instant::now();
             execute(&mut tlc_data, wm, cmd).unwrap();
-            println!("bbb  {:?}", t0.elapsed());
         }
     });
 }

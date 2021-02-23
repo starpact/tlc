@@ -12,7 +12,7 @@ use packed_simd::{f32x8, Simd};
 
 use crate::awsl;
 
-use super::{error::TLCResult, TLCConfig, TLCData};
+use super::{error::TLCResult, postprocess, TLCConfig, TLCData};
 
 /// 默认初始对流换热系数
 const DEFAULT_H0: f32 = 50.;
@@ -187,7 +187,7 @@ impl PointData<'_> {
 }
 
 impl TLCData {
-    pub fn solve(&mut self) -> TLCResult<Array2<f32>> {
+    pub fn solve(&mut self) -> TLCResult<&mut Self> {
         let peak_frames = self.get_peak_frames()?;
         let interp = self.get_interp()?;
 
@@ -236,7 +236,9 @@ impl TLCData {
         let nu2d = Array1::from(nus)
             .into_shape(region_shape)
             .map_err(|err| awsl!(err))?;
+        self.nu_ave.insert(postprocess::cal_average(nu2d.view()));
+        self.nu2d.insert(nu2d);
 
-        Ok(nu2d)
+        Ok(self)
     }
 }
