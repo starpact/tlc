@@ -23,6 +23,7 @@ import IInput from "../components/Input"
 function BasicSettings({ config, setConfig, setErrMsg }) {
   const [frame, setFrame] = useState("");
   const [frameIndex, setFrameIndex] = useState(0);
+  const [lastRenderFrameIndex, setLastRenderFrameIndex] = useState(-1);
 
   useEffect(() => {
     if (config === "") loadDefaultConfig();
@@ -211,11 +212,12 @@ function BasicSettings({ config, setConfig, setErrMsg }) {
               defaultValue={0}
               min={0}
               max={config.total_frames - 1}
+              onChange={v => setFrameIndex(parseInt(v))}
               onChangeEnd={v => {
                 const vv = parseInt(v);
-                if (vv === frameIndex) return;
+                if (vv === lastRenderFrameIndex) return;
+                setLastRenderFrameIndex(vv);
                 getFrame(vv);
-                setFrameIndex(vv);
               }}
             >
               <SliderTrack bgColor="#665c54">

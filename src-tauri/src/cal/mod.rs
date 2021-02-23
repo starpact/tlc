@@ -16,7 +16,7 @@ use preprocess::{FilterMethod, Interp, InterpMethod};
 use ndarray::prelude::*;
 use solve::IterationMethod;
 
-use io::{DecoderTool, DecoderToolBuilder};
+use io::{DecoderTool, VideoCtx};
 
 use crate::awsl;
 
@@ -101,7 +101,7 @@ pub struct TLCData {
     /// 配置信息
     config: TLCConfig,
     /// 每个视频一份
-    decoder_tool_builder: Option<DecoderToolBuilder>,
+    video_ctx: Option<VideoCtx>,
     /// 每个线程一份
     decoder_tool: Option<DecoderTool>,
     /// 未滤波的Green值二维矩阵，排列方式如下：
@@ -135,7 +135,7 @@ pub struct TLCData {
 /// 当某项数据所依赖的配置信息发生变化时，清空数据
 macro_rules! delete {
     ($v:ident @ all) => {
-        delete!($v @ decoder_tool_builder, decoder_tool, raw_g2d, filtered_g2d,
+        delete!($v @ video_ctx, decoder_tool, raw_g2d, filtered_g2d,
             peak_frames, t2d, interp, nu2d, nu_ave);
     };
 
@@ -152,7 +152,7 @@ impl TLCData {
     pub fn from_path<P: AsRef<Path>>(config_path: P) -> TLCResult<Self> {
         Ok(Self {
             config: TLCConfig::from_path(config_path)?,
-            decoder_tool_builder: None,
+            video_ctx: None,
             decoder_tool: None,
             raw_g2d: None,
             filtered_g2d: None,
@@ -168,8 +168,8 @@ impl TLCData {
         &self.config
     }
 
-    pub fn get_decoder_tool_builder(&self) -> TLCResult<&DecoderToolBuilder> {
-        self.decoder_tool_builder.as_ref().ok_or(awsl!())
+    pub fn get_video_ctx(&self) -> TLCResult<&VideoCtx> {
+        self.video_ctx.as_ref().ok_or(awsl!())
     }
 
     pub fn get_decoder_tool(&self) -> TLCResult<&DecoderTool> {
@@ -212,7 +212,7 @@ impl TLCData {
 
     pub fn set_video_path(&mut self, video_path: String) -> TLCResult<&mut Self> {
         self.config.set_video_path(video_path)?;
-        delete!(self @ decoder_tool_builder, decoder_tool, raw_g2d, filtered_g2d, peak_frames, nu2d, nu_ave);
+        delete!(self @ video_ctx, decoder_tool, raw_g2d, filtered_g2d, peak_frames, nu2d, nu_ave);
 
         Ok(self)
     }

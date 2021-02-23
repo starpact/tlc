@@ -1,5 +1,6 @@
 use std::fs::{create_dir_all, File};
 use std::io::BufReader;
+use std::lazy::SyncLazy;
 use std::ops::{Deref, DerefMut};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -33,12 +34,14 @@ use super::error::TLCError::VideoError;
 
 const COMPRESSION_RATIO: u32 = 4;
 
+static PACKETS: SyncLazy<Mutex<Vec<Packet>>> = SyncLazy::new(|| Mutex::new(Vec::new()));
+
 /// wrap `Context` to pass between threads(because of the raw pointer)
-struct SendableContext(ffmpeg::software::scaling::Context);
+struct SendCtx(ffmpeg::software::scaling::Context);
 
-unsafe impl Send for SendableContext {}
+unsafe impl Send for SendCtx {}
 
-impl Deref for SendableContext {
+impl Deref for SendCtx {
     type Target = ffmpeg::software::scaling::Context;
 
     fn deref(&self) -> &Self::Target {
@@ -46,33 +49,38 @@ impl Deref for SendableContext {
     }
 }
 
-impl DerefMut for SendableContext {
+impl DerefMut for SendCtx {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
 }
 
-pub struct DecoderToolBuilder {
-    packets: Vec<Packet>,
-    ctx_mutex: Mutex<Context>,
+pub struct VideoCtx(Mutex<Context>);
+
+impl VideoCtx {
+    pub fn new(ctx_mutex: Mutex<Context>) -> Self {
+        Self(ctx_mutex)
+    }
 }
 
-impl DecoderToolBuilder {
-    pub fn new(packets: Vec<Packet>, ctx_mutex: Mutex<Context>) -> Self {
-        Self { packets, ctx_mutex }
+impl Deref for VideoCtx {
+    type Target = Mutex<Context>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }
 
 pub struct DecoderTool {
     decoder: RefCell<ffmpeg::decoder::Video>,
-    sws_ctx: RefCell<SendableContext>,
+    sws_ctx: RefCell<SendCtx>,
     src_frame: RefCell<Video>,
     dst_frame: RefCell<Video>,
 }
 
 impl DecoderTool {
-    pub fn new(ctx_mutex: &Mutex<Context>, is_pressed: bool) -> TLCResult<Self> {
-        let decoder = ctx_mutex
+    pub fn new(video_ctx: &VideoCtx, is_pressed: bool) -> TLCResult<Self> {
+        let decoder = video_ctx
             .lock()
             .map_err(|err| awsl!(err))?
             .clone()
@@ -93,7 +101,7 @@ impl DecoderTool {
 
         Ok(Self {
             decoder: RefCell::new(decoder),
-            sws_ctx: RefCell::new(SendableContext(sws_ctx)),
+            sws_ctx: RefCell::new(SendCtx(sws_ctx)),
             src_frame: RefCell::new(Video::empty()),
             dst_frame: RefCell::new(Video::empty()),
         })
@@ -102,18 +110,14 @@ impl DecoderTool {
 
 impl TLCData {
     pub fn get_frame(&mut self, frame_index: usize) -> TLCResult<String> {
-        if self.decoder_tool_builder.is_none() {
-            self.decoder_tool_builder
-                .insert(self.config.create_decoder_tool_builder()?);
+        if self.video_ctx.is_none() {
+            self.video_ctx.insert(self.config.create_video_ctx()?);
         }
         if self.decoder_tool.is_none() {
-            self.decoder_tool.insert(DecoderTool::new(
-                &self.get_decoder_tool_builder()?.ctx_mutex,
-                true,
-            )?);
+            self.decoder_tool
+                .insert(DecoderTool::new(self.get_video_ctx()?, true)?);
         }
 
-        let packets = &self.get_decoder_tool_builder()?.packets;
         let DecoderTool {
             decoder,
             sws_ctx,
@@ -126,9 +130,35 @@ impl TLCData {
         let mut src_frame = src_frame.borrow_mut();
         let mut dst_frame = dst_frame.borrow_mut();
 
-        decoder
-            .send_packet(&packets[frame_index])
-            .map_err(|err| awsl!(VideoError, err, ""))?;
+        match PACKETS.try_lock() {
+            Ok(packets) => {
+                if frame_index < packets.len() {
+                    decoder
+                        .send_packet(&packets[frame_index])
+                        .map_err(|err| awsl!(VideoError, err, ""))?;
+                }
+            }
+            Err(_) => {
+                let video_path = &self.config.video_path;
+                let mut ipt = input(video_path).map_err(|_| awsl!(VideoIOError, video_path))?;
+                let video_stream = ipt.streams().best(Type::Video).ok_or(awsl!(
+                    VideoError,
+                    "找不到视频流",
+                    &video_path,
+                ))?;
+                let video_stream_index = video_stream.index();
+                let packet = ipt
+                    .packets()
+                    .filter(|(stream, _)| stream.index() == video_stream_index)
+                    .nth(frame_index)
+                    .ok_or(awsl!())?
+                    .1;
+                decoder
+                    .send_packet(&packet)
+                    .map_err(|err| awsl!(VideoError, err, ""))?;
+            }
+        };
+
         decoder
             .receive_frame(&mut src_frame)
             .map_err(|err| awsl!(VideoError, err, ""))?;
@@ -151,9 +181,8 @@ impl TLCData {
 
     /// 线程池解码视频读取Green值
     pub fn read_video(&mut self) -> TLCResult<&mut Self> {
-        if self.decoder_tool_builder.is_none() {
-            self.decoder_tool_builder
-                .insert(self.config.create_decoder_tool_builder()?);
+        if self.video_ctx.is_none() {
+            self.video_ctx.insert(self.config.create_video_ctx()?);
         }
 
         let TLCConfig {
@@ -171,10 +200,8 @@ impl TLCData {
         // 总像素点数
         let pix_num = cal_h * cal_w;
 
-        let DecoderToolBuilder {
-            packets,
-            ref ctx_mutex,
-        } = self.get_decoder_tool_builder()?;
+        let ctx_mutex = self.get_video_ctx()?;
+        let packets = PACKETS.lock().map_err(|err| awsl!(err))?;
 
         let g2d = Array2::zeros((frame_num, pix_num));
         let g2d_view = g2d.view();
@@ -372,25 +399,34 @@ impl TLCConfig {
         Ok(self)
     }
 
-    pub fn create_decoder_tool_builder(&self) -> TLCResult<DecoderToolBuilder> {
+    pub fn create_video_ctx(&self) -> TLCResult<VideoCtx> {
         ffmpeg::init().map_err(|err| awsl!(VideoError, err, "ffmpeg初始化错误，建议重装"))?;
-        let mut input =
-            input(&self.video_path).map_err(|_| awsl!(VideoIOError, &self.video_path))?;
-        let video_stream = input.streams().best(Type::Video).ok_or(awsl!(
+        let video_path = self.video_path.clone();
+        let ipt = input(&video_path).map_err(|_| awsl!(VideoIOError, &self.video_path))?;
+        let video_stream = ipt.streams().best(Type::Video).ok_or(awsl!(
             VideoError,
             "找不到视频流",
             &self.video_path,
         ))?;
         let video_stream_index = video_stream.index();
-        let mut packets = Vec::with_capacity(self.total_frames);
         let ctx_mutex = Mutex::new(video_stream.codec());
-        input.packets().for_each(|(stream, packet)| {
-            if stream.index() == video_stream_index {
-                packets.push(packet);
-            }
+
+        let mut packets = Vec::with_capacity(self.total_frames);
+
+        std::thread::spawn(move || -> TLCResult<()> {
+            let mut ipt = input(&video_path).map_err(|_| awsl!(VideoIOError, video_path))?;
+            ipt.packets().for_each(|(stream, packet)| {
+                if stream.index() == video_stream_index {
+                    packets.push(packet);
+                }
+            });
+            let mut p = PACKETS.lock().map_err(|err| awsl!(err))?;
+            *p = packets;
+
+            Ok(())
         });
 
-        Ok(DecoderToolBuilder::new(packets, ctx_mutex))
+        Ok(VideoCtx::new(ctx_mutex))
     }
 
     /// 读取参考温度(.lvm or .xlsx)
