@@ -3,6 +3,8 @@
 mod cal {
     use std::time::{Duration, Instant};
 
+    use plotters::prelude::*;
+
     use tlc::cal::*;
 
     const CONFIG_PATH: &str = "./cache/default_config.json";
@@ -26,7 +28,6 @@ mod cal {
     #[test]
     fn read_video() -> Res {
         let mut tlc_data = init();
-        tlc_data.get_frame(0)?;
         let t = Instant::now();
 
         tlc_data.read_video()?;
@@ -69,8 +70,6 @@ mod cal {
 
         Ok(())
     }
-
-    use plotters::prelude::*;
 
     #[test]
     fn test_filtering() -> Res {

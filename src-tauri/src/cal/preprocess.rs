@@ -17,6 +17,12 @@ pub enum FilterMethod {
     Wavelet(f32),
 }
 
+impl Default for FilterMethod {
+    fn default() -> Self {
+        FilterMethod::No
+    }
+}
+
 impl TLCData {
     /// 对Green值矩阵沿时间轴滤波
     pub fn filtering(&mut self) -> TLCResult<&mut Self> {
@@ -123,6 +129,12 @@ pub enum InterpMethod {
     VerticalExtra,
     Bilinear((usize, usize)),
     BilinearExtra((usize, usize)),
+}
+
+impl Default for InterpMethod {
+    fn default() -> Self {
+        InterpMethod::Horizontal
+    }
 }
 
 #[derive(Debug)]

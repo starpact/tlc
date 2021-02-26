@@ -11,7 +11,6 @@ import {
   Grid,
   Stack,
   GridItem,
-  Img,
 } from "@chakra-ui/react"
 import { FaFileVideo, FaFileCsv, FaFileImport } from "react-icons/fa"
 import * as tauri from 'tauri/api/tauri'
@@ -24,21 +23,21 @@ import IInput from "../components/Input"
 function BasicSettings({ config, setConfig, setErrMsg }) {
   const [frame, setFrame] = useState("");
   const [frameIndex, setFrameIndex] = useState(0);
-  const [lastRenderFrame, setLastRenderFrame] = useState(-1);
-
+  const [lastRenderFrameIndex, setLastRenderFrameIndex] = useState(-1);
 
   useEffect(() => {
     if (config === "") loadDefaultConfig();
     if (!!config) {
       getFrame(0);
+
     };
   }, []);
 
   function loadConfig() {
     dialog.open({ filter: "json" }).then(path => {
       tauri.promisified({
-        cmd: "LoadConfig",
-        config_path: path,
+        cmd: "loadConfig",
+        body: path,
       })
         .then(ok => setConfig(ok))
         .catch(err => setErrMsg(err));
@@ -46,7 +45,7 @@ function BasicSettings({ config, setConfig, setErrMsg }) {
   }
 
   function loadDefaultConfig() {
-    tauri.promisified({ cmd: "LoadDefaultConfig" })
+    tauri.promisified({ cmd: "loadDefaultConfig" })
       .then(ok => setConfig(ok))
       .catch(err => setErrMsg(err));
   }
@@ -56,15 +55,15 @@ function BasicSettings({ config, setConfig, setErrMsg }) {
       setErrMsg("请先确定保存根目录");
       return;
     }
-    tauri.promisified({ cmd: "SaveConfig" })
+    tauri.promisified({ cmd: "saveConfig" })
       .catch(err => setErrMsg(err));
   }
 
   function setSaveDir() {
     dialog.open({ directory: true }).then(save_dir => {
       tauri.promisified({
-        cmd: "SetSaveDir",
-        save_dir,
+        cmd: "setSaveDir",
+        body: save_dir,
       })
         .then(ok => setConfig(ok))
         .catch(err => setErrMsg(err));
@@ -77,9 +76,10 @@ function BasicSettings({ config, setConfig, setErrMsg }) {
       defaultPath: config.video_path.substr(0, config.video_path.lastIndexOf("\\") + 1)
     })
       .then(video_path => {
+        if (video_path === config.video_path) return;
         tauri.promisified({
-          cmd: "SetVideoPath",
-          video_path,
+          cmd: "setVideoPath",
+          body: video_path,
         })
           .then(ok => setConfig(ok))
           .catch(err => setErrMsg(err));
@@ -92,9 +92,10 @@ function BasicSettings({ config, setConfig, setErrMsg }) {
       defaultPath: config.daq_path.substr(0, config.daq_path.lastIndexOf("\\") + 1)
     })
       .then(daq_path => {
+        if (daq_path === config.daq_path) return;
         tauri.promisified({
-          cmd: "SetDAQPath",
-          daq_path,
+          cmd: "setDAQPath",
+          body: daq_path,
         })
           .then(ok => setConfig(ok))
           .catch(err => setErrMsg(err));
@@ -104,8 +105,8 @@ function BasicSettings({ config, setConfig, setErrMsg }) {
   function setStartFrame(start_frame) {
     if (start_frame === config.start_frame) return;
     tauri.promisified({
-      cmd: "SetStartFrame",
-      start_frame: start_frame,
+      cmd: "setStartFrame",
+      body: start_frame,
     })
       .then(ok => setConfig(ok))
       .catch(err => setErrMsg(err));
@@ -114,20 +115,22 @@ function BasicSettings({ config, setConfig, setErrMsg }) {
   function setStartRow(start_row) {
     if (start_row === config.start_row) return;
     tauri.promisified({
-      cmd: "SetStartRow",
-      start_row,
+      cmd: "setStartRow",
+      body: start_row,
     })
       .then(ok => setConfig(ok))
       .catch(err => setErrMsg(err));
   }
 
   function getFrame(frame_index) {
+    if (frameIndex === lastRenderFrameIndex) return;
     tauri.promisified({
-      cmd: "GetFrame",
-      frame_index,
+      cmd: "getFrame",
+      body: frame_index,
     })
       .then(ok => setFrame(ok))
       .catch(err => setErrMsg(err));
+    setLastRenderFrameIndex(frameIndex);
   }
 
   return (
@@ -198,8 +201,8 @@ function BasicSettings({ config, setConfig, setErrMsg }) {
           </Box> */}
           <Image
             src={`data:image/jpeg;base64,${frame}`}
-            htmlWidth="640"
-            htmlHeight="512"
+            htmlWidth={!!config && `${config.video_shape[1] / 2}`}
+            htmlHeight={!!config && `${config.video_path[0] / 2}`}
             alt="fuck"
           />
           <HStack>
@@ -215,12 +218,7 @@ function BasicSettings({ config, setConfig, setErrMsg }) {
               min={0}
               max={config.total_frames - 1}
               onChange={v => setFrameIndex(parseInt(v))}
-              onChangeEnd={v => {
-                const vv = parseInt(v);
-                if (vv === lastRenderFrame) return;
-                setLastRenderFrame(vv);
-                getFrame(vv);
-              }}
+              onChangeEnd={v => getFrame(parseInt(v))}
             >
               <SliderTrack bgColor="#665c54">
                 <SliderFilledTrack bgColor="#98971a" />
@@ -250,7 +248,7 @@ function BasicSettings({ config, setConfig, setErrMsg }) {
           />
         </Stack>
       </HStack>
-    </Stack>
+    </Stack >
   )
 }
 

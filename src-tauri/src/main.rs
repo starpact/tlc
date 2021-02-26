@@ -5,7 +5,7 @@
 
 use std::sync::mpsc;
 
-use tlc::view::{cmd::Cmd, handle::init};
+use tlc::view::{handle::init, request::Request};
 
 fn main() {
     let (tx, rx) = mpsc::sync_channel(1);
@@ -13,8 +13,9 @@ fn main() {
 
     tauri::AppBuilder::new()
         .invoke_handler(move |webview, arg| {
-            let cmd: Cmd = serde_json::from_str(arg).map_err(|err| err.to_string())?;
-            let _ = tx.try_send((webview.as_mut(), cmd));
+            let req: Request = serde_json::from_str(arg).unwrap();
+            println!("{}: {:?}", req.cmd, req.body);
+            let _ = tx.try_send((webview.as_mut(), req));
 
             Ok(())
         })

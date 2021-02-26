@@ -16,7 +16,7 @@ use preprocess::{FilterMethod, Interp, InterpMethod};
 use ndarray::prelude::*;
 use solve::IterationMethod;
 
-use io::{DecoderTool, DecoderToolBuilder};
+use io::{DecoderTool, VideoCtx};
 
 use crate::awsl;
 
@@ -26,26 +26,30 @@ const DEFAULT_CONFIG_PATH: &'static str = "./cache/default_config.json";
 /// 所有配置信息，与case一一对应
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TLCConfig {
-    #[serde(default)]
     /// 实验组名称（与视频文件名一致）
+    #[serde(default)]
     case_name: String,
     /// 保存配置信息和所有结果的根目录
+    #[serde(default)]
     save_dir: String,
     /// 视频文件路径
+    #[serde(default)]
     video_path: String,
     /// 数采文件路径
+    #[serde(default)]
     daq_path: String,
     /// 配置文件保存路径（仅运行时使用）
-    #[serde(default)]
+    #[serde(skip)]
     config_path: String,
-    /// 图片保存路径
-    #[serde(default)]
+    /// 图片保存路径（仅运行时使用）
+    #[serde(skip)]
     plots_path: String,
-    /// 数据保存路径
-    #[serde(default)]
+    /// 数据保存路径（仅运行时使用）
+    #[serde(skip)]
     data_path: String,
 
     /// 视频起始帧数
+    #[serde(default)]
     start_frame: usize,
     /// 视频总帧数
     #[serde(default)]
@@ -54,6 +58,7 @@ pub struct TLCConfig {
     #[serde(default)]
     frame_rate: usize,
     /// 数采文件起始行数
+    #[serde(default)]
     start_row: usize,
     /// 数采文件总行数
     #[serde(default)]
@@ -62,31 +67,45 @@ pub struct TLCConfig {
     #[serde(default)]
     frame_num: usize,
 
+    /// 视频尺寸（高，宽）
+    #[serde(default)]
+    video_shape: (usize, usize),
     /// 计算区域左上角坐标(y, x)
+    #[serde(default)]
     top_left_pos: (usize, usize),
     /// 计算区域尺寸（高，宽）
+    #[serde(default)]
     region_shape: (usize, usize),
     /// 各热电偶对应的数采文件中的列数
+    #[serde(default)]
     temp_column_num: Vec<usize>,
     /// 各热电偶位置
+    #[serde(default)]
     thermocouple_pos: Vec<(i32, i32)>,
     /// 插值方法
+    #[serde(default)]
     interp_method: InterpMethod,
     /// 滤波方法
+    #[serde(default)]
     filter_method: FilterMethod,
     /// 导热方程迭代求解方法（初值，最大迭代步数）
     #[serde(default)]
     iteration_method: IterationMethod,
 
     /// 峰值温度
+    #[serde(default)]
     peak_temp: f32,
     /// 固体导热系数
+    #[serde(default)]
     solid_thermal_conductivity: f32,
     /// 固体热扩散系数
+    #[serde(default)]
     solid_thermal_diffusivity: f32,
     /// 特征长度
+    #[serde(default)]
     characteristic_length: f32,
     /// 空气导热系数
+    #[serde(default)]
     air_thermal_conductivity: f32,
 
     /// 参考温度调节系数
@@ -101,7 +120,7 @@ pub struct TLCData {
     /// 配置信息
     config: TLCConfig,
     /// 每个视频一份
-    decoder_tool_builder: Option<DecoderToolBuilder>,
+    video_ctx: Option<VideoCtx>,
     /// 每个线程一份
     decoder_tool: Option<DecoderTool>,
     /// 未滤波的Green值二维矩阵，排列方式如下：
@@ -134,11 +153,6 @@ pub struct TLCData {
 
 /// 当某项数据所依赖的配置信息发生变化时，清空数据
 macro_rules! delete {
-    ($v:ident @ all) => {
-        delete!($v @ decoder_tool_builder, decoder_tool, raw_g2d, filtered_g2d,
-            peak_frames, t2d, interp, nu2d, nu_ave);
-    };
-
     ($v:ident @ $($member:tt),* $(,)*) => {
         $($v.$member = None;)*
     };
@@ -152,7 +166,7 @@ impl TLCData {
     pub fn from_path<P: AsRef<Path>>(config_path: P) -> TLCResult<Self> {
         Ok(Self {
             config: TLCConfig::from_path(config_path)?,
-            decoder_tool_builder: None,
+            video_ctx: None,
             decoder_tool: None,
             raw_g2d: None,
             filtered_g2d: None,
@@ -168,8 +182,8 @@ impl TLCData {
         &self.config
     }
 
-    pub fn get_decoder_tool_builder(&self) -> TLCResult<&DecoderToolBuilder> {
-        self.decoder_tool_builder.as_ref().ok_or(awsl!())
+    pub fn get_video_ctx(&self) -> TLCResult<&VideoCtx> {
+        self.video_ctx.as_ref().ok_or(awsl!())
     }
 
     pub fn get_decoder_tool(&self) -> TLCResult<&DecoderTool> {
@@ -212,14 +226,15 @@ impl TLCData {
 
     pub fn set_video_path(&mut self, video_path: String) -> TLCResult<&mut Self> {
         self.config.set_video_path(video_path)?;
-        delete!(self @ decoder_tool_builder, decoder_tool, raw_g2d, filtered_g2d, peak_frames, nu2d, nu_ave);
+        delete!(self @ video_ctx, decoder_tool, raw_g2d, filtered_g2d, 
+            peak_frames, t2d, interp, nu2d, nu_ave);
 
         Ok(self)
     }
 
     pub fn set_daq_path(&mut self, daq_path: String) -> TLCResult<&mut Self> {
         self.config.set_daq_path(daq_path)?;
-        delete!(self @ t2d, interp, nu2d, nu_ave);
+        delete!(self @ raw_g2d, filtered_g2d, peak_frames, t2d, interp, nu2d, nu_ave);
 
         Ok(self)
     }
@@ -252,7 +267,7 @@ impl TLCData {
     ) -> &mut Self {
         self.config.top_left_pos = top_left_pos;
         self.config.region_shape = region_shape;
-        delete!(self @ all);
+        delete!(self @ raw_g2d, filtered_g2d, peak_frames, interp, nu2d, nu_ave);
 
         self
     }
@@ -301,14 +316,14 @@ impl TLCData {
 
     pub fn set_start_frame(&mut self, start_frame: usize) -> &mut Self {
         self.config.start_frame = start_frame;
-        delete!(self @ all);
+        delete!(self @ raw_g2d, filtered_g2d, peak_frames, t2d, interp, nu2d, nu_ave);
 
         self
     }
 
     pub fn set_start_row(&mut self, start_row: usize) -> &mut Self {
         self.config.start_row = start_row;
-        delete!(self @ all);
+        delete!(self @ raw_g2d, filtered_g2d, peak_frames, t2d, interp, nu2d, nu_ave);
 
         self
     }
@@ -343,27 +358,28 @@ impl TLCData {
         Ok(self)
     }
 
-    pub fn plot_nu(&mut self) -> TLCResult<&mut Self> {
+    pub fn plot_nu(&mut self, range: Option<(f32, f32)>) -> TLCResult<&mut Self> {
         if self.nu2d.is_none() {
             self.solve()?;
         }
 
         let nu_nan_mean = self.get_nu_ave()?;
-        postprocess::plot_area(
-            self.get_nu2d()?,
-            nu_nan_mean * 0.6,
-            nu_nan_mean * 2.,
-            &self.config.plots_path,
-        )?;
+        let (vmin, vmax) = range.unwrap_or((nu_nan_mean * 0.6, nu_nan_mean * 2.));
+        postprocess::plot_area(self.get_nu2d()?, vmin, vmax, &self.config.plots_path)?;
 
         Ok(self)
     }
 
-    pub fn plot_temps_single_frame(&mut self, frame_index: usize) -> TLCResult<()> {
-        let path = format!("./cache/{}_{}.png", self.config.case_name, frame_index);
+    pub fn plot_temps_single_frame(
+        &mut self,
+        frame_index: usize,
+        range: Option<(f32, f32)>,
+    ) -> TLCResult<()> {
+        let path = format!("./cache/{}_{}.png", self.config.case_name, frame_index + 1);
         let temps_single_frame = self.interp_single_frame(frame_index)?;
         let mean = postprocess::cal_average(temps_single_frame.view());
-        postprocess::plot_area(temps_single_frame.view(), mean * 0.5, mean * 1.2, path)?;
+        let (vmin, vmax) = range.unwrap_or((mean * 0.5, mean * 1.2));
+        postprocess::plot_area(temps_single_frame.view(), vmin, vmax, path)?;
 
         Ok(())
     }

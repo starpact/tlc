@@ -13,8 +13,8 @@ function SolveSettings({ config, setConfig, setErrMsg }) {
   function setPeakTemp(peak_temp) {
     if (Math.abs(peak_temp - config.peak_temp) < 1e-5) return;
     tauri.promisified({
-      cmd: "SetPeakTemp",
-      peak_temp,
+      cmd: "setPeakTemp",
+      body: peak_temp,
     })
       .then(ok => setConfig(ok))
       .catch(err => setErrMsg(err));
@@ -23,8 +23,8 @@ function SolveSettings({ config, setConfig, setErrMsg }) {
   function setSolidThermalConductivity(solid_thermal_conductivity) {
     if (Math.abs(solid_thermal_conductivity - config.solid_thermal_conductivity) < 1e-5) return;
     tauri.promisified({
-      cmd: "SetSolidThermalConductivity",
-      solid_thermal_conductivity,
+      cmd: "setSolidThermalConductivity",
+      body: solid_thermal_conductivity,
     })
       .then(ok => setConfig(ok))
       .catch(err => setErrMsg(err));
@@ -33,8 +33,8 @@ function SolveSettings({ config, setConfig, setErrMsg }) {
   function setSolidThermalDiffusivity(solid_thermal_diffusivity) {
     if (Math.abs(solid_thermal_diffusivity - config.solid_thermal_diffusivity) < 1e-5) return;
     tauri.promisified({
-      cmd: "SetSolidThermalDiffusivity",
-      solid_thermal_diffusivity,
+      cmd: "setSolidThermalDiffusivity",
+      body: solid_thermal_diffusivity,
     })
       .then(ok => setConfig(ok))
       .catch(err => setErrMsg(err));
@@ -43,8 +43,8 @@ function SolveSettings({ config, setConfig, setErrMsg }) {
   function setAirThermalConductivity(air_thermal_conductivity) {
     if (Math.abs(air_thermal_conductivity - config.air_thermal_conductivity) < 1e-5) return;
     tauri.promisified({
-      cmd: "SetAirThermalConductivity",
-      air_thermal_conductivity,
+      cmd: "setAirThermalConductivity",
+      body: air_thermal_conductivity,
     })
       .then(ok => setConfig(ok))
       .catch(err => setErrMsg(err));
@@ -53,8 +53,8 @@ function SolveSettings({ config, setConfig, setErrMsg }) {
   function setCharacteristicLength(characteristic_length) {
     if (Math.abs(characteristic_length - config.characteristic_length) < 1e-5) return;
     tauri.promisified({
-      cmd: "SetCharacteristicLength",
-      characteristic_length,
+      cmd: "setCharacteristicLength",
+      body: characteristic_length,
     })
       .then(ok => setConfig(ok))
       .catch(err => setErrMsg(err));
@@ -62,8 +62,8 @@ function SolveSettings({ config, setConfig, setErrMsg }) {
 
   function setRegulator(regulator) {
     tauri.promisified({
-      cmd: "SetRegulator",
-      regulator,
+      cmd: "setRegulator",
+      body: regulator,
     })
       .then(ok => setConfig(ok))
       .catch(err => setErrMsg(err));
@@ -71,8 +71,8 @@ function SolveSettings({ config, setConfig, setErrMsg }) {
 
   function setFilterMethod(filter_method) {
     tauri.promisified({
-      cmd: "SetFilterMethod",
-      filter_method,
+      cmd: "setFilterMethod",
+      body: filter_method,
     })
       .then(ok => setConfig(ok))
       .catch(err => setErrMsg(err));
@@ -80,8 +80,8 @@ function SolveSettings({ config, setConfig, setErrMsg }) {
 
   function setInterpMethod(interp_method) {
     tauri.promisified({
-      cmd: "SetInterpMethod",
-      interp_method,
+      cmd: "setInterpMethod",
+      body: interp_method,
     })
       .then(ok => setConfig(ok))
       .catch(err => setErrMsg(err));
@@ -89,8 +89,8 @@ function SolveSettings({ config, setConfig, setErrMsg }) {
 
   function setIterationMethod(iteration_method) {
     tauri.promisified({
-      cmd: "SetIterationMethod",
-      iteration_method,
+      cmd: "setIterationMethod",
+      body: iteration_method,
     })
       .then(ok => setConfig(ok))
       .catch(err => setErrMsg(err))

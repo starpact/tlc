@@ -1,3 +1,3 @@
 mod batch;
-pub mod cmd;
+pub mod request;
 pub mod handle;

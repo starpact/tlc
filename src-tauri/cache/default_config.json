@@ -1,6 +1,4 @@
 {
-  "case_name": "",
-  "save_dir": "",
   "video_path": "E:\\research\\EXP\\exp_20201206\\imp\\videos\\imp_40000_1_up.avi",
   "daq_path": "E:\\research\\EXP\\exp_20201206\\imp\\daq\\imp_40000_1.lvm",
   "config_path": "E:\\research\\EXP\\exp_20201206\\tmp_res\\config\\imp_40000_1_up.json",

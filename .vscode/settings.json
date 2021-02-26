@@ -13,6 +13,7 @@
         "promisified",
         "simd",
         "thiserror",
+        "uget",
         "vmax",
         "vmin",
         "winres"

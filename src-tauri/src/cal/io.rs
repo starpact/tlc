@@ -1,13 +1,16 @@
-use std::fs::{create_dir_all, File};
 use std::io::BufReader;
+use std::lazy::SyncLazy;
 use std::ops::{Deref, DerefMut};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::{cell::RefCell, io::BufWriter};
+use std::{
+    cell::RefMut,
+    fs::{create_dir_all, File},
+};
 
+use ndarray::parallel::prelude::*;
 use ndarray::prelude::*;
-
-use rayon::{scope, ThreadPoolBuilder};
 
 use thread_local::ThreadLocal;
 
@@ -16,10 +19,7 @@ use ffmpeg_next as ffmpeg;
 use ffmpeg::software::scaling::flag::Flags;
 use ffmpeg::util::frame::video::Video;
 use ffmpeg::{codec::Context, media::Type};
-use ffmpeg::{
-    format::{input, Pixel},
-    Packet,
-};
+use ffmpeg::{format, Packet};
 
 use calamine::{open_workbook, Reader, Xlsx};
 
@@ -33,12 +33,14 @@ use super::error::TLCError::VideoError;
 
 const COMPRESSION_RATIO: u32 = 4;
 
+static PACKETS: SyncLazy<Mutex<Vec<Packet>>> = SyncLazy::new(|| Mutex::new(Vec::new()));
+
 /// wrap `Context` to pass between threads(because of the raw pointer)
-struct SendableContext(ffmpeg::software::scaling::Context);
+struct SendCtx(ffmpeg::software::scaling::Context);
 
-unsafe impl Send for SendableContext {}
+unsafe impl Send for SendCtx {}
 
-impl Deref for SendableContext {
+impl Deref for SendCtx {
     type Target = ffmpeg::software::scaling::Context;
 
     fn deref(&self) -> &Self::Target {
@@ -46,33 +48,32 @@ impl Deref for SendableContext {
     }
 }
 
-impl DerefMut for SendableContext {
+impl DerefMut for SendCtx {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
 }
 
-pub struct DecoderToolBuilder {
-    packets: Vec<Packet>,
-    ctx_mutex: Mutex<Context>,
-}
+pub struct VideoCtx(Mutex<Context>);
 
-impl DecoderToolBuilder {
-    pub fn new(packets: Vec<Packet>, ctx_mutex: Mutex<Context>) -> Self {
-        Self { packets, ctx_mutex }
+impl Deref for VideoCtx {
+    type Target = Mutex<Context>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }
 
 pub struct DecoderTool {
     decoder: RefCell<ffmpeg::decoder::Video>,
-    sws_ctx: RefCell<SendableContext>,
+    sws_ctx: RefCell<SendCtx>,
     src_frame: RefCell<Video>,
     dst_frame: RefCell<Video>,
 }
 
 impl DecoderTool {
-    pub fn new(ctx_mutex: &Mutex<Context>, is_pressed: bool) -> TLCResult<Self> {
-        let decoder = ctx_mutex
+    fn new(video_ctx: &VideoCtx, compress: bool) -> TLCResult<Self> {
+        let decoder = video_ctx
             .lock()
             .map_err(|err| awsl!(err))?
             .clone()
@@ -84,60 +85,65 @@ impl DecoderTool {
             decoder.format(),
             w,
             h,
-            Pixel::RGB24,
-            if is_pressed { w / COMPRESSION_RATIO } else { w },
-            if is_pressed { h / COMPRESSION_RATIO } else { h },
+            format::Pixel::RGB24,
+            if compress { w / COMPRESSION_RATIO } else { w },
+            if compress { h / COMPRESSION_RATIO } else { h },
             Flags::FAST_BILINEAR,
         )
         .map_err(|err| awsl!(VideoError, err, ""))?;
 
         Ok(Self {
             decoder: RefCell::new(decoder),
-            sws_ctx: RefCell::new(SendableContext(sws_ctx)),
+            sws_ctx: RefCell::new(SendCtx(sws_ctx)),
             src_frame: RefCell::new(Video::empty()),
             dst_frame: RefCell::new(Video::empty()),
         })
+    }
+
+    fn decode(&self, packet: &Packet) -> TLCResult<RefMut<Video>> {
+        let mut decoder = self.decoder.borrow_mut();
+        let mut sws_ctx = self.sws_ctx.borrow_mut();
+        let mut src_frame = self.src_frame.borrow_mut();
+        let mut dst_frame = self.dst_frame.borrow_mut();
+
+        decoder
+            .send_packet(packet)
+            .map_err(|err| awsl!(VideoError, err, "发送数据包错误"))?;
+        decoder
+            .receive_frame(&mut src_frame)
+            .map_err(|err| awsl!(VideoError, err, "接受数据帧错误"))?;
+        sws_ctx
+            .run(&src_frame, &mut dst_frame)
+            .map_err(|err| awsl!(VideoError, err, "颜色转换错误"))?;
+
+        Ok(dst_frame)
     }
 }
 
 impl TLCData {
     pub fn get_frame(&mut self, frame_index: usize) -> TLCResult<String> {
-        if self.decoder_tool_builder.is_none() {
-            self.decoder_tool_builder
-                .insert(self.config.create_decoder_tool_builder()?);
+        if self.video_ctx.is_none() {
+            self.video_ctx.insert(self.config.create_video_ctx()?);
         }
         if self.decoder_tool.is_none() {
-            self.decoder_tool.insert(DecoderTool::new(
-                &self.get_decoder_tool_builder()?.ctx_mutex,
-                true,
-            )?);
+            self.decoder_tool
+                .insert(DecoderTool::new(self.get_video_ctx()?, true)?);
         }
 
-        let packets = &self.get_decoder_tool_builder()?.packets;
-        let DecoderTool {
-            decoder,
-            sws_ctx,
-            src_frame,
-            dst_frame,
-        } = self.get_decoder_tool()?;
+        let packets = loop {
+            let packets = PACKETS.lock().map_err(|err| awsl!(err))?;
+            if frame_index < packets.len() {
+                break packets;
+            }
+            drop(packets);
+        };
 
-        let mut decoder = decoder.borrow_mut();
-        let mut sws_ctx = sws_ctx.borrow_mut();
-        let mut src_frame = src_frame.borrow_mut();
-        let mut dst_frame = dst_frame.borrow_mut();
+        let decode_tool = self.get_decoder_tool()?;
+        let dst_frame = decode_tool.decode(&packets[frame_index])?;
 
-        decoder
-            .send_packet(&packets[frame_index])
-            .map_err(|err| awsl!(VideoError, err, ""))?;
-        decoder
-            .receive_frame(&mut src_frame)
-            .map_err(|err| awsl!(VideoError, err, ""))?;
-        sws_ctx
-            .run(&src_frame, &mut dst_frame)
-            .map_err(|err| awsl!(VideoError, err, ""))?;
-
-        let dst_h = decoder.height() / COMPRESSION_RATIO;
-        let dst_w = decoder.width() / COMPRESSION_RATIO;
+        let (src_h, src_w) = self.get_config().video_shape;
+        let dst_h = src_h as u32 / COMPRESSION_RATIO;
+        let dst_w = src_w as u32 / COMPRESSION_RATIO;
         let mut buf = Vec::with_capacity((dst_h * dst_w * 3) as usize);
 
         let mut jpeg_encoder = image::jpeg::JpegEncoder::new(&mut buf);
@@ -151,9 +157,8 @@ impl TLCData {
 
     /// 线程池解码视频读取Green值
     pub fn read_video(&mut self) -> TLCResult<&mut Self> {
-        if self.decoder_tool_builder.is_none() {
-            self.decoder_tool_builder
-                .insert(self.config.create_decoder_tool_builder()?);
+        if self.video_ctx.is_none() {
+            self.video_ctx.insert(self.config.create_video_ctx()?);
         }
 
         let TLCConfig {
@@ -161,6 +166,7 @@ impl TLCData {
             region_shape,
             start_frame,
             frame_num,
+            video_shape,
             ..
         } = self.config;
 
@@ -170,61 +176,45 @@ impl TLCData {
         let (cal_h, cal_w) = region_shape;
         // 总像素点数
         let pix_num = cal_h * cal_w;
+        // 视频帧一行实际字节数
+        let real_w = (video_shape.1 * 3) as usize;
 
-        let DecoderToolBuilder {
-            packets,
-            ref ctx_mutex,
-        } = self.get_decoder_tool_builder()?;
-
-        let g2d = Array2::zeros((frame_num, pix_num));
-        let g2d_view = g2d.view();
-
+        let ctx_mutex = self.get_video_ctx()?;
+        let mut g2d = Array2::zeros((frame_num, pix_num));
         let tls = Arc::new(ThreadLocal::new());
+        let packets = loop {
+            let packets = PACKETS.lock().map_err(|err| awsl!(err))?;
+            if packets.len() == self.config.total_frames {
+                break packets;
+            }
+        };
 
-        ThreadPoolBuilder::new()
-            .build()
-            .map_err(|err| awsl!(err))?
-            .install(|| {
-                scope(|scp| {
-                    for (frame_index, packet) in
-                        packets.iter().skip(start_frame).take(frame_num).enumerate()
-                    {
-                        let tls_arc = tls.clone();
-                        scp.spawn(move |_| {
-                            if let Ok(tls_paras) =
-                                tls_arc.get_or_try(|| DecoderTool::new(ctx_mutex, false))
-                            {
-                                let mut decoder = tls_paras.decoder.borrow_mut();
-                                let mut sws_ctx = tls_paras.sws_ctx.borrow_mut();
-                                let mut src_frame = tls_paras.src_frame.borrow_mut();
-                                let mut dst_frame = tls_paras.dst_frame.borrow_mut();
+        packets
+            .par_iter()
+            .skip(start_frame)
+            .zip(g2d.axis_iter_mut(Axis(0)).into_par_iter())
+            .try_for_each(|(packet, mut row)| -> TLCResult<()> {
+                let tls_arc = tls.clone();
+                let dst_frame = tls_arc
+                    .get_or_try(|| DecoderTool::new(ctx_mutex, false))?
+                    .decode(packet)?;
 
-                                if decoder.send_packet(packet).is_err()
-                                    || decoder.receive_frame(&mut src_frame).is_err()
-                                    || sws_ctx.run(&src_frame, &mut dst_frame).is_err()
-                                {
-                                    return;
-                                }
+                // the data of each frame store in one u8 array:
+                // ||r g b r g b...r g b|......|r g b r g b...r g b||
+                // ||.......row_0.......|......|.......row_n.......||
+                let rgb = dst_frame.data(0);
+                let mut it = row.iter_mut();
 
-                                // the data of each frame store in one u8 array:
-                                // ||r g b r g b...r g b|......|r g b r g b...r g b||
-                                // ||.......row_0.......|......|.......row_n.......||
-                                let rgb = dst_frame.data(0);
-                                let real_w = (decoder.width() * 3) as usize;
-
-                                let ptr = g2d_view.as_ptr() as *mut u8;
-                                let mut index = (pix_num * frame_index) as isize;
-                                for i in (0..).step_by(real_w).skip(tl_y).take(cal_h) {
-                                    for j in (i..).skip(1).step_by(3).skip(tl_x).take(cal_w) {
-                                        unsafe { *ptr.offset(index) = *rgb.get_unchecked(j) };
-                                        index += 1;
-                                    }
-                                }
-                            };
-                        });
+                for i in (0..).step_by(real_w).skip(tl_y).take(cal_h) {
+                    for j in (i..).skip(1).step_by(3).skip(tl_x).take(cal_w) {
+                        if let Some(x) = it.next() {
+                            *x = unsafe { *rgb.get_unchecked(j) };
+                        }
                     }
-                })
-            });
+                }
+
+                Ok(())
+            })?;
 
         if let Ok(tls) = Arc::try_unwrap(tls) {
             tls.into_iter().for_each(|v| drop(v));
@@ -263,7 +253,8 @@ impl TLCConfig {
     fn init_video_metadata(&mut self) -> TLCResult<&mut Self> {
         ffmpeg::init().map_err(|err| awsl!(VideoError, err, "ffmpeg初始化错误，建议重装"))?;
 
-        let input = input(&self.video_path).map_err(|_| awsl!(VideoIOError, &self.video_path))?;
+        let input =
+            format::input(&self.video_path).map_err(|_| awsl!(VideoIOError, &self.video_path))?;
         let video_stream = input.streams().best(Type::Video).ok_or(awsl!(
             VideoError,
             "找不到视频流",
@@ -273,6 +264,12 @@ impl TLCConfig {
         self.frame_rate =
             (rational.numerator() as f32 / rational.denominator() as f32).round() as usize;
         self.total_frames = input.duration() as usize * self.frame_rate / 1_000_000;
+        let decoder = video_stream
+            .codec()
+            .decoder()
+            .video()
+            .map_err(|err| awsl!(VideoError, err, ""))?;
+        self.video_shape = (decoder.height() as usize, decoder.width() as usize);
 
         Ok(self)
     }
@@ -372,25 +369,35 @@ impl TLCConfig {
         Ok(self)
     }
 
-    pub fn create_decoder_tool_builder(&self) -> TLCResult<DecoderToolBuilder> {
+    pub fn create_video_ctx(&self) -> TLCResult<VideoCtx> {
         ffmpeg::init().map_err(|err| awsl!(VideoError, err, "ffmpeg初始化错误，建议重装"))?;
-        let mut input =
-            input(&self.video_path).map_err(|_| awsl!(VideoIOError, &self.video_path))?;
+        let video_path = &self.video_path;
+        let mut input = format::input(video_path).map_err(|_| awsl!(VideoIOError, video_path))?;
         let video_stream = input.streams().best(Type::Video).ok_or(awsl!(
             VideoError,
             "找不到视频流",
-            &self.video_path,
+            video_path,
         ))?;
         let video_stream_index = video_stream.index();
-        let mut packets = Vec::with_capacity(self.total_frames);
         let ctx_mutex = Mutex::new(video_stream.codec());
-        input.packets().for_each(|(stream, packet)| {
-            if stream.index() == video_stream_index {
-                packets.push(packet);
+        let total_frames = self.total_frames;
+
+        std::thread::spawn(move || -> TLCResult<()> {
+            let mut ps = PACKETS.lock().map_err(|err| awsl!(err))?;
+            ps.clear();
+            *ps = Vec::with_capacity(total_frames);
+            drop(ps);
+
+            for (stream, packet) in input.packets() {
+                if stream.index() == video_stream_index {
+                    PACKETS.lock().map_err(|err| awsl!(err))?.push(packet);
+                }
             }
+
+            Ok(())
         });
 
-        Ok(DecoderToolBuilder::new(packets, ctx_mutex))
+        Ok(VideoCtx(ctx_mutex))
     }
 
     /// 读取参考温度(.lvm or .xlsx)
