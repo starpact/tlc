@@ -28,7 +28,13 @@ function App() {
           <Button rounded={false} bg="#458588" color="#32302f" onClick={() => setAppState(1)}>求解设置</Button>
         </SimpleGrid>
         <Center>
-          <Heading color="#689d6a">当前实验组：{config.case_name}</Heading>
+          <Heading
+            color="#689d6a"
+            marginBottom="5px"
+            fontSize="3xl"
+          >
+            当前实验组：{config.case_name}
+          </Heading>
         </Center>
         <Stack key={new Date().getTime()} >
           {appState === 0 &&

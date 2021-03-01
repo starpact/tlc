@@ -314,18 +314,18 @@ impl TLCData {
         self
     }
 
-    pub fn set_start_frame(&mut self, start_frame: usize) -> &mut Self {
-        self.config.start_frame = start_frame;
+    pub fn set_start_frame(&mut self, start_frame: usize) -> TLCResult<&mut Self> {
+        self.config.set_start_frame(start_frame)?;
         delete!(self @ raw_g2d, filtered_g2d, peak_frames, t2d, interp, nu2d, nu_ave);
 
-        self
+        Ok(self)
     }
 
-    pub fn set_start_row(&mut self, start_row: usize) -> &mut Self {
-        self.config.start_row = start_row;
+    pub fn set_start_row(&mut self, start_row: usize) -> TLCResult<&mut Self> {
+        self.config.set_start_row(start_row)?;
         delete!(self @ raw_g2d, filtered_g2d, peak_frames, t2d, interp, nu2d, nu_ave);
 
-        self
+        Ok(self)
     }
 
     pub fn set_temp_column_num(&mut self, temp_column_num: Vec<usize>) -> &mut Self {

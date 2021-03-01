@@ -261,9 +261,7 @@ impl Interp {
                     let lv = f32x8::from_slice_unaligned(&l_temps[frame..]);
                     let rv = f32x8::from_slice_unaligned(&r_temps[frame..]);
                     let v8 = (lv * (r - pos) as f32 + rv * (pos - l) as f32) / (r - l) as f32;
-                    {
-                        v8.write_to_slice_unaligned(&mut row[frame..])
-                    };
+                    v8.write_to_slice_unaligned(&mut row[frame..]);
                     frame += f32x8::lanes();
                 }
                 while frame < frame_num {

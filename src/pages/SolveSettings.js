@@ -1,12 +1,12 @@
-import { Stack } from "@chakra-ui/react"
-import * as tauri from 'tauri/api/tauri'
+import { Stack } from "@chakra-ui/react";
+import * as tauri from 'tauri/api/tauri';
 
-import IInput from "../components/Input"
+import IInput from "../components/Input";
 
 import Regulator from "../components/Regulator";
 import SelectFilter from "../components/SelectFilter";
 import SelectInterp from "../components/SelectInterp";
-import SelectIteration from "../components/SelectIteration"
+import SelectIteration from "../components/SelectIteration";
 
 function SolveSettings({ config, setConfig, setErrMsg }) {
 

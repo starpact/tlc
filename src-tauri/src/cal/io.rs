@@ -31,7 +31,7 @@ use crate::awsl;
 
 use super::error::TLCError::VideoError;
 
-const COMPRESSION_RATIO: u32 = 4;
+const COMPRESSION_RATIO: u32 = 2;
 
 static PACKETS: SyncLazy<Mutex<Vec<Packet>>> = SyncLazy::new(|| Mutex::new(Vec::new()));
 
@@ -313,16 +313,15 @@ impl TLCConfig {
     }
 
     fn init_path(&mut self) -> TLCResult<&mut Self> {
-        if self.save_dir == "" {
-            return Ok(self);
-        }
-
         self.case_name = Path::new(&self.video_path)
             .file_stem()
             .ok_or(awsl!(VideoIOError, &self.video_path))?
             .to_str()
             .ok_or(awsl!(VideoIOError, &self.video_path))?
             .to_owned();
+        if self.save_dir == "" {
+            return Ok(self);
+        }
         let save_dir = Path::new(&self.save_dir);
         let config_dir = save_dir.join("config");
         let data_dir = save_dir.join("data");
@@ -365,6 +364,40 @@ impl TLCConfig {
     pub fn set_daq_path(&mut self, daq_path: String) -> TLCResult<&mut Self> {
         self.daq_path = daq_path;
         self.init_daq_metadata()?.init_frame_num();
+
+        Ok(self)
+    }
+
+    pub fn set_start_frame(&mut self, start_frame: usize) -> TLCResult<&mut Self> {
+        if start_frame >= self.total_frames {
+            return Err(awsl!("起始帧数超过视频总帧数"));
+        }
+        if self.start_row + start_frame < self.start_frame {
+            return Err(awsl!("起始行数须为非负"));
+        }
+        let start_row = self.start_row + start_frame - self.start_frame;
+        if start_row >= self.total_rows {
+            return Err(awsl!("起始行数超过数采文件总行数"));
+        }
+        self.start_frame = start_frame;
+        self.start_row = start_row;
+
+        Ok(self)
+    }
+
+    pub fn set_start_row(&mut self, start_row: usize) -> TLCResult<&mut Self> {
+        if start_row >= self.total_rows {
+            return Err(awsl!("起始行数超过数采文件总行数"));
+        }
+        if self.start_frame + start_row < self.start_row {
+            return Err(awsl!("起始帧数须为非负"));
+        }
+        let start_frame = self.start_frame + start_row - self.start_row;
+        if start_frame >= self.total_frames {
+            return Err(awsl!("起始帧数超过视频总帧数"));
+        }
+        self.start_row = start_row;
+        self.start_frame = start_frame;
 
         Ok(self)
     }

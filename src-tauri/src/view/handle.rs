@@ -132,7 +132,9 @@ fn set_daq_path(data: &mut TLCData, req: Request) -> TLCResult<String> {
 
 fn set_start_frame(data: &mut TLCData, req: Request) -> TLCResult<String> {
     let res = match req.body {
-        Some(Value::Uint(start_frame)) => Ok(data.set_start_frame(start_frame).get_config()),
+        Some(Value::Uint(start_frame)) => data
+            .set_start_frame(start_frame)
+            .map(|data| data.get_config()),
         _ => Err(awsl!(req.body)),
     };
 
@@ -141,7 +143,7 @@ fn set_start_frame(data: &mut TLCData, req: Request) -> TLCResult<String> {
 
 fn set_start_row(data: &mut TLCData, req: Request) -> TLCResult<String> {
     let res = match req.body {
-        Some(Value::Uint(start_row)) => Ok(data.set_start_row(start_row).get_config()),
+        Some(Value::Uint(start_row)) => data.set_start_row(start_row).map(|data| data.get_config()),
         _ => Err(awsl!(req.body)),
     };
 

@@ -8,7 +8,7 @@ import {
   Tag,
   Stack,
   HStack,
-} from "@chakra-ui/react"
+} from "@chakra-ui/react";
 import { useState } from "react";
 import IButton from "./Button";
 

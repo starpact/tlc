@@ -1,37 +1,23 @@
-import { useState, useEffect } from "react"
+import { useState, useEffect } from "react";
 import {
-  HStack,
-  Slider,
-  SliderTrack,
-  SliderFilledTrack,
-  SliderThumb,
-  Box,
   Text,
-  Image,
   Grid,
   Stack,
   GridItem,
-} from "@chakra-ui/react"
-import { FaFileVideo, FaFileCsv, FaFileImport } from "react-icons/fa"
-import * as tauri from 'tauri/api/tauri'
-import * as dialog from 'tauri/api/dialog'
+} from "@chakra-ui/react";
+import { FaFileVideo, FaFileCsv, FaFileImport } from "react-icons/fa";
+import * as tauri from 'tauri/api/tauri';
+import * as dialog from 'tauri/api/dialog';
 
-import IButton from "../components/Button"
-import IIConButton from "../components/IconButton"
-import IInput from "../components/Input"
+import IButton from "../components/Button";
+import IIConButton from "../components/IconButton";
+import IInput from "../components/Input";
+import VideoCanvas from "../components/VideoCanvas";
 
 function BasicSettings({ config, setConfig, setErrMsg }) {
-  const [frame, setFrame] = useState("");
   const [frameIndex, setFrameIndex] = useState(0);
-  const [lastRenderFrameIndex, setLastRenderFrameIndex] = useState(-1);
 
-  useEffect(() => {
-    if (config === "") loadDefaultConfig();
-    if (!!config) {
-      getFrame(0);
-
-    };
-  }, []);
+  useEffect(() => config === "" && loadDefaultConfig(), []);
 
   function loadConfig() {
     dialog.open({ filter: "json" }).then(path => {
@@ -122,29 +108,18 @@ function BasicSettings({ config, setConfig, setErrMsg }) {
       .catch(err => setErrMsg(err));
   }
 
-  function getFrame(frame_index) {
-    if (frameIndex === lastRenderFrameIndex) return;
-    tauri.promisified({
-      cmd: "getFrame",
-      body: frame_index,
-    })
-      .then(ok => setFrame(ok))
-      .catch(err => setErrMsg(err));
-    setLastRenderFrameIndex(frameIndex);
-  }
-
   return (
     <Stack>
       <Grid templateColumns="repeat(12, 1fr)" gap={2} marginX="30px">
         <GridItem colSpan={1}>
-          <Stack spacing="10px">
+          <Stack spacing="5px">
             <IButton text="重置配置" onClick={loadDefaultConfig} hover="重置为您上一次保存的配置" />
             <IButton text="导入配置" onClick={loadConfig} />
             <IButton text="保存配置" onClick={saveConfig} />
           </Stack>
         </GridItem>
         <GridItem colSpan={8}>
-          <Stack spacing="10px">
+          <Stack spacing="5px">
             <IInput
               leftTag="保存根目录"
               hover="所有结果的保存根目录，该目录下将自动创建config、data和plots子目录分类保存处理结果"
@@ -165,7 +140,7 @@ function BasicSettings({ config, setConfig, setErrMsg }) {
           </Stack>
         </GridItem>
         <GridItem colSpan={3}>
-          <Stack spacing="10px">
+          <Stack spacing="5px">
             <IInput
               leftTag="起始帧数"
               value={config.frame_num > 0 ? config.start_frame : ""}
@@ -190,64 +165,14 @@ function BasicSettings({ config, setConfig, setErrMsg }) {
           </Stack>
         </GridItem>
       </Grid>
-      <HStack>
-        <Stack>
-          {/* <Box
-            backgroundImage={`url(data:image/jpeg;base64,${frame})`}
-            backgroundSize="640px 512px"
-            w="640px"
-            h="512px"
-          >
-          </Box> */}
-          <Image
-            src={`data:image/jpeg;base64,${frame}`}
-            htmlWidth={!!config && `${config.video_shape[1] / 2}`}
-            htmlHeight={!!config && `${config.video_path[0] / 2}`}
-            alt="fuck"
-          />
-          <HStack>
-            <Box w="7px"></Box>
-            <Box textAlign="center" rounded="md" w="60px" bgColor="#98971a">
-              <Text color="#32302f" fontWeight="bold">
-                {frameIndex + 1}
-              </Text>
-            </Box>
-            <Box w="15px"></Box>
-            <Slider
-              defaultValue={0}
-              min={0}
-              max={config.total_frames - 1}
-              onChange={v => setFrameIndex(parseInt(v))}
-              onChangeEnd={v => getFrame(parseInt(v))}
-            >
-              <SliderTrack bgColor="#665c54">
-                <SliderFilledTrack bgColor="#98971a" />
-              </SliderTrack>
-              <SliderThumb bgColor="#928374" />
-            </Slider>
-          </HStack>
-        </Stack>
-        <Stack>
-          <IInput
-            leftTag="计算区域左上角Y"
-            hover="与上边界的距离"
-            value={!!config.top_left_pos && config.top_left_pos[0]}
-          />
-          <IInput
-            leftTag="计算区域左上角X"
-            hover="与左边界的距离"
-            value={!!config.top_left_pos && config.top_left_pos[1]}
-          />
-          <IInput
-            leftTag="计算区域高度"
-            value={!!config.region_shape && config.region_shape[0]}
-          />
-          <IInput
-            leftTag="计算区域宽度"
-            value={!!config.region_shape && config.region_shape[1]}
-          />
-        </Stack>
-      </HStack>
+      <VideoCanvas
+        frameIndex={frameIndex}
+        setFrameIndex={setFrameIndex}
+        config={config}
+        setConfig={setConfig}
+        setErrMsg={setErrMsg}
+      />
+      <Text color="red">{frameIndex}</Text>
     </Stack >
   )
 }
