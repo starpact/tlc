@@ -307,10 +307,8 @@ impl TLCConfig {
     }
 
     fn init_frame_num(&mut self) -> &mut Self {
-        if self.start_frame > 0 && self.start_row > 0 {
-            self.frame_num =
-                (self.total_frames - self.start_frame).min(self.total_rows - self.start_row);
-        }
+        self.frame_num =
+            (self.total_frames - self.start_frame).min(self.total_rows - self.start_row);
 
         self
     }
@@ -388,6 +386,7 @@ impl TLCConfig {
         self.start_frame = start_frame;
         self.start_row = start_row;
         self.init_frame_num();
+        println!("{} {}", start_frame, self.frame_num);
 
         Ok(self)
     }
