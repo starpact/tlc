@@ -330,7 +330,7 @@ function VideoCanvas({
           </Slider>
           <Box w="10px"></Box>
         </HStack>
-        <HStack h="30px">
+        <HStack h="25px">
           <Box w="7px"></Box>
           <Checkbox
             size="lg"
@@ -342,7 +342,7 @@ function VideoCanvas({
           >
             显示计算区域和热电偶位置
           </Checkbox>
-          {showPos && <IButton text="保存" onClick={onSubmit} size="sm" />}
+          {showPos && <IButton text="提交" onClick={onSubmit} size="sm" />}
         </HStack>
       </Stack>
     </HStack>

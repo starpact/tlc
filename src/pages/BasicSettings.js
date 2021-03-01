@@ -1,6 +1,5 @@
 import { useState, useEffect } from "react";
 import {
-  Text,
   Grid,
   Stack,
   GridItem,
@@ -90,6 +89,10 @@ function BasicSettings({ config, setConfig, setErrMsg }) {
 
   function setStartFrame(start_frame) {
     if (start_frame === config.start_frame) return;
+    if (start_frame < 0) {
+      setErrMsg("帧数须为正值");
+      return;
+    }
     tauri.promisified({
       cmd: "setStartFrame",
       body: start_frame,
@@ -100,6 +103,10 @@ function BasicSettings({ config, setConfig, setErrMsg }) {
 
   function setStartRow(start_row) {
     if (start_row === config.start_row) return;
+    if (start_row < 0) {
+      setErrMsg("行数须为正值");
+      return;
+    }
     tauri.promisified({
       cmd: "setStartRow",
       body: start_row,
@@ -143,19 +150,23 @@ function BasicSettings({ config, setConfig, setErrMsg }) {
           <Stack spacing="5px">
             <IInput
               leftTag="起始帧数"
-              value={config.frame_num > 0 ? config.start_frame : ""}
+              value={config.frame_num > 0 ? config.start_frame + 1 : ""}
               mutable
-              onBlur={v => setStartFrame(parseInt(v))}
+              onBlur={v => setStartFrame(parseInt(v) - 1)}
               rightTag={config.frame_num > 0 ?
-                `[${config.start_frame}, ${config.start_frame + config.frame_num}] / ${config.total_frames}` : ""}
+                `[${config.start_frame + 1}, 
+                  ${Math.min(config.start_frame + config.frame_num, config.total_frames)}] 
+                / ${config.total_frames}` : ""}
             />
             <IInput
               leftTag="起始行数"
-              value={config.frame_num > 0 ? config.start_row : ""}
-              onBlur={v => setStartRow(parseInt(v))}
+              value={config.frame_num > 0 ? config.start_row + 1 : ""}
+              onBlur={v => setStartRow(parseInt(v) - 1)}
               mutable
               rightTag={config.frame_num > 0 ?
-                `[${config.start_row}, ${config.start_row + config.frame_num}] / ${config.total_rows}` : ""}
+                `[${config.start_row + 1}, 
+                  ${Math.min(config.start_row + config.frame_num, config.total_rows)}] 
+                / ${config.total_rows}` : ""}
             />
             <IInput
               leftTag="帧率"
@@ -172,7 +183,6 @@ function BasicSettings({ config, setConfig, setErrMsg }) {
         setConfig={setConfig}
         setErrMsg={setErrMsg}
       />
-      <Text color="red">{frameIndex}</Text>
     </Stack >
   )
 }

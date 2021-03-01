@@ -245,7 +245,10 @@ impl TLCConfig {
         }
         let _ = cfg.init_daq_metadata();
         let _ = cfg.init_path();
-        cfg.init_frame_num().init_regulator();
+        if cfg.frame_num == 0 {
+            cfg.init_frame_num();
+        }
+        cfg.init_regulator();
 
         Ok(cfg)
     }
@@ -304,7 +307,7 @@ impl TLCConfig {
     }
 
     fn init_frame_num(&mut self) -> &mut Self {
-        if self.total_frames > 0 && self.total_rows > 0 {
+        if self.start_frame > 0 && self.start_row > 0 {
             self.frame_num =
                 (self.total_frames - self.start_frame).min(self.total_rows - self.start_row);
         }
@@ -370,34 +373,42 @@ impl TLCConfig {
 
     pub fn set_start_frame(&mut self, start_frame: usize) -> TLCResult<&mut Self> {
         if start_frame >= self.total_frames {
-            return Err(awsl!("起始帧数超过视频总帧数"));
+            return Err(awsl!(HandleError, "起始帧数超过视频总帧数"));
         }
         if self.start_row + start_frame < self.start_frame {
-            return Err(awsl!("起始行数须为非负"));
+            return Err(awsl!(HandleError, "根据同步结果推算出的起始行数 <= 0"));
         }
         let start_row = self.start_row + start_frame - self.start_frame;
         if start_row >= self.total_rows {
-            return Err(awsl!("起始行数超过数采文件总行数"));
+            return Err(awsl!(
+                HandleError,
+                "根据同步结果推算出的起始行数超过数采文件总行数"
+            ));
         }
         self.start_frame = start_frame;
         self.start_row = start_row;
+        self.init_frame_num();
 
         Ok(self)
     }
 
     pub fn set_start_row(&mut self, start_row: usize) -> TLCResult<&mut Self> {
         if start_row >= self.total_rows {
-            return Err(awsl!("起始行数超过数采文件总行数"));
+            return Err(awsl!(HandleError, "起始行数超过数采文件总行数"));
         }
         if self.start_frame + start_row < self.start_row {
-            return Err(awsl!("起始帧数须为非负"));
+            return Err(awsl!(HandleError, "根据同步结果推算出的起始帧数 <= 0"));
         }
         let start_frame = self.start_frame + start_row - self.start_row;
         if start_frame >= self.total_frames {
-            return Err(awsl!("起始帧数超过视频总帧数"));
+            return Err(awsl!(
+                HandleError,
+                "根据同步结果推算出的起始帧数超过视频总帧数"
+            ));
         }
         self.start_row = start_row;
         self.start_frame = start_frame;
+        self.init_frame_num();
 
         Ok(self)
     }

@@ -39,6 +39,9 @@ pub enum TLCError {
     #[error("画图失败: {0}")]
     PlotError(String),
 
+    #[error("{0}")]
+    HandleError(String),
+
     #[error("未知错误: {0}")]
     UnKnown(String),
 }
