@@ -376,7 +376,7 @@ impl TLCConfig {
             return Err(awsl!(HandleError, "起始帧数超过视频总帧数"));
         }
         if self.start_row + start_frame < self.start_frame {
-            return Err(awsl!(HandleError, "根据同步结果推算出的起始行数 <= 0"));
+            return Err(awsl!(HandleError, "根据同步结果推算出的起始行数非正值"));
         }
         let start_row = self.start_row + start_frame - self.start_frame;
         if start_row >= self.total_rows {
@@ -397,7 +397,7 @@ impl TLCConfig {
             return Err(awsl!(HandleError, "起始行数超过数采文件总行数"));
         }
         if self.start_frame + start_row < self.start_row {
-            return Err(awsl!(HandleError, "根据同步结果推算出的起始帧数 <= 0"));
+            return Err(awsl!(HandleError, "根据同步结果推算出的起始帧数非正值"));
         }
         let start_frame = self.start_frame + start_row - self.start_row;
         if start_frame >= self.total_frames {
