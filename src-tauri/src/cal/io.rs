@@ -135,7 +135,6 @@ impl TLCData {
             if frame_index < packets.len() {
                 break packets;
             }
-            drop(packets);
         };
 
         let decode_tool = self.get_decoder_tool()?;
@@ -155,7 +154,6 @@ impl TLCData {
         Ok(base64_string)
     }
 
-    /// 线程池解码视频读取Green值
     pub fn read_video(&mut self) -> TLCResult<&mut Self> {
         if self.video_ctx.is_none() {
             self.video_ctx.insert(self.config.create_video_ctx()?);
@@ -386,7 +384,6 @@ impl TLCConfig {
         self.start_frame = start_frame;
         self.start_row = start_row;
         self.init_frame_num();
-        println!("{} {}", start_frame, self.frame_num);
 
         Ok(self)
     }

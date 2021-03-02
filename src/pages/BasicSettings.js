@@ -3,6 +3,7 @@ import {
   Grid,
   Stack,
   GridItem,
+  HStack,
 } from "@chakra-ui/react";
 import { FaFileVideo, FaFileCsv, FaFileImport } from "react-icons/fa";
 import * as tauri from 'tauri/api/tauri';
@@ -12,6 +13,7 @@ import IButton from "../components/Button";
 import IIConButton from "../components/IconButton";
 import IInput from "../components/Input";
 import VideoCanvas from "../components/VideoCanvas";
+import ITable from "../components/Table";
 
 function BasicSettings({ config, setConfig, setErrMsg }) {
   const [frameIndex, setFrameIndex] = useState(0);
@@ -176,13 +178,16 @@ function BasicSettings({ config, setConfig, setErrMsg }) {
           </Stack>
         </GridItem>
       </Grid>
-      <VideoCanvas
-        frameIndex={frameIndex}
-        setFrameIndex={setFrameIndex}
-        config={config}
-        setConfig={setConfig}
-        setErrMsg={setErrMsg}
-      />
+      <HStack>
+        <VideoCanvas
+          frameIndex={frameIndex}
+          setFrameIndex={setFrameIndex}
+          config={config}
+          setConfig={setConfig}
+          setErrMsg={setErrMsg}
+        />
+        <ITable config={config} setErrMsg={setErrMsg} />
+      </HStack>
     </Stack >
   )
 }

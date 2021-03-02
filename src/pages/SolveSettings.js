@@ -133,10 +133,25 @@ function SolveSettings({ config, setConfig, setErrMsg }) {
         mutable
         rightTag="m"
       />
-      <Regulator regulator={config.regulator} onSubmit={setRegulator} />
-      <SelectFilter value={config.filter_method} onSubmit={setFilterMethod} />
-      <SelectInterp value={config.interp_method} onSubmit={setInterpMethod} />
-      <SelectIteration value={config.iteration_method} onSubmit={setIterationMethod} />
+      <Regulator
+        regulator={config.regulator}
+        onSubmit={setRegulator}
+      />
+      <SelectFilter
+        value={config.filter_method}
+        onSubmit={setFilterMethod}
+        setErrMsg={setErrMsg}
+      />
+      <SelectInterp
+        value={config.interp_method}
+        onSubmit={setInterpMethod}
+        setErrMsg={setErrMsg}
+      />
+      <SelectIteration
+        value={config.iteration_method}
+        onSubmit={setIterationMethod}
+        setErrMsg={setErrMsg}
+      />
     </Stack>
   )
 }

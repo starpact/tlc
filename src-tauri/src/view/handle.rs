@@ -1,6 +1,7 @@
 use std::thread;
 use std::{collections::HashMap, sync::mpsc::Receiver};
 
+use ndarray::Axis;
 use tauri::WebviewMut;
 
 use super::request::{Request, Value};
@@ -58,6 +59,7 @@ pub fn init(rx: Receiver<(WebviewMut, Request)>) {
             set_temp_column_num,
             set_thermocouple_pos,
             get_frame,
+            get_daq,
         );
 
         let mut tlc_data = TLCData::new().unwrap();
@@ -66,6 +68,7 @@ pub fn init(rx: Receiver<(WebviewMut, Request)>) {
             let (mut wm, req) = rx.recv().unwrap();
             let f = hm.get(req.cmd.as_str()).unwrap();
             let callback_string = f(&mut tlc_data, req).unwrap();
+            println!("{}", &callback_string[..200]);
             wm.dispatch(move |w| w.eval(callback_string.as_str()))
                 .unwrap();
         }
@@ -284,5 +287,10 @@ fn get_frame(data: &mut TLCData, req: Request) -> TLCResult<String> {
         _ => Err(awsl!(req.body)),
     };
 
+    Request::format_callback(res, req.callback, req.error)
+}
+
+fn get_daq(data: &mut TLCData, req: Request) -> TLCResult<String> {
+    let res = data.read_daq().unwrap().get_t2d();
     Request::format_callback(res, req.callback, req.error)
 }

@@ -3,27 +3,15 @@ import { useState } from "react";
 import IButton from "./Button";
 import IInput from "./Input";
 
-function SelectIteration({ value, onSubmit }) {
-  const [type, setType] = useState(() => {
-    if (!value) return "";
-    if (!!value.NewtonTangent) return "NewtonTangent";
-    return "NewtonDown";
-  });
+function SelectIteration({ value, onSubmit, setErrMsg }) {
+  const [type, setType] = useState(Object.keys(value)[0]);
 
-  const [h0, setH0] = useState(() => {
-    if (!value) return 50;
-    if (!!value.NewtonTangent) return value.NewtonTangent.h0;
-    return value.NewtonDown.h0;
-  });
+  const [h0, setH0] = useState(Object.values(value)[0][0]);
 
-  const [maxIterNum, setMaxIterNum] = useState(() => {
-    if (!value) return 10;
-    if (!!value.NewtonTangent) return value.NewtonTangent.max_iter_num;
-    return value.NewtonDown.max_iter_num;
-  })
+  const [maxIterNum, setMaxIterNum] = useState(Object.values(value)[0][1]);
 
   return (
-    <HStack w="600px">
+    <HStack>
       <Select
         w="200px"
         value={type}
@@ -40,13 +28,28 @@ function SelectIteration({ value, onSubmit }) {
         <IInput
           leftTag="初值"
           value={!!h0 && h0.toFixed(1)}
-          onBlur={v => setH0(parseFloat(v))}
+          onBlur={v => {
+            const vv = parseFloat(v);
+            if (!vv) {
+              setErrMsg(`不合法的迭代初值：${v}`);
+              return;
+            }
+            setH0(vv);
+          }}
           mutable
+          rightTag="W/(m2·K)"
         />
         <IInput
           leftTag="最大迭代步数"
           value={maxIterNum}
-          onBlur={v => setMaxIterNum(parseInt(v))}
+          onBlur={v => {
+            const vv = parseInt(v);
+            if (!vv || vv <= 0) {
+              setErrMsg(`不合法的最大迭代步数：${v}`);
+              return;
+            }
+            setMaxIterNum(vv);
+          }}
           mutable
         />
       </Stack>

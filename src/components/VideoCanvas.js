@@ -20,7 +20,7 @@ const ZOOM = {
   R: "大小周",
   T: 996, // top
   B: "007", // bottom
-  TL: "我", // 左上角
+  TL: "我", // top left
   BL: "爱",
   TR: "加",
   BR: "班"
@@ -110,7 +110,6 @@ function VideoCanvas({
     img.src = `data: image/jpeg;base64,${frame}`;
     img.onload = () => {
       ctx.drawImage(img, 0, 0, W, H);
-
 
       if (showPos) {
         ctx.strokeStyle = "#cc241d";
