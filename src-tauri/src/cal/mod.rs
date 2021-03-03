@@ -135,7 +135,12 @@ pub struct TLCData {
     filtered_g2d: Option<Array2<u8>>,
     /// 所有点峰值对应帧数
     peak_frames: Option<Vec<usize>>,
-    /// 热电偶温度二维矩阵，排列方式如下：
+    /// 数采文件数据
+    /// 数据排列方式与.lvm/.xlsx一致
+    daq: Option<Array2<f32>>,
+    /// 热电偶温度二维矩阵
+    /// 从daq中选出各热电偶对应的列然后转置（保证内存连续，插值时能使用SIMD）
+    /// 排列方式如下：
     ///
     /// 1号热电偶：| 第一帧 第二帧 ... |
     ///
@@ -171,6 +176,7 @@ impl TLCData {
             raw_g2d: None,
             filtered_g2d: None,
             peak_frames: None,
+            daq:None,
             t2d: None,
             interp: None,
             nu2d: None,
@@ -200,6 +206,10 @@ impl TLCData {
 
     pub fn get_peak_frames(&self) -> TLCResult<&Vec<usize>> {
         self.peak_frames.as_ref().ok_or(awsl!())
+    }
+
+    pub fn get_daq(&self) -> TLCResult<ArrayView2<f32>> {
+        self.daq.as_ref().map(|v| v.view()).ok_or(awsl!())
     }
 
     pub fn get_t2d(&self) -> TLCResult<ArrayView2<f32>> {
@@ -234,7 +244,7 @@ impl TLCData {
 
     pub fn set_daq_path(&mut self, daq_path: String) -> TLCResult<&mut Self> {
         self.config.set_daq_path(daq_path)?;
-        delete!(self @ raw_g2d, filtered_g2d, peak_frames, t2d, interp, nu2d, nu_ave);
+        delete!(self @ raw_g2d, filtered_g2d, peak_frames, daq, t2d, interp, nu2d, nu_ave);
 
         Ok(self)
     }
@@ -326,6 +336,12 @@ impl TLCData {
         delete!(self @ raw_g2d, filtered_g2d, peak_frames, t2d, interp, nu2d, nu_ave);
 
         Ok(self)
+    }
+
+    pub fn synchronize(&mut self, frame_index: usize, row_index: usize) -> &mut Self {
+        self.config.synchronize(frame_index, row_index);
+        
+        self
     }
 
     pub fn set_temp_column_num(&mut self, temp_column_num: Vec<usize>) -> &mut Self {

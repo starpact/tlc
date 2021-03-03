@@ -57,7 +57,7 @@ function SelectInterp({ value, onSubmit, setErrMsg }) {
           />
         </Stack>}
       <IButton text="提交" onClick={() => {
-        let interpMethod = new Object();
+        let interpMethod = {};
         interpMethod[type] = (type === "Bilinear" || type === "BilinearExtra") ? shape : null;
         onSubmit(interpMethod);
       }} />

@@ -224,7 +224,7 @@ impl TLCData {
     }
 
     pub fn read_daq(&mut self) -> TLCResult<&mut Self> {
-        self.t2d.insert(self.config.read_daq()?);
+        self.daq.insert(self.config.read_daq()?);
 
         Ok(self)
     }
@@ -409,6 +409,19 @@ impl TLCConfig {
         Ok(self)
     }
 
+    pub fn synchronize(&mut self, frame_index: usize, row_index: usize) -> &mut Self {
+        if frame_index < row_index {
+            self.start_frame = 0;
+            self.start_row = row_index - frame_index;
+        } else {
+            self.start_row = 0;
+            self.start_frame = frame_index - row_index;
+        }
+        self.init_frame_num();
+
+        self
+    }
+
     pub fn create_video_ctx(&self) -> TLCResult<VideoCtx> {
         ffmpeg::init().map_err(|err| awsl!(VideoError, err, "ffmpeg初始化错误，建议重装"))?;
         let video_path = &self.video_path;
@@ -443,41 +456,44 @@ impl TLCConfig {
     /// 读取参考温度(.lvm or .xlsx)
     pub fn read_daq(&self) -> TLCResult<Array2<f32>> {
         let daq_path = Path::new(&self.daq_path);
-        let raw_t2d = match daq_path
+        let daq = match daq_path
             .extension()
             .ok_or(awsl!(DAQIOError, "路径有误", daq_path))?
             .to_str()
             .ok_or(awsl!(DAQIOError, "路径有误", daq_path))?
         {
-            "lvm" => self.read_temp_from_lvm(),
-            "xlsx" => self.read_temp_from_excel(),
+            "lvm" => self.read_daq_from_lvm(),
+            "xlsx" => self.read_daq_from_excel(),
             _ => Err(awsl!(DAQIOError, "只支持.lvm或.xlsx格式", daq_path))?,
         }?;
 
-        let regulator = Array::from_shape_vec((self.regulator.len(), 1), self.regulator.clone())
-            .map_err(|err| awsl!(err))?;
-
-        Ok(raw_t2d * regulator)
+        Ok(daq)
     }
 
-    fn read_temp_from_lvm(&self) -> TLCResult<Array2<f32>> {
+    fn read_daq_from_lvm(&self) -> TLCResult<Array2<f32>> {
         let daq_path = Path::new(&self.daq_path);
+        let total_columns = ReaderBuilder::new()
+            .has_headers(false)
+            .delimiter(b'\t')
+            .from_path(daq_path)
+            .map_err(|err| awsl!(DAQIOError, err, daq_path))?
+            .records()
+            .next()
+            .ok_or(awsl!(DAQError, "数采文件为空", daq_path))?
+            .map_err(|err| awsl!(DAQError, err, daq_path))?
+            .len();
+
         let mut rdr = ReaderBuilder::new()
             .has_headers(false)
             .delimiter(b'\t')
             .from_path(daq_path)
             .map_err(|err| awsl!(DAQIOError, err, daq_path))?;
 
-        let mut t2d = Array2::zeros((self.temp_column_num.len(), self.frame_num));
-        for (csv_row_result, mut temp_col) in rdr
-            .records()
-            .skip(self.start_row)
-            .take(self.frame_num)
-            .zip(t2d.axis_iter_mut(Axis(1)))
-        {
+        let mut daq = Array2::zeros((self.total_rows, total_columns));
+        for (csv_row_result, mut daq_column) in rdr.records().zip(daq.genrows_mut()) {
             let csv_row = csv_row_result.map_err(|err| awsl!(DAQIOError, err, daq_path))?;
-            for (&index, t) in self.temp_column_num.iter().zip(temp_col.iter_mut()) {
-                *t = csv_row[index].parse::<f32>().map_err(|err| {
+            for (csv_val, daq_val) in csv_row.into_iter().zip(daq_column.iter_mut()) {
+                *daq_val = csv_val.parse::<f32>().map_err(|err| {
                     awsl!(
                         DAQError,
                         format!("数据采集文件中不应当有数字以外的格式{}", err),
@@ -487,10 +503,10 @@ impl TLCConfig {
             }
         }
 
-        Ok(t2d)
+        Ok(daq)
     }
 
-    fn read_temp_from_excel(&self) -> TLCResult<Array2<f32>> {
+    fn read_daq_from_excel(&self) -> TLCResult<Array2<f32>> {
         let daq_path = Path::new(&self.daq_path);
         let mut excel: Xlsx<_> =
             open_workbook(daq_path).map_err(|err| awsl!(DAQIOError, err, daq_path))?;
@@ -498,16 +514,12 @@ impl TLCConfig {
             .worksheet_range_at(0)
             .ok_or(awsl!(DAQError, "找不到worksheet", daq_path))?
             .map_err(|err| awsl!(DAQIOError, err, daq_path))?;
+        let total_columns = sheet.width();
 
-        let mut t2d = Array2::zeros((self.temp_column_num.len(), self.frame_num));
-        for (excel_row, mut temp_col) in sheet
-            .rows()
-            .skip(self.start_row)
-            .take(self.frame_num)
-            .zip(t2d.axis_iter_mut(Axis(1)))
-        {
-            for (&index, t) in self.temp_column_num.iter().zip(temp_col.iter_mut()) {
-                *t = excel_row[index].get_float().ok_or(awsl!(
+        let mut daq = Array2::zeros((self.total_rows, total_columns));
+        for (excel_row, mut daq_col) in sheet.rows().zip(daq.genrows_mut()) {
+            for (excel_val, daq_val) in excel_row.into_iter().zip(daq_col.iter_mut()) {
+                *daq_val = excel_val.get_float().ok_or(awsl!(
                     DAQError,
                     "数据采集文件中不应当有数字以外的格式",
                     daq_path,
@@ -515,7 +527,7 @@ impl TLCConfig {
             }
         }
 
-        Ok(t2d)
+        Ok(daq)
     }
 
     /// 保存配置

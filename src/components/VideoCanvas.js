@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useEffect, useState } from "react";
 import {
   Checkbox,
   HStack,
@@ -7,11 +7,11 @@ import {
   SliderFilledTrack,
   SliderThumb,
   Box,
-  Text,
   Stack,
 } from "@chakra-ui/react";
-import * as tauri from 'tauri/api/tauri';
-import IButton from './Button';
+import * as tauri from "tauri/api/tauri";
+import IButton from "./Button";
+import ITag from "./Tag";
 
 // 矩形的8个缩放方向
 // 辣鸡js连枚举都没有
@@ -145,8 +145,8 @@ function VideoCanvas({
   function determineTarget() {
     const [x, y] = [startX, startY];
     for (let i = 0; i < tcs.length; i++) {
-      // 1.拖动热电偶
       const tc = tcs[i];
+      // 1.拖动热电偶
       if ((x - tc.x) ** 2 + (y - tc.y) ** 2 < RADIUS ** 2) {
         dragTarget = tc;
         return;
@@ -286,65 +286,54 @@ function VideoCanvas({
   }
 
   return (
-    <HStack>
-      <Stack>
-        <canvas
-          width={W}
-          height={H}
-          ondragstart="return false"
-          onMouseDown={handleMouseDown}
-          onMouseMove={handleMouseMove}
-          onMouseUp={handleMouseUp}
-          onMouseOut={handleMouseOut}
-          ref={canvas}
+    <Stack>
+      <canvas
+        width={W}
+        height={H}
+        ondragstart="return false"
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onMouseOut={handleMouseOut}
+        ref={canvas}
+      >
+      </canvas>
+      <HStack>
+        <Box w={1} />
+        <ITag text={frameIndex + 1} w="60px" />
+        <Box w={3} />
+        <Slider
+          defaultValue={0}
+          min={0}
+          max={config.total_frames - 1}
+          onChange={v => {
+            const vv = parseInt(v);
+            setFrameIndex(vv);
+            getFrame(vv);
+          }}
         >
-        </canvas>
-        <HStack>
-          <Box
-            textAlign="center"
-            rounded="md"
-            w="60px"
-            bgColor="#98971a"
-            marginLeft="1"
-            marginRight="3"
-          >
-            <Text color="#32302f" fontWeight="bold">
-              {frameIndex + 1}
-            </Text>
-          </Box>
-          <Slider
-            defaultValue={0}
-            min={0}
-            max={config.total_frames - 1}
-            onChange={v => {
-              const vv = parseInt(v);
-              setFrameIndex(vv);
-              getFrame(vv);
-            }}
-          >
-            <SliderTrack bgColor="#665c54">
-              <SliderFilledTrack bgColor="#98971a" />
-            </SliderTrack>
-            <SliderThumb bgColor="#928374" />
-          </Slider>
-          <Box w="10px"></Box>
-        </HStack>
-        <HStack h="25px">
-          <Box w="7px"></Box>
-          <Checkbox
-            size="lg"
-            colorScheme="teal"
-            color="#98971a"
-            defaultChecked
-            checked={showPos}
-            onChange={e => setShowPos(e.target.checked)}
-          >
-            显示计算区域和热电偶位置
+          <SliderTrack bgColor="#665c54">
+            <SliderFilledTrack bgColor="#98971a" />
+          </SliderTrack>
+          <SliderThumb bgColor="#928374" />
+        </Slider>
+        <Box w="10px"></Box>
+      </HStack>
+      <HStack h="25px">
+        <Box w="7px"></Box>
+        <Checkbox
+          size="lg"
+          colorScheme="teal"
+          color="#98971a"
+          defaultChecked
+          checked={showPos}
+          onChange={e => setShowPos(e.target.checked)}
+        >
+          显示计算区域和热电偶位置
           </Checkbox>
-          {showPos && <IButton text="提交" onClick={onSubmit} size="sm" />}
-        </HStack>
-      </Stack>
-    </HStack>
+        {showPos && <IButton text="提交" onClick={onSubmit} size="sm" />}
+      </HStack>
+    </Stack>
   );
 }
 

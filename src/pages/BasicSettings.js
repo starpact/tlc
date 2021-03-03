@@ -1,9 +1,9 @@
 import { useState, useEffect } from "react";
 import {
+  Box,
   Grid,
   Stack,
   GridItem,
-  HStack,
 } from "@chakra-ui/react";
 import { FaFileVideo, FaFileCsv, FaFileImport } from "react-icons/fa";
 import * as tauri from 'tauri/api/tauri';
@@ -14,9 +14,12 @@ import IIConButton from "../components/IconButton";
 import IInput from "../components/Input";
 import VideoCanvas from "../components/VideoCanvas";
 import ITable from "../components/Table";
+import ITag from "../components/Tag";
 
 function BasicSettings({ config, setConfig, setErrMsg }) {
   const [frameIndex, setFrameIndex] = useState(0);
+  const [scrollToColumn, setScrollToColumn] = useState(-1);
+  const [scrollToRow, setScrollToRow] = useState(-1);
 
   useEffect(() => config === "" && loadDefaultConfig(), []);
 
@@ -117,9 +120,22 @@ function BasicSettings({ config, setConfig, setErrMsg }) {
       .catch(err => setErrMsg(err));
   }
 
+  function synchronize() {
+    if (frameIndex < 0 || scrollToRow < 0) {
+      setErrMsg("未选中数据行");
+      return;
+    }
+    tauri.promisified({
+      cmd: "synchronize",
+      body: [frameIndex, scrollToRow],
+    })
+      .then(ok => setConfig(ok))
+      .catch(err => setErrMsg(err));
+  }
+
   return (
     <Stack>
-      <Grid templateColumns="repeat(12, 1fr)" gap={2} marginX="30px">
+      <Grid templateColumns="repeat(12, 1fr)" gap={2} marginX="25px">
         <GridItem colSpan={1}>
           <Stack spacing="5px">
             <IButton text="重置配置" onClick={loadDefaultConfig} hover="重置为您上一次保存的配置" />
@@ -178,16 +194,50 @@ function BasicSettings({ config, setConfig, setErrMsg }) {
           </Stack>
         </GridItem>
       </Grid>
-      <HStack>
-        <VideoCanvas
-          frameIndex={frameIndex}
-          setFrameIndex={setFrameIndex}
-          config={config}
-          setConfig={setConfig}
-          setErrMsg={setErrMsg}
-        />
-        <ITable config={config} setErrMsg={setErrMsg} />
-      </HStack>
+      <Grid
+        templateRows="repeat(13, 1fr)"
+        templateColumns="repeat(12, 1fr)"
+        gap={2}
+        marginX="25px"
+      >
+        <GridItem rowSpan={13}>
+          <VideoCanvas
+            frameIndex={frameIndex}
+            setFrameIndex={setFrameIndex}
+            config={config}
+            setConfig={setConfig}
+            setErrMsg={setErrMsg}
+          />
+        </GridItem>
+        <GridItem rowSpan={1} colSpan={1}>
+          <Box marginTop="5px">
+            <ITag text={`行数：${scrollToRow >= 0 ? scrollToRow : 0}`} w="100px" />
+          </Box>
+        </GridItem>
+        <GridItem rowSpan={1} colSpan={1}>
+          <Box marginTop="5px">
+            <ITag text={`列数：${scrollToColumn >= 0 ? scrollToColumn : 0}`} w="100px" />
+          </Box>
+        </GridItem>
+        <GridItem rowSpan={1} colSpan={2}>
+          <IButton
+            text="确认同步"
+            onClick={synchronize}
+            hover="确认视频当前帧数与表格选中行数对应同一时刻"
+            size="sm"
+          />
+        </GridItem>
+        <GridItem rowSpan={1} colSpan={7}></GridItem>
+        <GridItem rowSpan={7} colSpan={11}>
+          <ITable
+            setErrMsg={setErrMsg}
+            scrollToColumn={scrollToColumn}
+            setScrollToColumn={setScrollToColumn}
+            scrollToRow={scrollToRow}
+            setScrollToRow={setScrollToRow}
+          />
+        </GridItem>
+      </Grid>
     </Stack >
   )
 }

@@ -1,6 +1,7 @@
 use std::thread;
 use std::{collections::HashMap, sync::mpsc::Receiver};
 
+use ndarray::ArrayView2;
 use tauri::WebviewMut;
 
 use super::request::{Request, Value};
@@ -59,6 +60,7 @@ pub fn init(rx: Receiver<(WebviewMut, Request)>) {
             set_thermocouple_pos,
             get_frame,
             get_daq,
+            synchronize,
         );
 
         let mut tlc_data = TLCData::new().unwrap();
@@ -67,7 +69,6 @@ pub fn init(rx: Receiver<(WebviewMut, Request)>) {
             let (mut wm, req) = rx.recv().unwrap();
             let f = hm.get(req.cmd.as_str()).unwrap();
             let callback_string = f(&mut tlc_data, req).unwrap();
-            println!("{}", &callback_string[..200]);
             wm.dispatch(move |w| w.eval(callback_string.as_str()))
                 .unwrap();
         }
@@ -290,6 +291,21 @@ fn get_frame(data: &mut TLCData, req: Request) -> TLCResult<String> {
 }
 
 fn get_daq(data: &mut TLCData, req: Request) -> TLCResult<String> {
-    let res = data.read_daq().unwrap().get_t2d();
+    fn f(data: &mut TLCData) -> TLCResult<ArrayView2<f32>> {
+        data.read_daq()?.get_daq()
+    }
+
+    Request::format_callback(f(data), req.callback, req.error)
+}
+
+fn synchronize(data: &mut TLCData, req: Request) -> TLCResult<String> {
+    let res = match req.body {
+        Some(Value::UintVec(arr)) => {
+            let (frame_index, row_index) = (arr[0], arr[1]);
+            Ok(data.synchronize(frame_index, row_index).get_config())
+        }
+        _ => Err(awsl!(req.body)),
+    };
+
     Request::format_callback(res, req.callback, req.error)
 }
