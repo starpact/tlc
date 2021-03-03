@@ -1,7 +1,6 @@
 use std::thread;
 use std::{collections::HashMap, sync::mpsc::Receiver};
 
-use ndarray::Axis;
 use tauri::WebviewMut;
 
 use super::request::{Request, Value};

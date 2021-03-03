@@ -63,8 +63,7 @@ impl TLCData {
         }
 
         let filtered_g2d = self.get_filtered_g2d()?;
-        let mut peak_frames = Vec::with_capacity(filtered_g2d.ncols());
-        unsafe { peak_frames.set_len(filtered_g2d.ncols()) };
+        let mut peak_frames = vec![0; filtered_g2d.ncols()];
 
         filtered_g2d
             .axis_iter(Axis(1))

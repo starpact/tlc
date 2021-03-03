@@ -1,8 +1,8 @@
 {
   "case_name": "imp_50000_2_up",
-  "save_dir": "D:\\research\\EXP\\exp_20201206\\tmp_res",
-  "video_path": "D:\\research\\EXP\\exp_20201206\\imp\\videos\\imp_50000_2_up.avi",
-  "daq_path": "D:\\research\\EXP\\exp_20201206\\imp\\daq\\imp_40000_1.lvm",
+  "save_dir": "E:\\research\\EXP\\exp_20201206\\tmp_res",
+  "video_path": "E:\\research\\EXP\\exp_20201206\\imp\\videos\\imp_50000_2_up.avi",
+  "daq_path": "E:\\research\\EXP\\exp_20201206\\imp\\daq\\imp_40000_1.lvm",
   "start_frame": 0,
   "total_frames": 2404,
   "frame_rate": 25,

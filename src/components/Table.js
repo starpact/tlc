@@ -1,6 +1,5 @@
 import { useState, useEffect } from "react";
 import {
-  Text,
   Table,
   Thead,
   Tbody,
@@ -11,14 +10,14 @@ import {
 } from "@chakra-ui/react";
 import * as tauri from 'tauri/api/tauri';
 
-function ITable(config, setErrMsg) {
+function ITable(setErrMsg) {
   const [daq, setDaq] = useState("");
 
   useEffect(() => {
-    tauri.promisified({ cmd: "getDaq" })
+    daq === "" && tauri.promisified({ cmd: "getDaq" })
       .then(ok => setDaq(ok))
       .catch(err => setErrMsg(err));
-  }, [config]);
+  }, []);
 
   return (
     <Box>
@@ -39,7 +38,6 @@ function ITable(config, setErrMsg) {
           }
         </Tbody> */}
       </Table>
-      <Text color="red">{!!daq && daq.data.length}</Text>
     </Box>
   )
 }
