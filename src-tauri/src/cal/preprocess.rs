@@ -26,9 +26,6 @@ impl Default for FilterMethod {
 impl TLCData {
     /// 对Green值矩阵沿时间轴滤波
     pub fn filtering(&mut self) -> TLCResult<&mut Self> {
-        if self.filtered_g2d.is_some() {
-            return Ok(self);
-        }
         if self.raw_g2d.is_none() {
             self.read_video()?;
         }
@@ -55,16 +52,12 @@ impl TLCData {
 
     /// 峰值检测
     pub fn detect_peak(&mut self) -> TLCResult<&mut Self> {
-        if self.peak_frames.is_some() {
-            return Ok(self);
-        }
         if self.filtered_g2d.is_none() {
             self.filtering()?;
         }
 
         let filtered_g2d = self.get_filtered_g2d()?;
-        let mut peak_frames = Vec::with_capacity(filtered_g2d.ncols());
-        unsafe { peak_frames.set_len(filtered_g2d.ncols()) };
+        let mut peak_frames = vec![0; filtered_g2d.ncols()];
 
         filtered_g2d
             .axis_iter(Axis(1))
@@ -85,6 +78,40 @@ impl TLCData {
         Ok(self)
     }
 
+    pub fn init_t2d(&mut self) -> TLCResult<&mut Self> {
+        if self.daq.is_none() {
+            self.read_daq()?;
+        }
+
+        let TLCConfig {
+            ref temp_column_num,
+            frame_num,
+            start_row,
+            ref regulator,
+            ..
+        } = self.config;
+        let mut t2d = Array2::zeros((temp_column_num.len(), frame_num));
+
+        for (daq_row, mut t2d_col) in self
+            .get_daq()?
+            .axis_iter(Axis(0))
+            .skip(start_row)
+            .take(frame_num)
+            .zip(t2d.axis_iter_mut(Axis(1)))
+        {
+            for (&index, t) in temp_column_num.iter().zip(t2d_col.iter_mut()) {
+                *t = daq_row[index];
+            }
+        }
+
+        let regulator = Array::from_shape_vec((regulator.len(), 1), regulator.clone())
+            .map_err(|err| awsl!(err))?;
+
+        self.t2d.insert(t2d * regulator);
+
+        Ok(self)
+    }
+
     pub fn interp_single_frame(&mut self, frame: usize) -> TLCResult<Array2<f32>> {
         if self.interp.is_none() {
             self.interp()?;
@@ -96,7 +123,7 @@ impl TLCData {
     /// interpolation of reference temperature matrix
     pub fn interp(&mut self) -> TLCResult<&mut Self> {
         if self.t2d.is_none() {
-            self.read_daq()?;
+            self.init_t2d()?;
         }
 
         let TLCConfig {

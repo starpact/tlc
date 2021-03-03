@@ -61,7 +61,6 @@ struct PointData<'a> {
     temps: &'a [f32],
     peak_temp: f32,
     dt: f32,
-    iteration_method: IterationMethod,
     solid_thermal_conductivity: f32,
     solid_thermal_diffusivity: f32,
 }
@@ -127,20 +126,13 @@ impl PointData<'_> {
 
         (tw - t0 - sum, diff_sum)
     }
+}
 
-    fn solve(&self) -> f32 {
-        use IterationMethod::*;
-        match self.iteration_method {
-            NewtonTangent { h0, max_iter_num } => self.newton_tangent(h0, max_iter_num),
-            NewtonDown { h0, max_iter_num } => self.newton_down(h0, max_iter_num),
-        }
-    }
-
-    fn newton_tangent(&self, h0: f32, max_iter_num: usize) -> f32 {
+fn newton_tangent(h0: f32, max_iter_num: usize) -> impl Fn(PointData) -> f32 {
+    move |point_data| {
         let mut h = h0;
-
         for _ in 0..max_iter_num {
-            let (f, df) = self.thermal_equation(h);
+            let (f, df) = point_data.thermal_equation(h);
             let next_h = h - f / df;
             if next_h.abs() > 10000. {
                 return NAN;
@@ -153,16 +145,17 @@ impl PointData<'_> {
 
         h
     }
+}
 
-    fn newton_down(&self, h0: f32, max_iter_num: usize) -> f32 {
+fn newton_down(h0: f32, max_iter_num: usize) -> impl Fn(PointData) -> f32 {
+    move |point_data| {
         let mut h = h0;
-        let (mut f, mut df) = self.thermal_equation(h);
-
+        let (mut f, mut df) = point_data.thermal_equation(h);
         for _ in 0..max_iter_num {
             let mut lambda = 1.;
             loop {
                 let next_h = h - lambda * f / df;
-                let (next_f, next_df) = self.thermal_equation(next_h);
+                let (next_f, next_df) = point_data.thermal_equation(next_h);
                 if next_f.abs() < f.abs() {
                     if (next_h - h).abs() < 1e-3 {
                         return next_h;
@@ -188,6 +181,23 @@ impl PointData<'_> {
 
 impl TLCData {
     pub fn solve(&mut self) -> TLCResult<&mut Self> {
+        use IterationMethod::*;
+        match self.config.iteration_method {
+            NewtonTangent { h0, max_iter_num } => self.solve_core(newton_tangent(h0, max_iter_num)),
+            NewtonDown { h0, max_iter_num } => self.solve_core(newton_down(h0, max_iter_num)),
+        }
+    }
+
+    fn solve_core<F>(&mut self, f: F) -> TLCResult<&mut Self>
+    where
+        F: Fn(PointData) -> f32 + Send + Sync,
+    {
+        if self.peak_frames.is_none() {
+            self.detect_peak()?;
+        }
+        if self.interp.is_none() {
+            self.interp()?;
+        }
         let peak_frames = self.get_peak_frames()?;
         let interp = self.get_interp()?;
 
@@ -199,13 +209,11 @@ impl TLCData {
             solid_thermal_diffusivity,
             characteristic_length,
             air_thermal_conductivity,
-            iteration_method,
             ..
         } = self.config;
         let dt = 1. / frame_rate as f32;
 
-        let mut nus = Vec::with_capacity(peak_frames.len());
-        unsafe { nus.set_len(peak_frames.len()) };
+        let mut nus = vec![0.; peak_frames.len()];
 
         peak_frames
             .into_par_iter()
@@ -220,11 +228,10 @@ impl TLCData {
                         temps,
                         peak_temp,
                         dt,
-                        iteration_method,
                         solid_thermal_conductivity,
                         solid_thermal_diffusivity,
                     };
-                    point_data.solve() * characteristic_length / air_thermal_conductivity
+                    f(point_data) * characteristic_length / air_thermal_conductivity
                 } else {
                     NAN
                 };

@@ -6,9 +6,9 @@ import IInput from "./Input";
 function SelectIteration({ value, onSubmit, setErrMsg }) {
   const [type, setType] = useState(Object.keys(value)[0]);
 
-  const [h0, setH0] = useState(Object.values(value)[0][0]);
+  const [h0, setH0] = useState(Object.values(value[type])[0]);
 
-  const [maxIterNum, setMaxIterNum] = useState(Object.values(value)[0][1]);
+  const [maxIterNum, setMaxIterNum] = useState(Object.values(value[type])[1]);
 
   return (
     <HStack>
@@ -26,7 +26,7 @@ function SelectIteration({ value, onSubmit, setErrMsg }) {
       </Select>
       <Stack>
         <IInput
-          leftTag="初值"
+          leftTag="对流换热系数初值"
           value={!!h0 && h0.toFixed(1)}
           onBlur={v => {
             const vv = parseFloat(v);

@@ -8,6 +8,8 @@
         "colormap",
         "erfcf",
         "fullscreen",
+        "gencolumns",
+        "genrows",
         "libm",
         "ncols",
         "promisified",

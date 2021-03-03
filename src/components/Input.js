@@ -39,13 +39,14 @@ function IInput({
       </InputLeftAddon>}
       <Input
         fontSize="xl"
-        color="#fbf1c7"
+        color={!!mutable ? "#fbf1c7" : "#dfc4a1"}
         borderWidth="2px"
         borderColor="#d79921"
         value={innerValue}
-        onChange={e => !!mutable && setInnerValue(e.target.value)}
+        onChange={e => setInnerValue(e.target.value)}
         onBlur={e => !!mutable && !!onBlur && onBlur(e.target.value)}
         placeholder={placeholder}
+        readOnly={!!mutable ? false : true}
       />
       {!!element && <InputRightElement>{element}</InputRightElement>}
       {!!rightTag &&

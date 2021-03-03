@@ -54,7 +54,18 @@ mod cal {
         let t = Instant::now();
         tlc_data.read_daq()?;
         println!("{:?}", t.elapsed());
-        println!("{}", tlc_data.get_t2d().unwrap());
+        println!("{:?}", tlc_data.get_daq().unwrap());
+
+        Ok(())
+    }
+
+    #[test]
+    fn init_t2d() -> Res {
+        let mut tlc_data = init();
+        let t = Instant::now();
+        tlc_data.init_t2d()?;
+        println!("{:?}", t.elapsed());
+        println!("{:?}", tlc_data.get_t2d().unwrap());
 
         Ok(())
     }
