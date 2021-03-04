@@ -6,10 +6,10 @@ import "echarts/lib/component/legend";
 import "echarts/lib/component/markPoint";
 import ReactEcharts from "echarts-for-react";
 
-function EchartsLine({
+function DaqLine({
   daq,
   scrollToColumn,
-  setScrollToRow
+  setScrollToRow,
 }) {
   function getOption() {
     if (!daq) return;
@@ -19,12 +19,16 @@ function EchartsLine({
         yData.push(daq.data[i]);
       }
     }
-    const xData = yData.map((_, i) => i);
-    const title = scrollToColumn >= 0 ? `第${scrollToColumn}列` : "请选择需要预览的列";
+    const xData = yData.map((_, i) => i + 1);
+    const title = scrollToColumn >= 0 ? `第${scrollToColumn + 1}列` : "请选择需要预览的列";
+    const show = scrollToColumn >= 0;
 
     let option = {
       title: {
         text: title,
+        textStyle: {
+          color: "#fbf1c7",
+        },
         x: "center"
       },
       tooltip: {
@@ -40,6 +44,14 @@ function EchartsLine({
       textStyle: {
         color: "#fbf1c7",
       },
+      dataZoom: [{
+        show,
+        type: "slider",
+      }],
+      grid: {
+        show: true,
+        top: 30,
+      },
       series: [
         {
           type: "line",
@@ -51,14 +63,19 @@ function EchartsLine({
     return option;
   }
 
+  const onEvents = {
+    "click": (params) => setScrollToRow(params.dataIndex),
+  };
+
   return (
     <div>
       <ReactEcharts
         option={getOption()}
+        onEvents={onEvents}
         style={{ width: "900px", height: "225px" }}
       />
     </div>
   )
 }
 
-export default EchartsLine
+export default DaqLine

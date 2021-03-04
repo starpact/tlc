@@ -9,7 +9,7 @@ use crate::awsl;
 use crate::cal::{error::TLCResult, *};
 
 macro_rules! register {
-    ($hm:expr, $($f:expr),* $(,)*) => {
+    (@$hm:expr, $($f:expr),* $(,)*) => {
         $($hm.insert(
             $crate::view::handle::snake_to_camel(stringify!($f)),
             &$f as &(dyn Fn(&mut TLCData, Request) -> TLCResult<String>)
@@ -37,7 +37,7 @@ pub fn init(rx: Receiver<(WebviewMut, Request)>) {
         // 注册所有请求（表驱动）
         let mut hm = HashMap::new();
         register!(
-            hm,
+            @hm,
             load_default_config,
             load_config,
             save_config,
@@ -86,7 +86,7 @@ fn load_default_config(data: &mut TLCData, req: Request) -> TLCResult<String> {
 
 fn load_config(data: &mut TLCData, req: Request) -> TLCResult<String> {
     let res = match req.body {
-        Some(Value::String(config_path)) => TLCData::from_path(config_path).map(|new_data| {
+        Value::String(config_path) => TLCData::from_path(config_path).map(|new_data| {
             *data = new_data;
             data.get_config()
         }),
@@ -106,7 +106,7 @@ fn save_config(data: &mut TLCData, req: Request) -> TLCResult<String> {
 
 fn set_save_dir(data: &mut TLCData, req: Request) -> TLCResult<String> {
     let res = match req.body {
-        Some(Value::String(save_dir)) => data.set_save_dir(save_dir).map(|data| data.get_config()),
+        Value::String(save_dir) => data.set_save_dir(save_dir).map(|data| data.get_config()),
         _ => Err(awsl!(req.body)),
     };
 
@@ -115,7 +115,7 @@ fn set_save_dir(data: &mut TLCData, req: Request) -> TLCResult<String> {
 
 fn set_video_path(data: &mut TLCData, req: Request) -> TLCResult<String> {
     let res = match req.body {
-        Some(Value::String(video_path)) => data
+        Value::String(video_path) => data
             .set_video_path(video_path)
             .map(|data| data.get_config()),
         _ => Err(awsl!(req.body)),
@@ -126,7 +126,7 @@ fn set_video_path(data: &mut TLCData, req: Request) -> TLCResult<String> {
 
 fn set_daq_path(data: &mut TLCData, req: Request) -> TLCResult<String> {
     let res = match req.body {
-        Some(Value::String(daq_path)) => data.set_daq_path(daq_path).map(|data| data.get_config()),
+        Value::String(daq_path) => data.set_daq_path(daq_path).map(|data| data.get_config()),
         _ => Err(awsl!(req.body)),
     };
 
@@ -135,7 +135,7 @@ fn set_daq_path(data: &mut TLCData, req: Request) -> TLCResult<String> {
 
 fn set_start_frame(data: &mut TLCData, req: Request) -> TLCResult<String> {
     let res = match req.body {
-        Some(Value::Uint(start_frame)) => data
+        Value::Uint(start_frame) => data
             .set_start_frame(start_frame)
             .map(|data| data.get_config()),
         _ => Err(awsl!(req.body)),
@@ -146,7 +146,7 @@ fn set_start_frame(data: &mut TLCData, req: Request) -> TLCResult<String> {
 
 fn set_start_row(data: &mut TLCData, req: Request) -> TLCResult<String> {
     let res = match req.body {
-        Some(Value::Uint(start_row)) => data.set_start_row(start_row).map(|data| data.get_config()),
+        Value::Uint(start_row) => data.set_start_row(start_row).map(|data| data.get_config()),
         _ => Err(awsl!(req.body)),
     };
 
@@ -155,7 +155,7 @@ fn set_start_row(data: &mut TLCData, req: Request) -> TLCResult<String> {
 
 fn set_peak_temp(data: &mut TLCData, req: Request) -> TLCResult<String> {
     let res = match req.body {
-        Some(Value::Float(peak_temp)) => Ok(data.set_peak_temp(peak_temp).get_config()),
+        Value::Float(peak_temp) => Ok(data.set_peak_temp(peak_temp).get_config()),
         _ => Err(awsl!(req.body)),
     };
 
@@ -164,7 +164,7 @@ fn set_peak_temp(data: &mut TLCData, req: Request) -> TLCResult<String> {
 
 fn set_solid_thermal_conductivity(data: &mut TLCData, req: Request) -> TLCResult<String> {
     let res = match req.body {
-        Some(Value::Float(solid_thermal_conductivity)) => Ok(data
+        Value::Float(solid_thermal_conductivity) => Ok(data
             .set_solid_thermal_conductivity(solid_thermal_conductivity)
             .get_config()),
         _ => Err(awsl!(req.body)),
@@ -175,7 +175,7 @@ fn set_solid_thermal_conductivity(data: &mut TLCData, req: Request) -> TLCResult
 
 fn set_solid_thermal_diffusivity(data: &mut TLCData, req: Request) -> TLCResult<String> {
     let res = match req.body {
-        Some(Value::Float(solid_thermal_diffusivity)) => Ok(data
+        Value::Float(solid_thermal_diffusivity) => Ok(data
             .set_solid_thermal_diffusivity(solid_thermal_diffusivity)
             .get_config()),
         _ => Err(awsl!(req.body)),
@@ -186,7 +186,7 @@ fn set_solid_thermal_diffusivity(data: &mut TLCData, req: Request) -> TLCResult<
 
 fn set_air_thermal_conductivity(data: &mut TLCData, req: Request) -> TLCResult<String> {
     let res = match req.body {
-        Some(Value::Float(air_thermal_conductivity)) => Ok(data
+        Value::Float(air_thermal_conductivity) => Ok(data
             .set_air_thermal_conductivity(air_thermal_conductivity)
             .get_config()),
         _ => Err(awsl!(req.body)),
@@ -197,7 +197,7 @@ fn set_air_thermal_conductivity(data: &mut TLCData, req: Request) -> TLCResult<S
 
 fn set_characteristic_length(data: &mut TLCData, req: Request) -> TLCResult<String> {
     let res = match req.body {
-        Some(Value::Float(characteristic_length)) => Ok(data
+        Value::Float(characteristic_length) => Ok(data
             .set_characteristic_length(characteristic_length)
             .get_config()),
         _ => Err(awsl!(req.body)),
@@ -208,7 +208,7 @@ fn set_characteristic_length(data: &mut TLCData, req: Request) -> TLCResult<Stri
 
 fn set_regulator(data: &mut TLCData, req: Request) -> TLCResult<String> {
     let res = match req.body {
-        Some(Value::FloatVec(regulator)) => Ok(data.set_regulator(regulator).get_config()),
+        Value::FloatVec(regulator) => Ok(data.set_regulator(regulator).get_config()),
         _ => Err(awsl!(req.body)),
     };
 
@@ -217,9 +217,7 @@ fn set_regulator(data: &mut TLCData, req: Request) -> TLCResult<String> {
 
 fn set_filter_method(data: &mut TLCData, req: Request) -> TLCResult<String> {
     let res = match req.body {
-        Some(Value::Filter(filter_method)) => {
-            Ok(data.set_filter_method(filter_method).get_config())
-        }
+        Value::Filter(filter_method) => Ok(data.set_filter_method(filter_method).get_config()),
         _ => Err(awsl!(req.body)),
     };
 
@@ -228,9 +226,7 @@ fn set_filter_method(data: &mut TLCData, req: Request) -> TLCResult<String> {
 
 fn set_interp_method(data: &mut TLCData, req: Request) -> TLCResult<String> {
     let res = match req.body {
-        Some(Value::Interp(interp_method)) => {
-            Ok(data.set_interp_method(interp_method).get_config())
-        }
+        Value::Interp(interp_method) => Ok(data.set_interp_method(interp_method).get_config()),
         _ => Err(awsl!(req.body)),
     };
 
@@ -239,7 +235,7 @@ fn set_interp_method(data: &mut TLCData, req: Request) -> TLCResult<String> {
 
 fn set_iteration_method(data: &mut TLCData, req: Request) -> TLCResult<String> {
     let res = match req.body {
-        Some(Value::Iteration(iteration_method)) => {
+        Value::Iteration(iteration_method) => {
             Ok(data.set_iteration_method(iteration_method).get_config())
         }
         _ => Err(awsl!(req.body)),
@@ -250,7 +246,7 @@ fn set_iteration_method(data: &mut TLCData, req: Request) -> TLCResult<String> {
 
 fn set_region(data: &mut TLCData, req: Request) -> TLCResult<String> {
     let res = match req.body {
-        Some(Value::UintVec(region)) if region.len() == 4 => Ok(data
+        Value::UintVec(region) if region.len() == 4 => Ok(data
             .set_region((region[0], region[1]), (region[2], region[3]))
             .get_config()),
         _ => Err(awsl!(req.body)),
@@ -261,7 +257,7 @@ fn set_region(data: &mut TLCData, req: Request) -> TLCResult<String> {
 
 fn set_temp_column_num(data: &mut TLCData, req: Request) -> TLCResult<String> {
     let res = match req.body {
-        Some(Value::UintVec(temp_column_num)) => {
+        Value::UintVec(temp_column_num) => {
             Ok(data.set_temp_column_num(temp_column_num).get_config())
         }
         _ => Err(awsl!(req.body)),
@@ -272,7 +268,7 @@ fn set_temp_column_num(data: &mut TLCData, req: Request) -> TLCResult<String> {
 
 fn set_thermocouple_pos(data: &mut TLCData, req: Request) -> TLCResult<String> {
     let res = match req.body {
-        Some(Value::IntPairVec(thermocouple_pos)) => {
+        Value::IntPairVec(thermocouple_pos) => {
             Ok(data.set_thermocouple_pos(thermocouple_pos).get_config())
         }
         _ => Err(awsl!(req.body)),
@@ -283,7 +279,7 @@ fn set_thermocouple_pos(data: &mut TLCData, req: Request) -> TLCResult<String> {
 
 fn get_frame(data: &mut TLCData, req: Request) -> TLCResult<String> {
     let res = match req.body {
-        Some(Value::Uint(frame_index)) => data.get_frame(frame_index),
+        Value::Uint(frame_index) => data.get_frame(frame_index),
         _ => Err(awsl!(req.body)),
     };
 
@@ -292,7 +288,10 @@ fn get_frame(data: &mut TLCData, req: Request) -> TLCResult<String> {
 
 fn get_daq(data: &mut TLCData, req: Request) -> TLCResult<String> {
     fn f(data: &mut TLCData) -> TLCResult<ArrayView2<f32>> {
-        data.read_daq()?.get_daq()
+        if data.get_daq().is_err() {
+            data.read_daq()?;
+        }
+        data.get_daq()
     }
 
     Request::format_callback(f(data), req.callback, req.error)
@@ -300,7 +299,7 @@ fn get_daq(data: &mut TLCData, req: Request) -> TLCResult<String> {
 
 fn synchronize(data: &mut TLCData, req: Request) -> TLCResult<String> {
     let res = match req.body {
-        Some(Value::UintVec(arr)) => {
+        Value::UintVec(arr) => {
             let (frame_index, row_index) = (arr[0], arr[1]);
             Ok(data.synchronize(frame_index, row_index).get_config())
         }

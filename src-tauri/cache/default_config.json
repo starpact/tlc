@@ -1,8 +1,8 @@
 {
   "case_name": "imp_40000_1_up",
-  "save_dir": "E:\\research\\EXP\\exp_20201206\\tmp_res",
-  "video_path": "E:\\research\\EXP\\exp_20201206\\imp\\videos\\imp_40000_1_up.avi",
-  "daq_path": "E:\\research\\EXP\\exp_20201206\\imp\\daq\\imp_40000_1.lvm",
+  "save_dir": "D:\\research\\EXP\\exp_20201206\\tmp_res",
+  "video_path": "D:\\research\\EXP\\exp_20201206\\imp\\videos\\imp_40000_1_up.avi",
+  "daq_path": "D:\\research\\EXP\\exp_20201206\\imp\\daq\\imp_40000_1.lvm",
   "start_frame": 0,
   "total_frames": 1564,
   "frame_rate": 25,
@@ -76,7 +76,7 @@
   "characteristic_length": 0.015,
   "air_thermal_conductivity": 0.0276,
   "regulator": [
-    0.9,
+    1.0,
     1.0,
     1.0,
     1.0,

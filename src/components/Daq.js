@@ -4,10 +4,11 @@ import * as tauri from 'tauri/api/tauri';
 import 'react-virtualized/styles.css'
 import { Box, Stack } from "@chakra-ui/react";
 
-import EchartsLine from "../components/EchartsLine";
+import DaqLine from "./DaqLine";
 
-function ITable({
-  setErrMsg,
+function Daq({
+  config,
+  awsl,
   scrollToColumn,
   setScrollToColumn,
   scrollToRow,
@@ -16,9 +17,10 @@ function ITable({
   const [daq, setDaq] = useState(null);
 
   useEffect(() => {
+    if (config === "") return;
     tauri.promisified({ cmd: "getDaq" })
       .then(ok => setDaq(ok))
-      .catch(err => setErrMsg(err));
+      .catch(err => awsl(err));
   }, []);
 
   function cellRenderer({ columnIndex, key, rowIndex, style }) {
@@ -64,8 +66,10 @@ function ITable({
             columnWidth={100}
             rowCount={daq.dim[0]}
             rowHeight={30}
+            scrollToRow={scrollToRow}
+            scrollToColumn={scrollToColumn}
           />
-          <EchartsLine
+          <DaqLine
             daq={daq}
             scrollToColumn={scrollToColumn}
             setScrollToColumn={setScrollToColumn}
@@ -78,4 +82,4 @@ function ITable({
   )
 }
 
-export default ITable
+export default Daq

@@ -13,50 +13,50 @@ import IButton from "../components/Button";
 import IIConButton from "../components/IconButton";
 import IInput from "../components/Input";
 import VideoCanvas from "../components/VideoCanvas";
-import ITable from "../components/Table";
+import Daq from "../components/Daq";
 import ITag from "../components/Tag";
 
-function BasicSettings({ config, setConfig, setErrMsg }) {
+function BasicSettings({ config, setConfig, awsl }) {
   const [frameIndex, setFrameIndex] = useState(0);
   const [scrollToColumn, setScrollToColumn] = useState(-1);
   const [scrollToRow, setScrollToRow] = useState(-1);
 
-  useEffect(() => config === "" && loadDefaultConfig(), []);
+  useEffect(() => { if (config === "") loadDefaultConfig() }, []);
 
   function loadConfig() {
     dialog.open({ filter: "json" }).then(path => {
       tauri.promisified({
         cmd: "loadConfig",
-        body: path,
+        body: { String: path },
       })
         .then(ok => setConfig(ok))
-        .catch(err => setErrMsg(err));
+        .catch(err => awsl(err));
     });
   }
 
   function loadDefaultConfig() {
     tauri.promisified({ cmd: "loadDefaultConfig" })
       .then(ok => setConfig(ok))
-      .catch(err => setErrMsg(err));
+      .catch(err => awsl(err));
   }
 
   function saveConfig() {
     if (config.save_dir === "") {
-      setErrMsg("请先确定保存根目录");
+      awsl("请先确定保存根目录");
       return;
     }
     tauri.promisified({ cmd: "saveConfig" })
-      .catch(err => setErrMsg(err));
+      .catch(err => awsl(err));
   }
 
   function setSaveDir() {
     dialog.open({ directory: true }).then(save_dir => {
       tauri.promisified({
         cmd: "setSaveDir",
-        body: save_dir,
+        body: { String: save_dir },
       })
         .then(ok => setConfig(ok))
-        .catch(err => setErrMsg(err));
+        .catch(err => awsl(err));
     });
   }
 
@@ -69,14 +69,14 @@ function BasicSettings({ config, setConfig, setErrMsg }) {
         if (video_path === config.video_path) return;
         tauri.promisified({
           cmd: "setVideoPath",
-          body: video_path,
+          body: { String: video_path },
         })
-          .then(ok => setConfig(ok))
-          .catch(err => setErrMsg(err));
+          .then(ok => { awsl(""); setConfig(ok); })
+          .catch(err => awsl(err));
       });
   }
 
-  function setDAQPath() {
+  function setDaqPath() {
     dialog.open({
       filter: "lvm,xlsx",
       defaultPath: config.daq_path.substr(0, config.daq_path.lastIndexOf("\\") + 1)
@@ -84,53 +84,53 @@ function BasicSettings({ config, setConfig, setErrMsg }) {
       .then(daq_path => {
         if (daq_path === config.daq_path) return;
         tauri.promisified({
-          cmd: "setDAQPath",
-          body: daq_path,
+          cmd: "setDaqPath",
+          body: { String: daq_path },
         })
-          .then(ok => setConfig(ok))
-          .catch(err => setErrMsg(err));
+          .then(ok => { awsl(""); setConfig(ok); })
+          .catch(err => awsl(err));
       });
   }
 
   function setStartFrame(start_frame) {
     if (start_frame === config.start_frame) return;
     if (start_frame < 0) {
-      setErrMsg("帧数须为正值");
+      awsl("帧数须为正值");
       return;
     }
     tauri.promisified({
       cmd: "setStartFrame",
-      body: start_frame,
+      body: { Uint: start_frame },
     })
       .then(ok => setConfig(ok))
-      .catch(err => setErrMsg(err));
+      .catch(err => awsl(err));
   }
 
   function setStartRow(start_row) {
     if (start_row === config.start_row) return;
     if (start_row < 0) {
-      setErrMsg("行数须为正值");
+      awsl("行数须为正值");
       return;
     }
     tauri.promisified({
       cmd: "setStartRow",
-      body: start_row,
+      body: { Uint: start_row },
     })
       .then(ok => setConfig(ok))
-      .catch(err => setErrMsg(err));
+      .catch(err => awsl(err));
   }
 
   function synchronize() {
     if (frameIndex < 0 || scrollToRow < 0) {
-      setErrMsg("未选中数据行");
+      awsl("未选中数据行");
       return;
     }
     tauri.promisified({
       cmd: "synchronize",
-      body: [frameIndex, scrollToRow],
+      body: { UintVec: [frameIndex, scrollToRow] },
     })
       .then(ok => setConfig(ok))
-      .catch(err => setErrMsg(err));
+      .catch(err => awsl(err));
   }
 
   return (
@@ -160,7 +160,7 @@ function BasicSettings({ config, setConfig, setErrMsg }) {
             <IInput
               leftTag="数采文件路径"
               value={config.daq_path}
-              element={<IIConButton icon={<FaFileCsv />} onClick={setDAQPath} />}
+              element={<IIConButton icon={<FaFileCsv />} onClick={setDaqPath} />}
             />
           </Stack>
         </GridItem>
@@ -206,17 +206,17 @@ function BasicSettings({ config, setConfig, setErrMsg }) {
             setFrameIndex={setFrameIndex}
             config={config}
             setConfig={setConfig}
-            setErrMsg={setErrMsg}
+            awsl={awsl}
           />
         </GridItem>
         <GridItem rowSpan={1} colSpan={1}>
           <Box marginTop="5px">
-            <ITag text={`行数：${scrollToRow >= 0 ? scrollToRow : 0}`} w="100px" />
+            <ITag text={`行数：${scrollToRow >= 0 ? scrollToRow + 1 : 0}`} w="100px" />
           </Box>
         </GridItem>
         <GridItem rowSpan={1} colSpan={1}>
           <Box marginTop="5px">
-            <ITag text={`列数：${scrollToColumn >= 0 ? scrollToColumn : 0}`} w="100px" />
+            <ITag text={`列数：${scrollToColumn >= 0 ? scrollToColumn + 1 : 0}`} w="100px" />
           </Box>
         </GridItem>
         <GridItem rowSpan={1} colSpan={2}>
@@ -229,8 +229,9 @@ function BasicSettings({ config, setConfig, setErrMsg }) {
         </GridItem>
         <GridItem rowSpan={1} colSpan={7}></GridItem>
         <GridItem rowSpan={7} colSpan={11}>
-          <ITable
-            setErrMsg={setErrMsg}
+          <Daq
+            config={config}
+            awsl={awsl}
             scrollToColumn={scrollToColumn}
             setScrollToColumn={setScrollToColumn}
             scrollToRow={scrollToRow}

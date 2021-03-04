@@ -14,7 +14,7 @@ import IButton from "./Button";
 import ITag from "./Tag";
 
 // 矩形的8个缩放方向
-// 辣鸡js连枚举都没有
+// js没有枚举...
 const ZOOM = {
   L: 995, // left
   R: "大小周",
@@ -37,75 +37,88 @@ function VideoCanvas({
   setFrameIndex,
   config,
   setConfig,
-  setErrMsg,
+  awsl,
 }) {
   const [frame, setFrame] = useState("");
   const [showPos, setShowPos] = useState(true);
-  const canvas = useRef();
+  const canvas = useRef(null);
+  const r = useRef(null);
   const W = !!config && config.video_shape[1] / 2;
   const H = !!config && config.video_shape[0] / 2;
-  let ctx = null;
-
-  let region = null; // 区域选框
-  let tcs = []; // 各热电偶
-  let zoom = null; // ZOOM中的一个
-  let dragTarget = null; // 可能是区域选框或某一个热电偶
-  let startX = null;
-  let startY = null;
-
-  useEffect(() => !!config && getFrame(0), []);
 
   useEffect(() => {
-    if (!config) return;
-    region = {
+    r.current = {
+      region: null,// 区域选框
+      tcs: null, // 各热电偶
+      zoom: null, // ZOOM中的一个
+      dragTarget: null, // 可能是区域选框或某一个热电偶
+      startX: null,
+      startY: null,
+    };
+    setTimeout(() => { if (config !== "") getFrame(0); }, 200);
+  }, []);
+
+  useEffect(() => {
+    if (config === "" || !r) return;
+    r.current.region = {
       x: config.top_left_pos[1] / 2,
       y: config.top_left_pos[0] / 2,
       w: config.region_shape[1] / 2,
       h: config.region_shape[0] / 2,
     };
+    r.current.tcs = [];
     for (let i = 0; i < config.thermocouple_pos.length; i++) {
-      tcs.push({
+      r.current.tcs.push({
         tag: config.temp_column_num[i],
         x: config.thermocouple_pos[i][1] / 2,
         y: config.thermocouple_pos[i][0] / 2,
       });
     }
-    ctx = canvas.current.getContext("2d");
     draw();
   }, [config, frame, showPos]);
 
   function getFrame(frame_index) {
     tauri.promisified({
       cmd: "getFrame",
-      body: frame_index,
+      body: { Uint: frame_index },
     })
       .then(ok => setFrame(ok))
-      .catch(err => setErrMsg(err));
+      .catch(err => awsl(err));
   }
 
   function onSubmit() {
-    const { x, y, w, h } = region;
+    const { x, y, w, h } = r.current.region;
     tauri.promisified({
       cmd: "setRegion",
-      body: [y * 2, x * 2, h * 2, w * 2],
+      body: { UintVec: [y * 2, x * 2, h * 2, w * 2] },
     })
-      .catch(err => { setErrMsg(err); return; });
+      .catch(err => { awsl(err); return; });
 
     tauri.promisified({
       cmd: "setTempColumnNum",
-      body: tcs.map(({ tag }) => tag),
+      body: { UintVec: r.current.tcs.map(({ tag }) => tag) },
     })
-      .catch(err => { setErrMsg(err); return; });
+      .catch(err => { awsl(err); return; });
 
     tauri.promisified({
       cmd: "setThermocouplePos",
-      body: tcs.map(({ x, y }) => [y * 2, x * 2]),
+      body: { IntPairVec: r.current.tcs.map(({ x, y }) => [y * 2, x * 2]) },
     })
       .then(ok => setConfig(ok))
-      .catch(err => setErrMsg(err));
+      .catch(err => awsl(err));
   }
 
   function draw() {
+    const ctx = canvas.current.getContext("2d");
+    if (frame === "") {
+      ctx.fillStyle = "#3c3836";
+      ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = "#fbf1c7";
+      ctx.font = "30px serif";
+      ctx.fillText("请选择视频", W / 2 - 80, H / 2);
+      return;
+    }
+
     const img = new Image();
     img.src = `data: image/jpeg;base64,${frame}`;
     img.onload = () => {
@@ -113,16 +126,16 @@ function VideoCanvas({
 
       if (showPos) {
         ctx.strokeStyle = "#cc241d";
-        const { x, y, w, h } = region;
+        const { x, y, w, h } = r.current.region;
         ctx.strokeRect(x, y, w, h);
 
         ctx.fillStyle = "#cc241d";
         ctx.font = "20px serif";
         ctx.fillText("计算区域：", 3, 20);
         ctx.fillText(`x: ${x * 2} y: ${y * 2} w: ${w * 2} h: ${h * 2}`, 5, 40);
-        tcs.forEach(({ tag, x, y }) => {
+        r.current.tcs.forEach(({ tag, x, y }) => {
           if (x < 0 || x > W || y < 0 || y > H) return;
-          if (!!dragTarget && dragTarget.tag === tag) {
+          if (!!r.current.dragTarget && r.current.dragTarget.tag === tag) {
             ctx.font = "20px serif";
             ctx.fillText(`${tag}号热电偶：`, 3, 65);
             ctx.fillText(`x: ${x * 2} y: ${y * 2}`, 5, 85);
@@ -143,129 +156,136 @@ function VideoCanvas({
   }
 
   function determineTarget() {
-    const [x, y] = [startX, startY];
-    for (let i = 0; i < tcs.length; i++) {
-      const tc = tcs[i];
+    if (!r.current.region) return;
+    const [x, y] = [r.current.startX, r.current.startY];
+    for (let i = 0; i < r.current.tcs.length; i++) {
+      const tc = r.current.tcs[i];
       // 1.拖动热电偶
       if ((x - tc.x) ** 2 + (y - tc.y) ** 2 < RADIUS ** 2) {
-        dragTarget = tc;
+        r.current.dragTarget = tc;
         return;
       }
     }
 
-    const { x: rx, y: ry, w: rw, h: rh } = region;
+    const { x: rx, y: ry, w: rw, h: rh } = r.current.region;
     // 2.拖动区域框选
     if (x > rx + D && x < rx + rw - D && y > ry + D && y < ry + rh - D) {
-      dragTarget = region;
+      r.current.dragTarget = r.current.region;
       return;
     }
     // 3.缩放区域框选
     if (x >= rx - D && x <= rx + D && y >= ry + D && y <= ry + rh - D) {
-      zoom = ZOOM.L;
+      r.current.zoom = ZOOM.L;
     } else if (x >= rx + rw - D && x <= rx + rw + D && y >= ry + D && y <= ry + rh - D) {
-      zoom = ZOOM.R;
+      r.current.zoom = ZOOM.R;
     } else if (x >= rx + D && x <= rx + rw - D && y >= ry - D && y <= ry + D) {
-      zoom = ZOOM.T;
+      r.current.zoom = ZOOM.T;
     } else if (x >= rx + D && x <= rx + rw - D && y >= ry + rh - D && y <= ry + rh + D) {
-      zoom = ZOOM.B;
+      r.current.zoom = ZOOM.B;
     } else if (x > rx - D && x < rx + D && y > ry - D && y < ry + D) {
-      zoom = ZOOM.TL;
+      r.current.zoom = ZOOM.TL;
     } else if (x > rx - D && x < rx + D && y > ry + rh - D && y < ry + rh + D) {
-      zoom = ZOOM.BL;
+      r.current.zoom = ZOOM.BL;
     } else if (x > rx + rw - D && x < rx + rw + D && y > ry - D && y < ry + D) {
-      zoom = ZOOM.TR;
+      r.current.zoom = ZOOM.TR;
     } else if (x > rx + rw - D && x < rx + rw + D && y > ry + rh - D && y < ry + rh + D) {
-      zoom = ZOOM.BR;
+      r.current.zoom = ZOOM.BR;
     }
   }
 
   function handleMouseDown(e) {
-    startX = e.nativeEvent.offsetX - canvas.current.clientLeft;
-    startY = e.nativeEvent.offsetY - canvas.current.clientTop;
+    r.current.startX = e.nativeEvent.offsetX - canvas.current.clientLeft;
+    r.current.startY = e.nativeEvent.offsetY - canvas.current.clientTop;
     determineTarget();
   }
 
   function handleMouseMove(e) {
-    if (!dragTarget && !zoom) return;
+    if (!r.current.dragTarget && !r.current.zoom) return;
 
     const mouseX = e.nativeEvent.offsetX - canvas.current.clientLeft;
     const mouseY = e.nativeEvent.offsetY - canvas.current.clientTop;
-    const dx = mouseX - startX;
-    const dy = mouseY - startY;
-    startX = mouseX;
-    startY = mouseY;
-    if (dragTarget) {
-      const [targetX, targetY] = [dragTarget.x + dx, dragTarget.y + dy];
+    const dx = mouseX - r.current.startX;
+    const dy = mouseY - r.current.startY;
+    r.current.startX = mouseX;
+    r.current.startY = mouseY;
+    if (r.current.dragTarget) {
+      const [targetX, targetY] = [r.current.dragTarget.x + dx, r.current.dragTarget.y + dy];
       if (targetX >= 0 && targetX <= W && targetY >= 0 && targetY <= H) {
-        if (!!dragTarget.tag
-          || (targetX + dragTarget.w <= W && targetY + dragTarget.h <= H)) {
-          dragTarget.x += dx;
-          dragTarget.y += dy;
+        if (!!r.current.dragTarget.tag
+          || (targetX + r.current.dragTarget.w <= W && targetY + r.current.dragTarget.h <= H)) {
+          r.current.dragTarget.x += dx;
+          r.current.dragTarget.y += dy;
         }
       }
     } else {
-      switch (zoom) {
+      switch (r.current.zoom) {
         case ZOOM.L:
           {
-            const [x, w] = [region.x + dx, region.w - dx];
+            const [x, w] = [r.current.region.x + dx, r.current.region.w - dx];
             if (x >= 0 && w >= 4 * D) {
-              [region.x, region.w] = [x, w];
+              [r.current.region.x, r.current.region.w] = [x, w];
             }
           }
           break;
         case ZOOM.R:
           {
-            const w = region.w + dx;
-            if (w >= 4 * D && region.x + w <= W) {
-              region.w = w;
+            const w = r.current.region.w + dx;
+            if (w >= 4 * D && r.current.region.x + w <= W) {
+              r.current.region.w = w;
             }
           }
           break;
         case ZOOM.T:
           {
-            const [y, h] = [region.y + dy, region.h - dy];
+            const [y, h] = [r.current.region.y + dy, r.current.region.h - dy];
             if (y >= 0 && h >= 4 * D) {
-              [region.y, region.h] = [y, h];
+              [r.current.region.y, r.current.region.h] = [y, h];
             }
           }
           break;
         case ZOOM.B:
           {
-            const h = region.h + dy;
-            if (h >= 4 * D && region.y + h <= H) {
-              region.h = h;
+            const h = r.current.region.h + dy;
+            if (h >= 4 * D && r.current.region.y + h <= H) {
+              r.current.region.h = h;
             }
           }
           break;
         case ZOOM.TL:
           {
-            const [x, y, w, h] = [region.x + dx, region.y + dy, region.w - dx, region.h - dy];
+            const [x, y, w, h] = [
+              r.current.region.x + dx,
+              r.current.region.y + dy,
+              r.current.region.w - dx,
+              r.current.region.h - dy
+            ];
             if (x >= 0 && y >= 0 && w > 4 * D && h >= 4 * D) {
-              [region.x, region.y, region.w, region.h] = [x, y, w, h];
+              [r.current.region.x, r.current.region.y, r.current.region.w, r.current.region.h]
+                = [x, y, w, h];
             }
           }
           break;
         case ZOOM.BL:
           {
-            const [x, w, h] = [region.x + dx, region.w - dx, region.h + dy];
-            if (x >= 0 && w >= 4 * D && h >= 4 * D && region.y + h <= H) {
-              [region.x, region.w, region.h] = [x, w, h];
+            const [x, w, h] = [r.current.region.x + dx, r.current.region.w - dx, r.current.region.h + dy];
+            if (x >= 0 && w >= 4 * D && h >= 4 * D && r.current.region.y + h <= H) {
+              [r.current.region.x, r.current.region.w, r.current.region.h] = [x, w, h];
             }
           }
           break;
         case ZOOM.TR:
           {
-            const [y, w, h] = [region.y + dy, region.w + dx, region.h - dy];
-            if (y >= 0 && w >= 4 * D && region.x + w <= W && h >= 4 * D) {
-              [region.y, region.w, region.h] = [y, w, h];
+            const [y, w, h] = [r.current.region.y + dy, r.current.region.w + dx, r.current.region.h - dy];
+            if (y >= 0 && w >= 4 * D && r.current.region.x + w <= W && h >= 4 * D) {
+              [r.current.region.y, r.current.region.w, r.current.region.h] = [y, w, h];
             }
           }
           break;
         case ZOOM.BR:
           {
-            const [w, h] = [region.w + dx, region.h + dy];
-            if (w > 4 * D && region.x + w <= W && h > 4 * D && region.y + h <= H) {
-              [region.w, region.h] = [w, h];
+            const [w, h] = [r.current.region.w + dx, r.current.region.h + dy];
+            if (w > 4 * D && r.current.region.x + w <= W && h > 4 * D && r.current.region.y + h <= H) {
+              [r.current.region.w, r.current.region.h] = [w, h];
             }
           }
           break;
@@ -277,8 +297,8 @@ function VideoCanvas({
   }
 
   function handleMouseUp() {
-    dragTarget = null;
-    zoom = null;
+    r.current.dragTarget = null;
+    r.current.zoom = null;
   }
 
   function handleMouseOut() {

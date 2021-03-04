@@ -3,11 +3,11 @@ use std::lazy::SyncLazy;
 use std::ops::{Deref, DerefMut};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
-use std::{cell::RefCell, io::BufWriter};
 use std::{
-    cell::RefMut,
+    cell::Ref,
     fs::{create_dir_all, File},
 };
+use std::{cell::RefCell, io::BufWriter};
 
 use ndarray::parallel::prelude::*;
 use ndarray::prelude::*;
@@ -100,7 +100,7 @@ impl DecoderTool {
         })
     }
 
-    fn decode(&self, packet: &Packet) -> TLCResult<RefMut<Video>> {
+    fn decode(&self, packet: &Packet) -> TLCResult<Ref<Video>> {
         let mut decoder = self.decoder.borrow_mut();
         let mut sws_ctx = self.sws_ctx.borrow_mut();
         let mut src_frame = self.src_frame.borrow_mut();
@@ -115,8 +115,9 @@ impl DecoderTool {
         sws_ctx
             .run(&src_frame, &mut dst_frame)
             .map_err(|err| awsl!(VideoError, err, "颜色转换错误"))?;
+        drop(dst_frame);
 
-        Ok(dst_frame)
+        Ok(self.dst_frame.borrow())
     }
 }
 

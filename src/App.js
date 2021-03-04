@@ -19,14 +19,21 @@ function App() {
   const [errMsg, setErrMsg] = useState("");
   const [config, setConfig] = useState("");
 
+  function awsl(msg) {
+    if (msg === "") setErrMsg("");
+    else if (errMsg === "") setErrMsg(msg);
+  }
+
   return (
     <ChakraProvider>
       <Box h="800px" bg="#282828">
         <IAlert errMsg={errMsg} onClose={() => setErrMsg("")} />
-        <SimpleGrid columns={2}>
-          <Button rounded={false} bg="#98971a" color="#32302f" onClick={() => setAppState(0)}>路径与同步</Button>
-          <Button rounded={false} bg="#458588" color="#32302f" onClick={() => setAppState(1)}>求解设置</Button>
-        </SimpleGrid>
+        {errMsg === "" &&
+          <SimpleGrid columns={2}>
+            <Button rounded={false} bg="#98971a" color="#32302f" onClick={() => setAppState(0)}>路径与同步</Button>
+            <Button rounded={false} bg="#458588" color="#32302f" onClick={() => setAppState(1)}>求解设置</Button>
+          </SimpleGrid>
+        }
         <Center>
           <Heading
             color="#689d6a"
@@ -36,18 +43,19 @@ function App() {
             当前实验组：{config.case_name}
           </Heading>
         </Center>
-        <Stack key={new Date().getTime()} >
+        {/* <Stack key={`${JSON.stringify(config)}`}> */}
+        <Stack key={`${JSON.stringify(config)}${errMsg}`}>
           {appState === 0 &&
             <BasicSettings
               config={config}
               setConfig={setConfig}
-              setErrMsg={setErrMsg}
+              awsl={awsl}
             />}
           {appState === 1 &&
             <SolveSettings
               config={config}
               setConfig={setConfig}
-              setErrMsg={setErrMsg}
+              awsl={awsl}
             />}
         </Stack>
       </Box>

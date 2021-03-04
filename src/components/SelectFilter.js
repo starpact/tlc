@@ -3,7 +3,7 @@ import { useState } from "react";
 import IButton from "./Button";
 import IInput from "./Input";
 
-function SelectFilter({ value, onSubmit, setErrMsg }) {
+function SelectFilter({ value, onSubmit, awsl }) {
   const [innerValue, setInnerValue] = useState(value);
 
   const onSelectChange = v => {
@@ -37,7 +37,7 @@ function SelectFilter({ value, onSubmit, setErrMsg }) {
             onBlur={v => {
               const vv = parseInt(v);
               if (!vv || vv < 0) {
-                setErrMsg(`不合法的窗口宽度：${v}`);
+                awsl(`不合法的窗口宽度：${v}`);
                 return;
               }
               setInnerValue({ Median: vv });
@@ -51,7 +51,7 @@ function SelectFilter({ value, onSubmit, setErrMsg }) {
             onBlur={v => {
               const vv = parseFloat(v);
               if (!vv || vv < 0 || vv > 1) {
-                setErrMsg(`不合法的滤波阈值：${v}`);
+                awsl(`不合法的滤波阈值：${v}`);
                 return;
               }
               setInnerValue({ Wavelet: vv });

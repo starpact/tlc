@@ -9,6 +9,7 @@ import {
 function IAlert({ errMsg, onClose }) {
   return (
     <Alert
+      h="40px"
       display={errMsg === "" ? "none" : "flex"}
       status="error"
       bg="#f38019"

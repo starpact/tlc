@@ -8,92 +8,96 @@ import SelectFilter from "../components/SelectFilter";
 import SelectInterp from "../components/SelectInterp";
 import SelectIteration from "../components/SelectIteration";
 
-function SolveSettings({ config, setConfig, setErrMsg }) {
+function SolveSettings({ config, setConfig, awsl }) {
 
-  function setPeakTemp(peak_temp) {
-    if (Math.abs(peak_temp - config.peak_temp) < 1e-5) return;
+  function setPeakTemp(peakTemp) {
+    if (!peakTemp) return;
+    if (Math.abs(peakTemp - config.peak_temp) < 1e-5) return;
     tauri.promisified({
       cmd: "setPeakTemp",
-      body: peak_temp,
+      body: { Float: peakTemp },
     })
       .then(ok => setConfig(ok))
-      .catch(err => setErrMsg(err));
+      .catch(err => awsl(err));
   }
 
-  function setSolidThermalConductivity(solid_thermal_conductivity) {
-    if (Math.abs(solid_thermal_conductivity - config.solid_thermal_conductivity) < 1e-5) return;
+  function setSolidThermalConductivity(solidThermalConductivity) {
+    if (!solidThermalConductivity) return;
+    if (Math.abs(solidThermalConductivity - config.solid_thermal_conductivity) < 1e-5) return;
     tauri.promisified({
       cmd: "setSolidThermalConductivity",
-      body: solid_thermal_conductivity,
+      body: { Float: solidThermalConductivity },
     })
       .then(ok => setConfig(ok))
-      .catch(err => setErrMsg(err));
+      .catch(err => awsl(err));
   }
 
-  function setSolidThermalDiffusivity(solid_thermal_diffusivity) {
-    if (Math.abs(solid_thermal_diffusivity - config.solid_thermal_diffusivity) < 1e-5) return;
+  function setSolidThermalDiffusivity(solidThermalDiffusivity) {
+    if (!solidThermalDiffusivity) return;
     tauri.promisified({
       cmd: "setSolidThermalDiffusivity",
-      body: solid_thermal_diffusivity,
+      body: { Float: solidThermalDiffusivity },
     })
       .then(ok => setConfig(ok))
-      .catch(err => setErrMsg(err));
+      .catch(err => awsl(err));
   }
 
-  function setAirThermalConductivity(air_thermal_conductivity) {
-    if (Math.abs(air_thermal_conductivity - config.air_thermal_conductivity) < 1e-5) return;
+  function setAirThermalConductivity(airThermalConductivity) {
+    if (!airThermalConductivity) return;
+    if (Math.abs(airThermalConductivity - config.air_thermal_conductivity) < 1e-5) return;
     tauri.promisified({
       cmd: "setAirThermalConductivity",
-      body: air_thermal_conductivity,
+      body: { Float: airThermalConductivity },
     })
       .then(ok => setConfig(ok))
-      .catch(err => setErrMsg(err));
+      .catch(err => awsl(err));
   }
 
-  function setCharacteristicLength(characteristic_length) {
-    if (Math.abs(characteristic_length - config.characteristic_length) < 1e-5) return;
+  function setCharacteristicLength(characteristicLength) {
+    if (!characteristicLength) return;
+    if (Math.abs(characteristicLength - config.characteristic_length) < 1e-5) return;
     tauri.promisified({
       cmd: "setCharacteristicLength",
-      body: characteristic_length,
+      body: { Float: characteristicLength },
     })
       .then(ok => setConfig(ok))
-      .catch(err => setErrMsg(err));
+      .catch(err => awsl(err));
   }
 
   function setRegulator(regulator) {
     tauri.promisified({
       cmd: "setRegulator",
-      body: regulator,
+      body: { FloatVec: regulator },
     })
       .then(ok => setConfig(ok))
-      .catch(err => setErrMsg(err));
+      .catch(err => awsl(err));
   }
 
-  function setFilterMethod(filter_method) {
+  function setFilterMethod(filterMethod) {
     tauri.promisified({
       cmd: "setFilterMethod",
-      body: filter_method,
+      body: { Filter: filterMethod },
     })
       .then(ok => setConfig(ok))
-      .catch(err => setErrMsg(err));
+      .catch(err => awsl(err));
   }
 
-  function setInterpMethod(interp_method) {
+  function setInterpMethod(interpMethod) {
     tauri.promisified({
       cmd: "setInterpMethod",
-      body: interp_method,
+      body: { Interp: interpMethod },
     })
       .then(ok => setConfig(ok))
-      .catch(err => setErrMsg(err));
+      .catch(err => awsl(err));
   }
 
-  function setIterationMethod(iteration_method) {
+  function setIterationMethod(iterationMethod) {
     tauri.promisified({
       cmd: "setIterationMethod",
-      body: iteration_method,
+      body: { Iteration: iterationMethod },
     })
       .then(ok => setConfig(ok))
-      .catch(err => setErrMsg(err))
+      .catch(err => awsl(err))
   }
 
   return (
@@ -140,17 +144,17 @@ function SolveSettings({ config, setConfig, setErrMsg }) {
       <SelectFilter
         value={config.filter_method}
         onSubmit={setFilterMethod}
-        setErrMsg={setErrMsg}
+        awsl={awsl}
       />
       <SelectInterp
         value={config.interp_method}
         onSubmit={setInterpMethod}
-        setErrMsg={setErrMsg}
+        awsl={awsl}
       />
       <SelectIteration
         value={config.iteration_method}
         onSubmit={setIterationMethod}
-        setErrMsg={setErrMsg}
+        awsl={awsl}
       />
     </Stack>
   )

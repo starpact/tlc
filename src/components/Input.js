@@ -44,7 +44,7 @@ function IInput({
         borderColor="#d79921"
         value={innerValue}
         onChange={e => setInnerValue(e.target.value)}
-        onBlur={e => !!mutable && !!onBlur && onBlur(e.target.value)}
+        onBlur={e => { !!mutable && !!onBlur && onBlur(e.target.value) }}
         placeholder={placeholder}
         readOnly={!!mutable ? false : true}
       />

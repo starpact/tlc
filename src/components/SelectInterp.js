@@ -3,7 +3,7 @@ import { useState } from "react";
 import IButton from "./Button";
 import IInput from "./Input";
 
-function SelectInterp({ value, onSubmit, setErrMsg }) {
+function SelectInterp({ value, onSubmit, awsl }) {
   const [type, setType] = useState(Object.keys(value)[0]);
 
   const [shape, setShape] = useState(Object.values(value)[0]);
@@ -35,7 +35,7 @@ function SelectInterp({ value, onSubmit, setErrMsg }) {
             onBlur={v => {
               const vv = parseInt(v);
               if (!vv || vv <= 0) {
-                setErrMsg(`不合法的热电偶行数：${v}`);
+                awsl(`不合法的热电偶行数：${v}`);
                 return;
               }
               setShape([vv, shape[1]]);
@@ -48,7 +48,7 @@ function SelectInterp({ value, onSubmit, setErrMsg }) {
             onBlur={v => {
               const vv = parseInt(v);
               if (!vv || vv <= 0) {
-                setErrMsg(`不合法的热电偶列数：${v}`);
+                awsl(`不合法的热电偶列数：${v}`);
                 return;
               }
               setShape([shape[0], vv]);

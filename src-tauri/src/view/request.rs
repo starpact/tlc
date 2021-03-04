@@ -10,8 +10,8 @@ use crate::cal::{
 
 /// body数据类型
 #[derive(Debug, Deserialize)]
-#[serde(untagged)]
 pub enum Value {
+    Nothing,
     String(String),
     Uint(usize),
     Float(f32),
@@ -27,9 +27,19 @@ pub enum Value {
 pub struct Request {
     /// as url
     pub cmd: String,
-    pub body: Option<Value>,
+    /// js数据类型映射到rust
+    #[serde(default)]
+    pub body: Value,
+    /// then
     pub callback: String,
+    /// catch
     pub error: String,
+}
+
+impl Default for Value {
+    fn default() -> Self {
+        Self::Nothing
+    }
 }
 
 impl Request {
