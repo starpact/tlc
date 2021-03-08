@@ -1,12 +1,12 @@
 use serde::{Deserialize, Serialize};
 use tauri::api::rpc::format_callback_result;
 
-use crate::awsl;
 use crate::cal::{
     error::TLCResult,
     preprocess::{FilterMethod, InterpMethod},
     solve::IterationMethod,
 };
+use crate::{awsl, cal::Thermocouple};
 
 /// body数据类型
 #[derive(Debug, Deserialize)]
@@ -17,7 +17,7 @@ pub enum Value {
     Float(f32),
     UintVec(Vec<usize>),
     FloatVec(Vec<f32>),
-    IntPairVec(Vec<(i32, i32)>),
+    Thermocouples(Vec<Thermocouple>),
     Interp(InterpMethod),
     Filter(FilterMethod),
     Iteration(IterationMethod),

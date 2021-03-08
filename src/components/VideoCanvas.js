@@ -8,10 +8,20 @@ import {
   SliderThumb,
   Box,
   Stack,
+  Popover,
+  PopoverTrigger,
+  PopoverContent,
+  PopoverHeader,
+  PopoverBody,
+  PopoverArrow,
+  PopoverCloseButton,
+  Tooltip,
+  Text,
 } from "@chakra-ui/react";
 import * as tauri from "tauri/api/tauri";
 import IButton from "./Button";
 import ITag from "./Tag";
+import IPopover from "./Popover";
 
 // 矩形的8个缩放方向
 // js没有枚举...
@@ -32,6 +42,9 @@ const RADIUS = 10;
 // 区域选框触发缩放操作的宽度
 const D = 10;
 
+const from = pos => pos / 2;
+const into = pos => pos * 2;
+
 function VideoCanvas({
   frameIndex,
   setFrameIndex,
@@ -43,8 +56,8 @@ function VideoCanvas({
   const [showPos, setShowPos] = useState(true);
   const canvas = useRef(null);
   const r = useRef(null);
-  const W = !!config && config.video_shape[1] / 2;
-  const H = !!config && config.video_shape[0] / 2;
+  const W = from(!!config && config.video_shape[1]);
+  const H = from(!!config && config.video_shape[0]);
 
   useEffect(() => {
     r.current = {
@@ -55,23 +68,23 @@ function VideoCanvas({
       startX: null,
       startY: null,
     };
-    setTimeout(() => { if (config !== "") getFrame(0); }, 200);
+    setTimeout(() => getFrame(0), 200);
   }, []);
 
   useEffect(() => {
-    if (config === "" || !r) return;
     r.current.region = {
-      x: config.top_left_pos[1] / 2,
-      y: config.top_left_pos[0] / 2,
-      w: config.region_shape[1] / 2,
-      h: config.region_shape[0] / 2,
+      x: from(config.top_left_pos[1]),
+      y: from(config.top_left_pos[0]),
+      w: from(config.region_shape[1]),
+      h: from(config.region_shape[0]),
     };
     r.current.tcs = [];
-    for (let i = 0; i < config.thermocouple_pos.length; i++) {
+    for (let i = 0; i < config.thermocouples.length; i++) {
       r.current.tcs.push({
-        tag: config.temp_column_num[i],
-        x: config.thermocouple_pos[i][1] / 2,
-        y: config.thermocouple_pos[i][0] / 2,
+        id: i,
+        tag: config.thermocouples[i].column_num + 1,
+        x: from(config.thermocouples[i].pos[1]),
+        y: from(config.thermocouples[i].pos[0]),
       });
     }
     draw();
@@ -90,22 +103,51 @@ function VideoCanvas({
     const { x, y, w, h } = r.current.region;
     tauri.promisified({
       cmd: "setRegion",
-      body: { UintVec: [y * 2, x * 2, h * 2, w * 2] },
+      body: { UintVec: [into(y), into(x), into(h), into(w)] },
     })
       .catch(err => { awsl(err); return; });
 
     tauri.promisified({
-      cmd: "setTempColumnNum",
-      body: { UintVec: r.current.tcs.map(({ tag }) => tag) },
-    })
-      .catch(err => { awsl(err); return; });
-
-    tauri.promisified({
-      cmd: "setThermocouplePos",
-      body: { IntPairVec: r.current.tcs.map(({ x, y }) => [y * 2, x * 2]) },
+      cmd: "setThermocouples",
+      body: {
+        Thermocouples: r.current.tcs.map(({ tag, x, y }) => {
+          return {
+            column_num: tag - 1,
+            pos: [into(y), into(x)]
+          };
+        })
+      }
     })
       .then(ok => setConfig(ok))
       .catch(err => awsl(err));
+  }
+
+  function deleteThermocouple(targetId) {
+    r.current.tcs = r.current.tcs.filter(({ id }) => id !== targetId);
+    config.thermocouples = r.current.tcs.map(({ tag, x, y }) => {
+      return {
+        column_num: tag - 1,
+        pos: [into(y), into(x)]
+      };
+    })
+    setConfig(Object.assign({}, config));
+  }
+
+  function updateThermocouple(targetId, xx, yy) {
+    config.thermocouples = r.current.tcs.map(({ id, tag, x, y }) => {
+      if (id === targetId) {
+        return {
+          column_num: tag - 1,
+          pos: [yy, xx]
+        };
+      } else {
+        return {
+          column_num: tag - 1,
+          pos: [into(y), into(x)]
+        };
+      }
+    });
+    setConfig(Object.assign({}, config));
   }
 
   function draw() {
@@ -132,13 +174,13 @@ function VideoCanvas({
         ctx.fillStyle = "#cc241d";
         ctx.font = "20px serif";
         ctx.fillText("计算区域：", 3, 20);
-        ctx.fillText(`x: ${x * 2} y: ${y * 2} w: ${w * 2} h: ${h * 2}`, 5, 40);
-        r.current.tcs.forEach(({ tag, x, y }) => {
+        ctx.fillText(`x: ${into(x)} y: ${into(y)} w: ${into(w)} h: ${into(h)}`, 5, 40);
+        r.current.tcs.forEach(({ id, tag, x, y }) => {
           if (x < 0 || x > W || y < 0 || y > H) return;
-          if (!!r.current.dragTarget && r.current.dragTarget.tag === tag) {
+          if (!!r.current.dragTarget && r.current.dragTarget.id === id) {
             ctx.font = "20px serif";
             ctx.fillText(`${tag}号热电偶：`, 3, 65);
-            ctx.fillText(`x: ${x * 2} y: ${y * 2}`, 5, 85);
+            ctx.fillText(`x: ${into(x)} y: ${into(y)}`, 5, 85);
           }
           ctx.font = "15px serif";
           if (tag < 10) {
@@ -194,9 +236,12 @@ function VideoCanvas({
   }
 
   function handleMouseDown(e) {
-    r.current.startX = e.nativeEvent.offsetX - canvas.current.clientLeft;
     r.current.startY = e.nativeEvent.offsetY - canvas.current.clientTop;
+    r.current.startX = e.nativeEvent.offsetX - canvas.current.clientLeft;
     determineTarget();
+    if (e.button === 2 && !!r.current.dragTarget && !!r.current.dragTarget.tag) {
+      deleteThermocouple(r.current.dragTarget.id);
+    }
   }
 
   function handleMouseMove(e) {
@@ -284,7 +329,7 @@ function VideoCanvas({
         case ZOOM.BR:
           {
             const [w, h] = [r.current.region.w + dx, r.current.region.h + dy];
-            if (w > 4 * D && r.current.region.x + w <= W && h > 4 * D && r.current.region.y + h <= H) {
+            if (w >= 4 * D && r.current.region.x + w <= W && h >= 4 * D && r.current.region.y + h <= H) {
               [r.current.region.w, r.current.region.h] = [w, h];
             }
           }
@@ -301,8 +346,19 @@ function VideoCanvas({
     r.current.zoom = null;
   }
 
+  // 鼠标移出canvas时更新config数据
+  // 保证在拖动时不会触发重新渲染的前提下，其他组件能拿到ref里的最新数据
   function handleMouseOut() {
-    handleMouseUp();
+    const { x, y, w, h } = r.current.region;
+    config.top_left_pos = [into(y), into(x)];
+    config.region_shape = [into(h), into(w)];
+    config.thermocouples = r.current.tcs.map(({ tag, x, y }) => {
+      return {
+        column_num: tag - 1,
+        pos: [into(y), into(x)]
+      };
+    })
+    setConfig(Object.assign({}, config));
   }
 
   return (
@@ -310,7 +366,6 @@ function VideoCanvas({
       <canvas
         width={W}
         height={H}
-        ondragstart="return false"
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
@@ -319,7 +374,6 @@ function VideoCanvas({
       >
       </canvas>
       <HStack>
-        <Box w={1} />
         <ITag text={frameIndex + 1} w="60px" />
         <Box w={3} />
         <Slider
@@ -337,21 +391,57 @@ function VideoCanvas({
           </SliderTrack>
           <SliderThumb bgColor="#928374" />
         </Slider>
-        <Box w="10px"></Box>
       </HStack>
       <HStack h="25px">
-        <Box w="7px"></Box>
         <Checkbox
           size="lg"
           colorScheme="teal"
           color="#98971a"
           defaultChecked
           checked={showPos}
-          onChange={e => setShowPos(e.target.checked)}
-        >
-          显示计算区域和热电偶位置
-          </Checkbox>
+          onChange={e => setShowPos(e.target.checked)} >
+          显示计算区域和热电偶
+        </Checkbox>
+        <Box w="7px"></Box>
         {showPos && <IButton text="提交" onClick={onSubmit} size="sm" />}
+        <Box w="7px"></Box>
+        {showPos && !!r && !!r.current && r.current.tcs.map(({ id, tag, x, y }) =>
+          <Popover>
+            <PopoverTrigger>
+              <Box>
+                <Tooltip label={`x: ${into(x)} y: ${into(y)}`}>
+                  <Text
+                    rounded="full"
+                    marginLeft="2px"
+                    marginRight="2px"
+                    w="30px"
+                    border="solid"
+                    onMouseDown={e => { if (e.button === 2) deleteThermocouple(id); }}
+                    color="#98971a"
+                    fontWeight="bold"
+                    align="center"
+                  >
+                    {`${tag}`}
+                  </Text>
+                </Tooltip>
+              </Box>
+            </PopoverTrigger>
+            <PopoverContent bgColor="#282828" color="#d79921" borderColor="#282828">
+              <PopoverArrow bgColor="#282828" />
+              <PopoverCloseButton color="#fbf1c7" />
+              <PopoverHeader fontSize="lg" border="0">
+                手动设置镜头范围外的热电偶位置
+                </PopoverHeader>
+              <PopoverBody>
+                <IPopover
+                  id={id} x={into(x)} y={into(y)}
+                  updateThermocouple={updateThermocouple}
+                  into={into}
+                />
+              </PopoverBody>
+            </PopoverContent>
+          </Popover>
+        )}
       </HStack>
     </Stack>
   );

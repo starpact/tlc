@@ -87,8 +87,11 @@ mod cal {
         let mut tlc_data = init();
         let mut raw = Vec::new();
         let mut filtered = Vec::new();
+        tlc_data.read_video()?;
 
+        let t0 = Instant::now();
         tlc_data.filtering()?;
+        println!("{:?}", t0.elapsed());
 
         let g2d = tlc_data.get_raw_g2d()?;
         let column_num: usize = 180000;
@@ -100,7 +103,7 @@ mod cal {
             filtered.push(*g as usize);
         }
 
-        let root = BitMapBackend::new("./tmp/plots/1.png", (2400, 800)).into_drawing_area();
+        let root = BitMapBackend::new("./cache/1.png", (2400, 800)).into_drawing_area();
         root.fill(&WHITE)?;
         let mut chart = ChartBuilder::on(&root).build_cartesian_2d(0..g2d.nrows(), 0usize..50)?;
         chart.draw_series(LineSeries::new(raw.into_iter().enumerate(), &RED))?;

@@ -1,5 +1,10 @@
-import { Stack } from "@chakra-ui/react";
-import * as tauri from 'tauri/api/tauri';
+import {
+  Box,
+  Grid,
+  GridItem,
+  SimpleGrid,
+} from "@chakra-ui/react";
+import * as tauri from "tauri/api/tauri";
 
 import IInput from "../components/Input";
 
@@ -7,8 +12,21 @@ import Regulator from "../components/Regulator";
 import SelectFilter from "../components/SelectFilter";
 import SelectInterp from "../components/SelectInterp";
 import SelectIteration from "../components/SelectIteration";
+import InterpImg from "../components/InterpImg";
+import { useState, useEffect } from "react";
 
 function SolveSettings({ config, setConfig, awsl }) {
+  const [interp, setInterp] = useState(null);
+
+  useEffect(() => {
+    if (config === "") return;
+    tauri.promisified({
+      cmd: "getInterpSingleFrame",
+      body: { Uint: 800 },
+    })
+      .then(ok => setInterp(ok))
+      .catch(err => awsl(err));
+  }, []);
 
   function setPeakTemp(peakTemp) {
     if (!peakTemp) return;
@@ -101,62 +119,97 @@ function SolveSettings({ config, setConfig, awsl }) {
   }
 
   return (
-    <Stack>
-      <IInput
-        leftTag="峰值温度"
-        value={!!config.peak_temp ? config.peak_temp.toPrecision(4) : ""}
-        onBlur={v => setPeakTemp(parseFloat(v))}
-        mutable
-        rightTag="°C"
-      />
-      <IInput
-        leftTag="固体导热系数"
-        value={!!config.solid_thermal_conductivity ? config.solid_thermal_conductivity.toPrecision(3) : ""}
-        onBlur={v => setSolidThermalConductivity(parseFloat(v))}
-        mutable
-        rightTag="W/(m·K)"
-      />
-      <IInput
-        leftTag="固体热扩散系数"
-        value={!!config.solid_thermal_diffusivity ? config.solid_thermal_diffusivity.toPrecision(4) : ""}
-        rightTag="m2/s"
-        onBlur={v => setSolidThermalDiffusivity(parseFloat(v))}
-        mutable
-      />
-      <IInput
-        leftTag="气体导热系数"
-        value={!!config.air_thermal_conductivity ? config.air_thermal_conductivity.toPrecision(3) : ""}
-        onBlur={v => setAirThermalConductivity(parseFloat(v))}
-        mutable
-        rightTag="W/(m·K)"
-      />
-      <IInput
-        leftTag="特征长度"
-        value={!!config.characteristic_length ? config.characteristic_length.toFixed(4) : ""}
-        onBlur={v => setCharacteristicLength(parseFloat(v))}
-        mutable
-        rightTag="m"
-      />
-      <Regulator
-        regulator={config.regulator}
-        onSubmit={setRegulator}
-      />
-      <SelectFilter
-        value={config.filter_method}
-        onSubmit={setFilterMethod}
-        awsl={awsl}
-      />
-      <SelectInterp
-        value={config.interp_method}
-        onSubmit={setInterpMethod}
-        awsl={awsl}
-      />
-      <SelectIteration
-        value={config.iteration_method}
-        onSubmit={setIterationMethod}
-        awsl={awsl}
-      />
-    </Stack>
+    <Box>
+      { config !== "" && <Grid
+        templateRows="repeat(5, 1fr)"
+        templateColumns="repeat(3, 1fr)"
+        gap={2}
+        marginX="25px"
+      >
+        <GridItem colSpan={1}>
+          <IInput
+            leftTag="峰值温度"
+            value={!!config.peak_temp ? config.peak_temp.toPrecision(4) : ""}
+            onBlur={v => setPeakTemp(parseFloat(v))}
+            mutable
+            rightTag="°C"
+          />
+        </GridItem>
+        <GridItem colSpan={1}>
+          <IInput
+            leftTag="固体导热系数"
+            value={!!config.solid_thermal_conductivity
+              ? config.solid_thermal_conductivity.toPrecision(3) : ""}
+            onBlur={v => setSolidThermalConductivity(parseFloat(v))}
+            mutable
+            rightTag="W/(m·K)"
+          />
+        </GridItem>
+        <GridItem colSpan={1}>
+          <IInput
+            leftTag="固体热扩散系数"
+            value={!!config.solid_thermal_diffusivity
+              ? config.solid_thermal_diffusivity.toPrecision(4) : ""}
+            rightTag="m2/s"
+            onBlur={v => setSolidThermalDiffusivity(parseFloat(v))}
+            mutable
+          />
+        </GridItem>
+        <GridItem colSpan={1} rowSpan={1}>
+          <IInput
+            leftTag="气体导热系数"
+            value={!!config.air_thermal_conductivity
+              ? config.air_thermal_conductivity.toPrecision(3) : ""}
+            onBlur={v => setAirThermalConductivity(parseFloat(v))}
+            mutable
+            rightTag="W/(m·K)"
+          />
+        </GridItem>
+        <GridItem colSpan={1} rowSpan={1}>
+          <IInput
+            leftTag="特征长度"
+            value={!!config.characteristic_length
+              ? config.characteristic_length.toFixed(4) : ""}
+            onBlur={v => setCharacteristicLength(parseFloat(v))}
+            mutable
+            rightTag="m"
+          />
+        </GridItem>
+        <GridItem colSpan={1} rowSpan={4}>
+          <Regulator
+            regulator={config.regulator}
+            onSubmit={setRegulator}
+          />
+        </GridItem>
+        <GridItem colSpan={2} rowSpan={1}>
+          <SelectFilter
+            value={config.filter_method}
+            onSubmit={setFilterMethod}
+            awsl={awsl}
+          />
+        </GridItem>
+        <GridItem colSpan={2} rowSpan={1}>
+          {!!config !== "" && <SelectInterp
+            value={config.interp_method}
+            onSubmit={setInterpMethod}
+            awsl={awsl}
+          />}
+        </GridItem>
+        <GridItem colSpan={2} rowSpan={1}>
+          <SelectIteration
+            value={config.iteration_method}
+            onSubmit={setIterationMethod}
+            awsl={awsl}
+          />
+        </GridItem>
+      </Grid>
+      }
+      {!!interp &&
+        <SimpleGrid columns={2}>
+          <InterpImg interp={interp} />
+        </SimpleGrid>
+      }
+    </Box>
   )
 }
 

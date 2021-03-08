@@ -1,4 +1,4 @@
-import { HStack, Select, Stack } from "@chakra-ui/react";
+import { Box, HStack, Select, Stack } from "@chakra-ui/react";
 import { useState } from "react";
 import IButton from "./Button";
 import IInput from "./Input";
@@ -18,11 +18,12 @@ function SelectIteration({ value, onSubmit, awsl }) {
         border="unset"
         fontWeight="bold"
         onChange={e => setType(e.target.value)}
+        marginRight="9px"
       >
         <option value="NewtonTangent">牛顿切线</option>
         <option value="NewtonDown">牛顿下山</option>
       </Select>
-      <Stack>
+      <Box w="350px" marginRight="9px">
         <IInput
           leftTag="对流换热系数初值"
           value={!!h0 && h0.toFixed(1)}
@@ -37,6 +38,8 @@ function SelectIteration({ value, onSubmit, awsl }) {
           mutable
           rightTag="W/(m2·K)"
         />
+      </Box>
+      <Box w="200px" marginRight="9px">
         <IInput
           leftTag="最大迭代步数"
           value={maxIterNum}
@@ -50,7 +53,7 @@ function SelectIteration({ value, onSubmit, awsl }) {
           }}
           mutable
         />
-      </Stack>
+      </Box>
       <IButton text="提交" onClick={() => {
         if (type === "NewtonTangent") onSubmit({ NewtonTangent: { h0, max_iter_num: maxIterNum } })
         else onSubmit({ NewtonDown: { h0, max_iter_num: maxIterNum } })

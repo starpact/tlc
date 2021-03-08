@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useEffect, useState } from "react";
 import {
   ChakraProvider,
   Center,
@@ -7,12 +7,13 @@ import {
   Stack,
   Button,
   SimpleGrid,
-} from "@chakra-ui/react"
+} from "@chakra-ui/react";
+import * as tauri from "tauri/api/tauri";
 
 import IAlert from "./components/Alert";
 
-import SolveSettings from "./pages/SolveSettings"
-import BasicSettings from "./pages/BasicSettings"
+import SolveSettings from "./pages/SolveSettings";
+import BasicSettings from "./pages/BasicSettings";
 
 function App() {
   const [appState, setAppState] = useState(0);
@@ -43,8 +44,8 @@ function App() {
             当前实验组：{config.case_name}
           </Heading>
         </Center>
-        {/* <Stack key={`${JSON.stringify(config)}`}> */}
-        <Stack key={`${JSON.stringify(config)}${errMsg}`}>
+        {/* <Stack key={`${JSON.stringify(config)}${errMsg}`}> */}
+        <Stack>
           {appState === 0 &&
             <BasicSettings
               config={config}

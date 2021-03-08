@@ -1,4 +1,4 @@
-import { HStack, Select, Stack } from "@chakra-ui/react";
+import { Box, HStack, Select } from "@chakra-ui/react";
 import { useState } from "react";
 import IButton from "./Button";
 import IInput from "./Input";
@@ -24,13 +24,14 @@ function SelectFilter({ value, onSubmit, awsl }) {
         border="unset"
         fontWeight="bold"
         onChange={onSelectChange}
+        marginRight="9px"
       >
         <option value="No">无</option>
         <option value="Median">中值</option>
         <option value="Wavelet">小波</option>
       </Select>
-      <Stack>
-        {!!innerValue.Median &&
+      {!!innerValue.Median &&
+        <Box w="200px" marginRight="9px">
           <IInput
             leftTag="窗口宽度"
             value={innerValue.Median}
@@ -43,8 +44,10 @@ function SelectFilter({ value, onSubmit, awsl }) {
               setInnerValue({ Median: vv });
             }}
             mutable
-          />}
-        {!!innerValue.Wavelet &&
+          />
+        </Box>}
+      {!!innerValue && !!innerValue.Wavelet &&
+        <Box w="300px" marginRight="9px">
           <IInput
             leftTag="滤波阈值"
             value={innerValue.Wavelet.toPrecision(2)}
@@ -58,8 +61,9 @@ function SelectFilter({ value, onSubmit, awsl }) {
             }}
             mutable
             rightTag="(0, 1)"
-          />}
-      </Stack>
+          />
+        </Box>
+      }
       <IButton text="提交" onClick={() => onSubmit(innerValue)} />
     </HStack>
   )

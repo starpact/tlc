@@ -69,7 +69,7 @@ pub fn plot_line(arr: ArrayView1<f32>) -> TLCResult<()> {
     let max = arr.iter().fold(x0, |m, &x| if x > m { x } else { m });
     let delta = max - min;
 
-    let root = BitMapBackend::new("plotters/simple_plot.png", (640, 480)).into_drawing_area();
+    let root = BitMapBackend::new("cache/simple_plot.png", (640, 480)).into_drawing_area();
     root.fill(&WHITE).map_err(|err| awsl!(PlotError, err))?;
     let mut chart = ChartBuilder::on(&root)
         .margin(30)

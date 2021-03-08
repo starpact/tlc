@@ -12,7 +12,6 @@ function DaqLine({
   setScrollToRow,
 }) {
   function getOption() {
-    if (!daq) return;
     const yData = [];
     if (scrollToColumn >= 0) {
       for (let i = scrollToColumn; i < daq.data.length; i += daq.dim[1]) {
@@ -23,7 +22,7 @@ function DaqLine({
     const title = scrollToColumn >= 0 ? `第${scrollToColumn + 1}列` : "请选择需要预览的列";
     const show = scrollToColumn >= 0;
 
-    let option = {
+    const option = {
       title: {
         text: title,
         textStyle: {
@@ -51,6 +50,8 @@ function DaqLine({
       grid: {
         show: true,
         top: 30,
+        left: "5%",
+        right: "5%",
       },
       series: [
         {

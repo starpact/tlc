@@ -26,11 +26,12 @@ use calamine::{open_workbook, Reader, Xlsx};
 use csv::{ReaderBuilder, StringRecord, WriterBuilder};
 
 use super::{error::TLCResult, DEFAULT_CONFIG_PATH};
-use super::{TLCConfig, TLCData};
+use super::{TLCConfig, TLCData, Thermocouple};
 use crate::awsl;
 
 use super::error::TLCError::VideoError;
 
+/// 视频帧压缩后发送给前端
 const COMPRESSION_RATIO: u32 = 2;
 
 static PACKETS: SyncLazy<Mutex<Vec<Packet>>> = SyncLazy::new(|| Mutex::new(Vec::new()));
@@ -214,12 +215,16 @@ impl TLCData {
 
                 Ok(())
             })?;
+        self.raw_g2d.insert(g2d);
 
+        // 确保thread local析构
         if let Ok(tls) = Arc::try_unwrap(tls) {
             tls.into_iter().for_each(|v| drop(v));
         }
-
-        self.raw_g2d.insert(g2d);
+        // 将缓存的视频数据包析构
+        PACKETS.lock().map_err(|err| awsl!(err))?.clear();
+        self.video_ctx.take();
+        self.decoder_tool.take();
 
         Ok(self)
     }
@@ -271,7 +276,9 @@ impl TLCConfig {
             .decoder()
             .video()
             .map_err(|err| awsl!(VideoError, err, ""))?;
-        self.video_shape = (decoder.height() as usize, decoder.width() as usize);
+        if self.video_shape == (0, 0) {
+            self.video_shape = (decoder.height() as usize, decoder.width() as usize);
+        }
 
         Ok(self)
     }
@@ -341,10 +348,12 @@ impl TLCConfig {
         Ok(self)
     }
 
-    fn init_regulator(&mut self) {
-        if self.regulator.len() == 0 {
-            self.regulator = vec![1.; self.temp_column_num.len()];
+    fn init_regulator(&mut self) -> &mut Self {
+        if self.thermocouples.len() != self.regulator.len() {
+            self.regulator = vec![1.; self.thermocouples.len()];
         }
+
+        self
     }
 
     pub fn set_save_dir(&mut self, save_dir: String) -> TLCResult<&mut Self> {
@@ -408,6 +417,13 @@ impl TLCConfig {
         self.init_frame_num();
 
         Ok(self)
+    }
+
+    pub fn set_thermocouples(&mut self, thermocouples: Vec<Thermocouple>) -> &mut Self {
+        self.thermocouples = thermocouples;
+        self.init_regulator();
+
+        self
     }
 
     pub fn synchronize(&mut self, frame_index: usize, row_index: usize) -> &mut Self {

@@ -1,12 +1,19 @@
-import { HStack, Select, Stack } from "@chakra-ui/react";
-import { useState } from "react";
+import { HStack, Select, Box } from "@chakra-ui/react";
+import { useEffect, useState } from "react";
 import IButton from "./Button";
 import IInput from "./Input";
 
 function SelectInterp({ value, onSubmit, awsl }) {
-  const [type, setType] = useState(Object.keys(value)[0]);
-
-  const [shape, setShape] = useState(Object.values(value)[0]);
+  const [type, setType] = useState(() => {
+    if (!!value.Bilinear) return "Bilinear";
+    if (!!value.BilinearExtra) return "BilinearExtra";
+    return value;
+  });
+  const [shape, setShape] = useState(() => {
+    if (!!value.Bilinear) return value.Bilinear;
+    if (!!value.BilinearExtra) return value.BilinearExtra;
+    return ["", ""];
+  });
 
   return (
     <HStack>
@@ -19,6 +26,7 @@ function SelectInterp({ value, onSubmit, awsl }) {
         border="unset"
         fontWeight="bold"
         onChange={e => setType(e.target.value)}
+        marginRight="9px"
       >
         <option value="Horizontal">水平</option>
         <option value="HorizontalExtra">水平（外插）</option>
@@ -28,40 +36,44 @@ function SelectInterp({ value, onSubmit, awsl }) {
         <option value="BilinearExtra">双线性（外插）</option>
       </Select>
       {(type === "Bilinear" || type === "BilinearExtra") &&
-        <Stack>
-          <IInput
-            leftTag="热电偶行数"
-            value={shape[0]}
-            onBlur={v => {
-              const vv = parseInt(v);
-              if (!vv || vv <= 0) {
-                awsl(`不合法的热电偶行数：${v}`);
-                return;
-              }
-              setShape([vv, shape[1]]);
-            }}
-            mutable
-          />
-          <IInput
-            leftTag="热电偶列数"
-            value={shape[1]}
-            onBlur={v => {
-              const vv = parseInt(v);
-              if (!vv || vv <= 0) {
-                awsl(`不合法的热电偶列数：${v}`);
-                return;
-              }
-              setShape([shape[0], vv]);
-            }}
-            mutable
-          />
-        </Stack>}
+        <HStack marginRight="9px">
+          <Box w="167px" marginRight="9px">
+            <IInput
+              leftTag="热电偶行数"
+              value={shape[0]}
+              onBlur={v => {
+                const vv = parseInt(v);
+                if (!vv || vv < 2) {
+                  awsl(`不合法的热电偶行数：${v}`);
+                  return;
+                }
+                setShape([vv, shape[1]]);
+              }}
+              mutable
+            />
+          </Box>
+          <Box w="167px">
+            <IInput
+              leftTag="热电偶列数"
+              value={shape[1]}
+              onBlur={v => {
+                const vv = parseInt(v);
+                if (!vv || vv < 2) {
+                  awsl(`不合法的热电偶列数：${v}`);
+                  return;
+                }
+                setShape([shape[0], vv]);
+              }}
+              mutable
+            />
+          </Box>
+        </HStack>}
       <IButton text="提交" onClick={() => {
         let interpMethod = {};
         interpMethod[type] = (type === "Bilinear" || type === "BilinearExtra") ? shape : null;
         onSubmit(interpMethod);
       }} />
-    </HStack >
+    </HStack>
   )
 }
 

@@ -1,8 +1,8 @@
 {
   "case_name": "imp_40000_1_up",
-  "save_dir": "D:\\research\\EXP\\exp_20201206\\tmp_res",
-  "video_path": "D:\\research\\EXP\\exp_20201206\\imp\\videos\\imp_40000_1_up.avi",
-  "daq_path": "D:\\research\\EXP\\exp_20201206\\imp\\daq\\imp_40000_1.lvm",
+  "save_dir": "E:\\research\\EXP\\exp_20201206\\tmp_res",
+  "video_path": "E:\\research\\EXP\\exp_20201206\\imp\\videos\\imp_40000_1_up.avi",
+  "daq_path": "E:\\research\\EXP\\exp_20201206\\imp\\daq\\imp_40000_1.lvm",
   "start_frame": 0,
   "total_frames": 1564,
   "frame_rate": 25,
@@ -21,46 +21,59 @@
     356,
     766
   ],
-  "temp_column_num": [
-    1,
-    2,
-    3,
-    4,
-    5,
-    6
+  "thermocouples": [
+    {
+      "column_num": 1,
+      "pos": [
+        864,
+        168
+      ]
+    },
+    {
+      "column_num": 2,
+      "pos": [
+        866,
+        353
+      ]
+    },
+    {
+      "column_num": 3,
+      "pos": [
+        866,
+        547
+      ]
+    },
+    {
+      "column_num": 4,
+      "pos": [
+        870,
+        731
+      ]
+    },
+    {
+      "column_num": 5,
+      "pos": [
+        872,
+        920
+      ]
+    },
+    {
+      "column_num": 6,
+      "pos": [
+        870,
+        1106
+      ]
+    }
   ],
-  "thermocouple_pos": [
-    [
-      866,
-      168
-    ],
-    [
-      866,
-      353
-    ],
-    [
-      866,
-      547
-    ],
-    [
-      870,
-      731
-    ],
-    [
-      872,
-      920
-    ],
-    [
-      870,
-      1106
-    ]
+  "regulator": [
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
   ],
-  "interp_method": {
-    "Bilinear": [
-      2,
-      3
-    ]
-  },
+  "interp_method": "Horizontal",
   "filter_method": {
     "Median": 20
   },
@@ -74,13 +87,5 @@
   "solid_thermal_conductivity": 0.19,
   "solid_thermal_diffusivity": 1.091e-7,
   "characteristic_length": 0.015,
-  "air_thermal_conductivity": 0.0276,
-  "regulator": [
-    1.0,
-    1.0,
-    1.0,
-    1.0,
-    1.0,
-    1.0
-  ]
+  "air_thermal_conductivity": 0.0276
 }

@@ -121,7 +121,7 @@ function BasicSettings({ config, setConfig, awsl }) {
   }
 
   function synchronize() {
-    if (frameIndex < 0 || scrollToRow < 0) {
+    if (scrollToRow < 0) {
       awsl("未选中数据行");
       return;
     }
@@ -131,6 +131,18 @@ function BasicSettings({ config, setConfig, awsl }) {
     })
       .then(ok => setConfig(ok))
       .catch(err => awsl(err));
+  }
+
+  function addThermocouple() {
+    if (scrollToColumn < 0) {
+      awsl("未选中数据列");
+      return;
+    }
+    config.thermocouples.push({
+      column_num: scrollToColumn,
+      pos: [config.video_shape[0] / 2, config.video_shape[1] / 2]
+    });
+    setConfig(Object.assign({}, config));
   }
 
   return (
@@ -146,6 +158,7 @@ function BasicSettings({ config, setConfig, awsl }) {
         <GridItem colSpan={8}>
           <Stack spacing="5px">
             <IInput
+              key={config.save_dir}
               leftTag="保存根目录"
               hover="所有结果的保存根目录，该目录下将自动创建config、data和plots子目录分类保存处理结果"
               placeholder="保存所有结果的根目录"
@@ -153,11 +166,13 @@ function BasicSettings({ config, setConfig, awsl }) {
               element={<IIConButton icon={<FaFileImport />} onClick={setSaveDir} />}
             />
             <IInput
+              key={config.video_path}
               leftTag="视频文件路径"
               value={config.video_path}
               element={<IIConButton icon={<FaFileVideo />} onClick={setVideoPath} />}
             />
             <IInput
+              key={config.daq_path}
               leftTag="数采文件路径"
               value={config.daq_path}
               element={<IIConButton icon={<FaFileCsv />} onClick={setDaqPath} />}
@@ -167,6 +182,7 @@ function BasicSettings({ config, setConfig, awsl }) {
         <GridItem colSpan={3}>
           <Stack spacing="5px">
             <IInput
+              key={config.start_frame}
               leftTag="起始帧数"
               value={config.frame_num > 0 ? config.start_frame + 1 : ""}
               mutable
@@ -177,6 +193,7 @@ function BasicSettings({ config, setConfig, awsl }) {
                 / ${config.total_frames}` : ""}
             />
             <IInput
+              key={config.start_row}
               leftTag="起始行数"
               value={config.frame_num > 0 ? config.start_row + 1 : ""}
               onBlur={v => setStartRow(parseInt(v) - 1)}
@@ -187,6 +204,7 @@ function BasicSettings({ config, setConfig, awsl }) {
                 / ${config.total_rows}` : ""}
             />
             <IInput
+              key={config.frame_rate}
               leftTag="帧率"
               value={config.frame_rate > 0 ? config.frame_rate : ""}
               rightTag="Hz"
@@ -194,51 +212,60 @@ function BasicSettings({ config, setConfig, awsl }) {
           </Stack>
         </GridItem>
       </Grid>
-      <Grid
-        templateRows="repeat(13, 1fr)"
-        templateColumns="repeat(12, 1fr)"
-        gap={2}
-        marginX="25px"
-      >
-        <GridItem rowSpan={13}>
-          <VideoCanvas
-            frameIndex={frameIndex}
-            setFrameIndex={setFrameIndex}
-            config={config}
-            setConfig={setConfig}
-            awsl={awsl}
-          />
-        </GridItem>
-        <GridItem rowSpan={1} colSpan={1}>
-          <Box marginTop="5px">
-            <ITag text={`行数：${scrollToRow >= 0 ? scrollToRow + 1 : 0}`} w="100px" />
-          </Box>
-        </GridItem>
-        <GridItem rowSpan={1} colSpan={1}>
-          <Box marginTop="5px">
-            <ITag text={`列数：${scrollToColumn >= 0 ? scrollToColumn + 1 : 0}`} w="100px" />
-          </Box>
-        </GridItem>
-        <GridItem rowSpan={1} colSpan={2}>
-          <IButton
-            text="确认同步"
-            onClick={synchronize}
-            hover="确认视频当前帧数与表格选中行数对应同一时刻"
-            size="sm"
-          />
-        </GridItem>
-        <GridItem rowSpan={1} colSpan={7}></GridItem>
-        <GridItem rowSpan={7} colSpan={11}>
-          <Daq
-            config={config}
-            awsl={awsl}
-            scrollToColumn={scrollToColumn}
-            setScrollToColumn={setScrollToColumn}
-            scrollToRow={scrollToRow}
-            setScrollToRow={setScrollToRow}
-          />
-        </GridItem>
-      </Grid>
+      {config !== "" &&
+        <Grid
+          templateRows="repeat(13, 1fr)"
+          templateColumns="repeat(12, 1fr)"
+          gap={2}
+          marginX="25px"
+        >
+          <GridItem rowSpan={13}>
+            <VideoCanvas
+              key={config.video_path}
+              frameIndex={frameIndex}
+              setFrameIndex={setFrameIndex}
+              config={config}
+              setConfig={setConfig}
+              awsl={awsl}
+            />
+          </GridItem>
+          <GridItem rowSpan={1} colSpan={1}>
+            <Box marginTop="5px">
+              <ITag text={`行数：${scrollToRow >= 0 ? scrollToRow + 1 : "_"}`} w="95px" />
+            </Box>
+          </GridItem>
+          <GridItem rowSpan={1} colSpan={1}>
+            <Box marginTop="5px">
+              <ITag text={`列数：${scrollToColumn >= 0 ? scrollToColumn + 1 : "_"}`} w="95px" />
+            </Box>
+          </GridItem>
+          <GridItem rowSpan={1} colSpan={1}>
+            <IButton
+              text="确认同步"
+              onClick={synchronize}
+              hover="确认视频当前帧数与表格选中行数对应同一时刻"
+              size="sm"
+            />
+          </GridItem>
+          <GridItem rowSpan={1} colSpan={1}>
+            <IButton
+              text="添加热电偶"
+              onClick={addThermocouple}
+              hover="添加表格选中列对应的热电偶，通过右键图像中的热电偶或左下角图标进行删除"
+              size="sm"
+            />
+          </GridItem>
+          <GridItem rowSpan={7} colSpan={11}>
+            <Daq
+              config={config}
+              awsl={awsl}
+              scrollToColumn={scrollToColumn}
+              setScrollToColumn={setScrollToColumn}
+              scrollToRow={scrollToRow}
+              setScrollToRow={setScrollToRow}
+            />
+          </GridItem>
+        </Grid>}
     </Stack >
   )
 }

@@ -7,8 +7,10 @@ use serde::{Deserialize, Serialize};
 
 use packed_simd::f32x8;
 
-use super::{error::TLCResult, TLCConfig, TLCData};
+use super::{error::TLCResult, TLCConfig, TLCData, Thermocouple};
 use crate::awsl;
+
+const SCALING: usize = 5;
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 pub enum FilterMethod {
@@ -84,13 +86,13 @@ impl TLCData {
         }
 
         let TLCConfig {
-            ref temp_column_num,
+            ref thermocouples,
             frame_num,
             start_row,
             ref regulator,
             ..
         } = self.config;
-        let mut t2d = Array2::zeros((temp_column_num.len(), frame_num));
+        let mut t2d = Array2::zeros((thermocouples.len(), frame_num));
 
         for (daq_row, mut t2d_col) in self
             .get_daq()?
@@ -99,8 +101,8 @@ impl TLCData {
             .take(frame_num)
             .zip(t2d.axis_iter_mut(Axis(1)))
         {
-            for (&index, t) in temp_column_num.iter().zip(t2d_col.iter_mut()) {
-                *t = daq_row[index];
+            for (tc, t) in thermocouples.iter().zip(t2d_col.iter_mut()) {
+                *t = daq_row[tc.column_num];
             }
         }
 
@@ -130,7 +132,7 @@ impl TLCData {
             interp_method,
             top_left_pos,
             region_shape,
-            ref thermocouple_pos,
+            ref thermocouples,
             ..
         } = self.config;
         let t2d = self.get_t2d()?;
@@ -138,7 +140,7 @@ impl TLCData {
         let interp = Interp::new(
             t2d,
             interp_method,
-            thermocouple_pos,
+            thermocouples,
             top_left_pos,
             region_shape,
         )?;
@@ -171,7 +173,7 @@ impl Interp {
     fn new(
         t2d: ArrayView2<f32>,
         interp_method: InterpMethod,
-        thermocouple_pos: &[(i32, i32)],
+        thermocouples: &[Thermocouple],
         top_left_pos: (usize, usize),
         region_shape: (usize, usize),
     ) -> TLCResult<Self> {
@@ -180,7 +182,7 @@ impl Interp {
                 t2d,
                 interp_method,
                 region_shape,
-                thermocouple_pos,
+                thermocouples,
                 top_left_pos,
             ),
 
@@ -188,7 +190,7 @@ impl Interp {
                 t2d,
                 interp_method,
                 region_shape,
-                thermocouple_pos,
+                thermocouples,
                 top_left_pos,
             ),
         }
@@ -232,6 +234,15 @@ impl Interp {
                 .to_owned(),
         };
 
+        let arr: Vec<f32> = single_frame
+            .exact_chunks((SCALING, SCALING))
+            .into_iter()
+            .map(|a| a.mean().unwrap())
+            .collect();
+        let mut single_frame = Array2::from_shape_vec((cal_h / SCALING, cal_w / SCALING), arr)
+            .map_err(|err| awsl!(err))?;
+        single_frame.invert_axis(Axis(0));
+
         Ok(single_frame)
     }
 
@@ -239,7 +250,7 @@ impl Interp {
         t2d: ArrayView2<f32>,
         interp_method: InterpMethod,
         region_shape: (usize, usize),
-        tc_pos: &[(i32, i32)],
+        tcs: &[Thermocouple],
         tl_pos: (usize, usize),
     ) -> Option<Interp> {
         let (cal_h, cal_w) = region_shape;
@@ -248,11 +259,11 @@ impl Interp {
         let (interp_len, tc_pos): (_, Vec<_>) = match interp_method {
             InterpMethod::Horizontal | InterpMethod::HorizontalExtra => (
                 cal_w,
-                tc_pos.iter().map(|(_, x)| x - tl_pos.1 as i32).collect(),
+                tcs.iter().map(|tc| tc.pos.1 - tl_pos.1 as i32).collect(),
             ),
             InterpMethod::Vertical | InterpMethod::VerticalExtra => (
                 cal_h,
-                tc_pos.iter().map(|(y, _)| y - tl_pos.0 as i32).collect(),
+                tcs.iter().map(|tc| tc.pos.0 - tl_pos.0 as i32).collect(),
             ),
             _ => unreachable!(),
         };
@@ -307,7 +318,7 @@ impl Interp {
         t2d: ArrayView2<f32>,
         interp_method: InterpMethod,
         region_shape: (usize, usize),
-        tc_pos: &[(i32, i32)],
+        tcs: &[Thermocouple],
         tl_pos: (usize, usize),
     ) -> Option<Interp> {
         let (tc_shape, do_extra) = match interp_method {
@@ -316,16 +327,16 @@ impl Interp {
             _ => unreachable!(),
         };
         let (tc_h, tc_w) = tc_shape;
-        let tc_x: Vec<_> = tc_pos
+        let tc_x: Vec<_> = tcs
             .iter()
             .take(tc_w)
-            .map(|(_, x)| x - tl_pos.1 as i32)
+            .map(|tc| tc.pos.1 - tl_pos.1 as i32)
             .collect();
-        let tc_y: Vec<_> = tc_pos
+        let tc_y: Vec<_> = tcs
             .iter()
             .step_by(tc_w)
             .take(tc_h)
-            .map(|(y, _)| y - tl_pos.0 as i32)
+            .map(|tc| tc.pos.0 - tl_pos.0 as i32)
             .collect();
 
         let (cal_h, cal_w) = region_shape;
@@ -406,11 +417,14 @@ fn interp_bilinear() -> Result<(), Box<dyn std::error::Error>> {
     println!("{:?}", t2d.shape());
     let interp_method = InterpMethod::BilinearExtra((2, 3));
     let region_shape = (14, 14);
-    let tc_pos = &[(10, 10), (10, 15), (10, 20), (20, 10), (20, 15), (20, 20)];
+    let tcs: Vec<Thermocouple> = [(10, 10), (10, 15), (10, 20), (20, 10), (20, 15), (20, 20)]
+        .iter()
+        .map(|&pos| Thermocouple { column_num: 0, pos })
+        .collect();
     let tl_pos = (8, 8);
 
     let interp =
-        Interp::interp_bilinear(t2d.view(), interp_method, region_shape, tc_pos, tl_pos).unwrap();
+        Interp::interp_bilinear(t2d.view(), interp_method, region_shape, &tcs, tl_pos).unwrap();
 
     let res = interp.interp_single_frame(0, region_shape)?;
     println!("{:?}", res);

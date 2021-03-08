@@ -11,6 +11,7 @@
         "fullscreen",
         "gencolumns",
         "genrows",
+        "heatmap",
         "libm",
         "ncols",
         "promisified",

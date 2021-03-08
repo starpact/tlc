@@ -11,7 +11,7 @@ use crate::cal::{error::TLCResult, *};
 macro_rules! register {
     (@$hm:expr, $($f:expr),* $(,)*) => {
         $($hm.insert(
-            $crate::view::handle::snake_to_camel(stringify!($f)),
+            snake_to_camel(stringify!($f)),
             &$f as &(dyn Fn(&mut TLCData, Request) -> TLCResult<String>)
         );)*
     };
@@ -56,11 +56,11 @@ pub fn init(rx: Receiver<(WebviewMut, Request)>) {
             set_interp_method,
             set_iteration_method,
             set_region,
-            set_temp_column_num,
-            set_thermocouple_pos,
+            set_thermocouples,
             get_frame,
             get_daq,
             synchronize,
+            get_interp_single_frame,
         );
 
         let mut tlc_data = TLCData::new().unwrap();
@@ -255,21 +255,10 @@ fn set_region(data: &mut TLCData, req: Request) -> TLCResult<String> {
     Request::format_callback(res, req.callback, req.error)
 }
 
-fn set_temp_column_num(data: &mut TLCData, req: Request) -> TLCResult<String> {
+fn set_thermocouples(data: &mut TLCData, req: Request) -> TLCResult<String> {
     let res = match req.body {
-        Value::UintVec(temp_column_num) => {
-            Ok(data.set_temp_column_num(temp_column_num).get_config())
-        }
-        _ => Err(awsl!(req.body)),
-    };
-
-    Request::format_callback(res, req.callback, req.error)
-}
-
-fn set_thermocouple_pos(data: &mut TLCData, req: Request) -> TLCResult<String> {
-    let res = match req.body {
-        Value::IntPairVec(thermocouple_pos) => {
-            Ok(data.set_thermocouple_pos(thermocouple_pos).get_config())
+        Value::Thermocouples(thermocouples) => {
+            Ok(data.set_thermocouples(thermocouples).get_config())
         }
         _ => Err(awsl!(req.body)),
     };
@@ -303,6 +292,15 @@ fn synchronize(data: &mut TLCData, req: Request) -> TLCResult<String> {
             let (frame_index, row_index) = (arr[0], arr[1]);
             Ok(data.synchronize(frame_index, row_index).get_config())
         }
+        _ => Err(awsl!(req.body)),
+    };
+
+    Request::format_callback(res, req.callback, req.error)
+}
+
+fn get_interp_single_frame(data: &mut TLCData, req: Request) -> TLCResult<String> {
+    let res = match req.body {
+        Value::Uint(frame_index) => data.interp_single_frame(frame_index),
         _ => Err(awsl!(req.body)),
     };
 

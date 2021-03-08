@@ -17,7 +17,7 @@ function IInput({
   mutable,
   placeholder,
   rightTag,
-  element
+  element,
 }) {
   const [innerValue, setInnerValue] = useState(value);
 

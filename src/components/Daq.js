@@ -7,7 +7,6 @@ import { Box, Stack } from "@chakra-ui/react";
 import DaqLine from "./DaqLine";
 
 function Daq({
-  config,
   awsl,
   scrollToColumn,
   setScrollToColumn,
@@ -17,7 +16,6 @@ function Daq({
   const [daq, setDaq] = useState(null);
 
   useEffect(() => {
-    if (config === "") return;
     tauri.promisified({ cmd: "getDaq" })
       .then(ok => setDaq(ok))
       .catch(err => awsl(err));
@@ -72,8 +70,6 @@ function Daq({
           <DaqLine
             daq={daq}
             scrollToColumn={scrollToColumn}
-            setScrollToColumn={setScrollToColumn}
-            scrollToRow={scrollToRow}
             setScrollToRow={setScrollToRow}
           />
         </Stack>

@@ -23,8 +23,16 @@ use crate::awsl;
 /// 默认配置文件路径
 const DEFAULT_CONFIG_PATH: &'static str = "./cache/default_config.json";
 
+#[derive(Debug, Default, Serialize, Deserialize)]
+pub struct Thermocouple {
+    /// 热电偶在数采文件中的列数
+    pub column_num: usize,
+    /// 热电偶的位置
+    pub pos: (i32, i32),
+}
+
 /// 所有配置信息，与case一一对应
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct TLCConfig {
     /// 实验组名称（与视频文件名一致）
     #[serde(default)]
@@ -76,12 +84,11 @@ pub struct TLCConfig {
     /// 计算区域尺寸（高，宽）
     #[serde(default)]
     region_shape: (usize, usize),
-    /// 各热电偶对应的数采文件中的列数
+    /// 各热电偶
+    thermocouples: Vec<Thermocouple>,
+    /// 参考温度调节系数
     #[serde(default)]
-    temp_column_num: Vec<usize>,
-    /// 各热电偶位置
-    #[serde(default)]
-    thermocouple_pos: Vec<(i32, i32)>,
+    regulator: Vec<f32>,
     /// 插值方法
     #[serde(default)]
     interp_method: InterpMethod,
@@ -107,10 +114,6 @@ pub struct TLCConfig {
     /// 空气导热系数
     #[serde(default)]
     air_thermal_conductivity: f32,
-
-    /// 参考温度调节系数
-    #[serde(default)]
-    regulator: Vec<f32>,
 }
 
 /// 配置信息 + 运行时数据
@@ -159,7 +162,7 @@ pub struct TLCData {
 /// 当某项数据所依赖的配置信息发生变化时，清空数据
 macro_rules! delete {
     ($v:ident @ $($member:tt),* $(,)*) => {
-        $($v.$member = None;)*
+        $($v.$member.take();)*
     };
 }
 
@@ -176,7 +179,7 @@ impl TLCData {
             raw_g2d: None,
             filtered_g2d: None,
             peak_frames: None,
-            daq:None,
+            daq: None,
             t2d: None,
             interp: None,
             nu2d: None,
@@ -340,20 +343,13 @@ impl TLCData {
 
     pub fn synchronize(&mut self, frame_index: usize, row_index: usize) -> &mut Self {
         self.config.synchronize(frame_index, row_index);
-        
+
         self
     }
 
-    pub fn set_temp_column_num(&mut self, temp_column_num: Vec<usize>) -> &mut Self {
-        self.config.temp_column_num = temp_column_num;
+    pub fn set_thermocouples(&mut self, thermocouples: Vec<Thermocouple>) -> &mut Self {
+        self.config.set_thermocouples( thermocouples);
         delete!(self @ t2d, interp, nu2d, nu_ave);
-
-        self
-    }
-
-    pub fn set_thermocouple_pos(&mut self, thermocouple_pos: Vec<(i32, i32)>) -> &mut Self {
-        self.config.thermocouple_pos = thermocouple_pos;
-        delete!(self @ interp, nu2d, nu_ave);
 
         self
     }

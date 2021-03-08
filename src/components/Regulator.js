@@ -8,6 +8,7 @@ import {
   Tag,
   Stack,
   HStack,
+  Box,
 } from "@chakra-ui/react";
 import { useState } from "react";
 import IButton from "./Button";
@@ -43,19 +44,20 @@ function Regulator({ regulator, onSubmit }) {
 
   return (
     <HStack>
-      <Center>
-        {!!innerRegulator && innerRegulator.map((v, i) =>
-          <ISlider
-            key={i}
-            value={v}
-            onChange={v => {
-              const arr = innerRegulator.concat();
-              arr[i] = v;
-              setInnerRegulator(arr);
-            }}
-          />
+      {!!innerRegulator &&
+        innerRegulator.map((v, i) =>
+          <Box marginRight="5px">
+            <ISlider
+              key={i}
+              value={v}
+              onChange={v => {
+                const arr = innerRegulator.concat();
+                arr[i] = v;
+                setInnerRegulator(arr);
+              }}
+            />
+          </Box>
         )}
-      </Center>
       <Stack>
         <IButton text="重置" onClick={() => setInnerRegulator(innerRegulator.map(() => 1.0))} />
         <IButton text="提交" onClick={() => onSubmit(innerRegulator)} />
