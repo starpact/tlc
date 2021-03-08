@@ -5,25 +5,11 @@ import "echarts/lib/component/legend";
 import "echarts/lib/component/markPoint";
 import ReactEcharts from "echarts-for-react";
 
-function DaqLine({
-  daq,
-  scrollToColumn,
-  setScrollToRow,
-}) {
+function GreenHistoryLine({ history, pos }) {
   function getOption() {
-    const yData = [];
-    if (scrollToColumn >= 0) {
-      for (let i = scrollToColumn; i < daq.data.length; i += daq.dim[1]) {
-        yData.push(daq.data[i]);
-      }
-    }
-    const xData = yData.map((_, i) => i + 1);
-    const title = scrollToColumn >= 0 ? `第${scrollToColumn + 1}列` : "请选择需要预览的列";
-    const show = scrollToColumn >= 0;
-
     const option = {
       title: {
-        text: title,
+        text: `绿色通道历史(x: ${pos[0]} y: ${pos[1]})`,
         textStyle: {
           color: "#fbf1c7",
         },
@@ -33,29 +19,30 @@ function DaqLine({
         trigger: "axis",
       },
       xAxis: {
-        data: xData,
+        data: history.map((_, i) => i + 1),
       },
       yAxis: {
         type: "value"
       },
-      color: "#d79921",
+      color: "#98971a",
       textStyle: {
         color: "#fbf1c7",
       },
       dataZoom: [{
-        show,
+        show: true,
         type: "slider",
       }],
       grid: {
         show: true,
-        top: 30,
-        left: "5%",
-        right: "5%",
+        top: "15%",
+        left: "4%",
+        right: "0%",
+        bottom: "35%",
       },
       series: [
         {
           type: "line",
-          data: yData,
+          data: history,
         }
       ]
     };
@@ -63,19 +50,14 @@ function DaqLine({
     return option;
   }
 
-  const onEvents = {
-    "click": params => setScrollToRow(params.dataIndex),
-  };
-
   return (
     <div>
       <ReactEcharts
         option={getOption()}
-        onEvents={onEvents}
-        style={{ width: "900px", height: "225px" }}
+        style={{ width: "800px", height: "200px" }}
       />
     </div>
   )
 }
 
-export default DaqLine
+export default GreenHistoryLine

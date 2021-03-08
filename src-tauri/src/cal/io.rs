@@ -221,10 +221,8 @@ impl TLCData {
         if let Ok(tls) = Arc::try_unwrap(tls) {
             tls.into_iter().for_each(|v| drop(v));
         }
-        // 将缓存的视频数据包析构
-        PACKETS.lock().map_err(|err| awsl!(err))?.clear();
-        self.video_ctx.take();
-        self.decoder_tool.take();
+        drop(packets);
+        self.drop_video();
 
         Ok(self)
     }
@@ -233,6 +231,16 @@ impl TLCData {
         self.daq.insert(self.config.read_daq()?);
 
         Ok(self)
+    }
+
+    pub fn drop_video(&mut self) {
+        // 缓存的视频数据包析构
+        if let Ok(mut ps) = PACKETS.lock() {
+            ps.clear();
+        }
+        // 解码相关内存析构
+        self.video_ctx.take();
+        self.decoder_tool.take();
     }
 }
 

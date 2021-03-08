@@ -2,7 +2,8 @@ import {
   Box,
   Grid,
   GridItem,
-  SimpleGrid,
+  HStack,
+  Stack,
 } from "@chakra-ui/react";
 import * as tauri from "tauri/api/tauri";
 
@@ -12,74 +13,91 @@ import Regulator from "../components/Regulator";
 import SelectFilter from "../components/SelectFilter";
 import SelectInterp from "../components/SelectInterp";
 import SelectIteration from "../components/SelectIteration";
-import InterpImg from "../components/InterpImg";
+import InterpImg from "../components/InterpDistribution";
 import { useState, useEffect } from "react";
+import GreenHistoryLine from "../components/GreenHistoryLine";
 
-function SolveSettings({ config, setConfig, awsl }) {
+function SolveSettings({ config, setConfig, setErrMsg }) {
   const [interp, setInterp] = useState(null);
+  const [currentFrame, setCurrentFrame] = useState(parseInt(config.frame_num / 2));
+  const [showRegulator, setShowRegulator] = useState(false);
+  const [pos, setPos] = useState([
+    parseInt(config.region_shape[1] / 2),
+    parseInt(config.region_shape[0] / 2),
+  ]);
+  const [history, setHistory] = useState(null);
 
   useEffect(() => {
     if (config === "") return;
     tauri.promisified({
       cmd: "getInterpSingleFrame",
-      body: { Uint: 800 },
+      body: { Uint: currentFrame - 1 },
     })
       .then(ok => setInterp(ok))
-      .catch(err => awsl(err));
-  }, []);
+      .catch(err => setErrMsg(err));
+  }, [config, currentFrame]);
+
+  useEffect(() => {
+    tauri.promisified({
+      cmd: "getGreenHistory",
+      body: { Uint: pos[1] * config.region_shape[1] + pos[0] },
+    })
+      .then(ok => setHistory(ok))
+      .catch(err => setErrMsg(err));
+  }, [config, pos]);
 
   function setPeakTemp(peakTemp) {
-    if (!peakTemp) return;
+    if (isNaN(peakTemp)) return;
     if (Math.abs(peakTemp - config.peak_temp) < 1e-5) return;
     tauri.promisified({
       cmd: "setPeakTemp",
       body: { Float: peakTemp },
     })
       .then(ok => setConfig(ok))
-      .catch(err => awsl(err));
+      .catch(err => setErrMsg(err));
   }
 
   function setSolidThermalConductivity(solidThermalConductivity) {
-    if (!solidThermalConductivity) return;
+    if (isNaN(solidThermalConductivity)) return;
     if (Math.abs(solidThermalConductivity - config.solid_thermal_conductivity) < 1e-5) return;
     tauri.promisified({
       cmd: "setSolidThermalConductivity",
       body: { Float: solidThermalConductivity },
     })
       .then(ok => setConfig(ok))
-      .catch(err => awsl(err));
+      .catch(err => setErrMsg(err));
   }
 
   function setSolidThermalDiffusivity(solidThermalDiffusivity) {
-    if (!solidThermalDiffusivity) return;
+    if (isNaN(solidThermalDiffusivity)) return;
     tauri.promisified({
       cmd: "setSolidThermalDiffusivity",
       body: { Float: solidThermalDiffusivity },
     })
       .then(ok => setConfig(ok))
-      .catch(err => awsl(err));
+      .catch(err => setErrMsg(err));
   }
 
   function setAirThermalConductivity(airThermalConductivity) {
-    if (!airThermalConductivity) return;
+    if (isNaN(airThermalConductivity)) return;
     if (Math.abs(airThermalConductivity - config.air_thermal_conductivity) < 1e-5) return;
     tauri.promisified({
       cmd: "setAirThermalConductivity",
       body: { Float: airThermalConductivity },
     })
       .then(ok => setConfig(ok))
-      .catch(err => awsl(err));
+      .catch(err => setErrMsg(err));
   }
 
   function setCharacteristicLength(characteristicLength) {
-    if (!characteristicLength) return;
+    if (isNaN(characteristicLength)) return;
     if (Math.abs(characteristicLength - config.characteristic_length) < 1e-5) return;
     tauri.promisified({
       cmd: "setCharacteristicLength",
       body: { Float: characteristicLength },
     })
       .then(ok => setConfig(ok))
-      .catch(err => awsl(err));
+      .catch(err => setErrMsg(err));
   }
 
   function setRegulator(regulator) {
@@ -88,7 +106,7 @@ function SolveSettings({ config, setConfig, awsl }) {
       body: { FloatVec: regulator },
     })
       .then(ok => setConfig(ok))
-      .catch(err => awsl(err));
+      .catch(err => setErrMsg(err));
   }
 
   function setFilterMethod(filterMethod) {
@@ -97,7 +115,7 @@ function SolveSettings({ config, setConfig, awsl }) {
       body: { Filter: filterMethod },
     })
       .then(ok => setConfig(ok))
-      .catch(err => awsl(err));
+      .catch(err => setErrMsg(err));
   }
 
   function setInterpMethod(interpMethod) {
@@ -106,7 +124,7 @@ function SolveSettings({ config, setConfig, awsl }) {
       body: { Interp: interpMethod },
     })
       .then(ok => setConfig(ok))
-      .catch(err => awsl(err));
+      .catch(err => setErrMsg(err));
   }
 
   function setIterationMethod(iterationMethod) {
@@ -115,7 +133,7 @@ function SolveSettings({ config, setConfig, awsl }) {
       body: { Iteration: iterationMethod },
     })
       .then(ok => setConfig(ok))
-      .catch(err => awsl(err))
+      .catch(err => setErrMsg(err))
   }
 
   return (
@@ -175,40 +193,59 @@ function SolveSettings({ config, setConfig, awsl }) {
             rightTag="m"
           />
         </GridItem>
-        <GridItem colSpan={1} rowSpan={4}>
-          <Regulator
-            regulator={config.regulator}
-            onSubmit={setRegulator}
-          />
-        </GridItem>
-        <GridItem colSpan={2} rowSpan={1}>
-          <SelectFilter
-            value={config.filter_method}
-            onSubmit={setFilterMethod}
-            awsl={awsl}
+        <GridItem colSpan={1} rowSpan={1}>
+          <IInput
+            leftTag="当前插值帧数"
+            hover="从同步后的起始帧数开始计数"
+            value={currentFrame}
+            onBlur={v => {
+              if (v === "happiness") {
+                setShowRegulator(true);
+                return;
+              }
+              const vv = parseInt(v);
+              if (isNaN(vv) || vv <= 0 || vv > config.frame_num) {
+                setErrMsg(`不合法的帧数：${v}`);
+                return;
+              }
+              setCurrentFrame(vv);
+            }}
+            mutable
           />
         </GridItem>
         <GridItem colSpan={2} rowSpan={1}>
           {!!config !== "" && <SelectInterp
             value={config.interp_method}
             onSubmit={setInterpMethod}
-            awsl={awsl}
+            setErrMsg={setErrMsg}
           />}
+        </GridItem>
+        <GridItem colSpan={2} rowSpan={1}>
+          <SelectFilter
+            value={config.filter_method}
+            onSubmit={setFilterMethod}
+            setErrMsg={setErrMsg}
+          />
         </GridItem>
         <GridItem colSpan={2} rowSpan={1}>
           <SelectIteration
             value={config.iteration_method}
             onSubmit={setIterationMethod}
-            awsl={awsl}
+            setErrMsg={setErrMsg}
           />
         </GridItem>
-      </Grid>
-      }
-      {!!interp &&
-        <SimpleGrid columns={2}>
-          <InterpImg interp={interp} />
-        </SimpleGrid>
-      }
+        <GridItem rowStart={3} colStart={3} colSpan={1} rowSpan={3}>
+          {showRegulator &&
+            <Regulator
+              regulator={config.regulator}
+              onSubmit={setRegulator}
+            />}
+        </GridItem>
+      </Grid>}
+      <Stack w="820px" marginX="25px">
+        {!!interp && <InterpImg interp={interp} setPos={setPos} />}
+        {!!history && <GreenHistoryLine history={history} pos={pos} />}
+      </Stack>
     </Box>
   )
 }

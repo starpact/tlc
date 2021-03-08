@@ -20,10 +20,11 @@ function App() {
   const [errMsg, setErrMsg] = useState("");
   const [config, setConfig] = useState("");
 
-  function awsl(msg) {
-    if (msg === "") setErrMsg("");
-    else if (errMsg === "") setErrMsg(msg);
-  }
+  useEffect(() => {
+    if (appState > 0) {
+      tauri.promisified({ cmd: "dropVideo" });
+    }
+  }, [appState]);
 
   return (
     <ChakraProvider>
@@ -44,19 +45,18 @@ function App() {
             当前实验组：{config.case_name}
           </Heading>
         </Center>
-        {/* <Stack key={`${JSON.stringify(config)}${errMsg}`}> */}
         <Stack>
           {appState === 0 &&
             <BasicSettings
               config={config}
               setConfig={setConfig}
-              awsl={awsl}
+              setErrMsg={setErrMsg}
             />}
           {appState === 1 &&
             <SolveSettings
               config={config}
               setConfig={setConfig}
-              awsl={awsl}
+              setErrMsg={setErrMsg}
             />}
         </Stack>
       </Box>

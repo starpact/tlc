@@ -7,7 +7,7 @@ import { Box, Stack } from "@chakra-ui/react";
 import DaqLine from "./DaqLine";
 
 function Daq({
-  awsl,
+  setErrMsg,
   scrollToColumn,
   setScrollToColumn,
   scrollToRow,
@@ -18,7 +18,7 @@ function Daq({
   useEffect(() => {
     tauri.promisified({ cmd: "getDaq" })
       .then(ok => setDaq(ok))
-      .catch(err => awsl(err));
+      .catch(err => setErrMsg(err));
   }, []);
 
   function cellRenderer({ columnIndex, key, rowIndex, style }) {

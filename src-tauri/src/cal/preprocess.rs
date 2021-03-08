@@ -43,13 +43,29 @@ impl TLCData {
                         let mut filter = Filter::new(window_size);
                         col.iter_mut().for_each(|g| *g = filter.consume(*g))
                     });
+            }
+            _ => {}
+        }
+        self.filtered_g2d.insert(filtered_g2d);
 
-                self.filtered_g2d.insert(filtered_g2d);
+        Ok(self)
+    }
+
+    pub fn filtering_single_point(&mut self, pos: usize) -> TLCResult<Vec<u8>> {
+        if self.raw_g2d.is_none() {
+            self.read_video()?;
+        }
+        let mut filtered_g = self.get_raw_g2d()?.column(pos).to_vec();
+
+        match self.config.filter_method {
+            FilterMethod::Median(window_size) => {
+                let mut filter = Filter::new(window_size);
+                filtered_g.iter_mut().for_each(|g| *g = filter.consume(*g));
             }
             _ => {}
         }
 
-        Ok(self)
+        Ok(filtered_g)
     }
 
     /// 峰值检测
@@ -117,6 +133,9 @@ impl TLCData {
     pub fn interp_single_frame(&mut self, frame: usize) -> TLCResult<Array2<f32>> {
         if self.interp.is_none() {
             self.interp()?;
+        }
+        if frame > self.config.frame_num {
+            return Err(awsl!("帧数超出范围"));
         }
         self.get_interp()?
             .interp_single_frame(frame, self.config.region_shape)

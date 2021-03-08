@@ -61,6 +61,8 @@ pub fn init(rx: Receiver<(WebviewMut, Request)>) {
             get_daq,
             synchronize,
             get_interp_single_frame,
+            drop_video,
+            get_green_history,
         );
 
         let mut tlc_data = TLCData::new().unwrap();
@@ -301,6 +303,24 @@ fn synchronize(data: &mut TLCData, req: Request) -> TLCResult<String> {
 fn get_interp_single_frame(data: &mut TLCData, req: Request) -> TLCResult<String> {
     let res = match req.body {
         Value::Uint(frame_index) => data.interp_single_frame(frame_index),
+        _ => Err(awsl!(req.body)),
+    };
+
+    Request::format_callback(res, req.callback, req.error)
+}
+
+/// 如果当前Green矩阵已存在，则说明不需要重新解码视频，可以将视频缓存数据包和解码相关内存析构
+fn drop_video(data: &mut TLCData, req: Request) -> TLCResult<String> {
+    if let Ok(_) = data.get_raw_g2d() {
+        data.drop_video();
+    }
+
+    Request::format_callback(TLCResult::Ok(()), req.callback, req.error)
+}
+
+fn get_green_history(data: &mut TLCData, req: Request) -> TLCResult<String> {
+    let res = match req.body {
+        Value::Uint(pos) => data.filtering_single_point(pos),
         _ => Err(awsl!(req.body)),
     };
 

@@ -23,7 +23,7 @@ function ISlider({ value, onChange }) {
         onChange={v => onChange(v / 100)}
         orientation="vertical"
         value={value * 100}
-        h="100px"
+        h="80px"
       >
         <SliderTrack bgColor="#665c54">
           <SliderFilledTrack bgColor="#98971a" />

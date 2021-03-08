@@ -3,6 +3,7 @@
 mod cal {
     use std::time::{Duration, Instant};
 
+    use ndarray::prelude::*;
     use plotters::prelude::*;
 
     use tlc::cal::*;
@@ -85,31 +86,41 @@ mod cal {
     #[test]
     fn test_filtering() -> Res {
         let mut tlc_data = init();
-        let mut raw = Vec::new();
-        let mut filtered = Vec::new();
+        // let mut raw = Vec::new();
+        // let mut filtered = Vec::new();
+        let t0 = Instant::now();
         tlc_data.read_video()?;
+        println!("{:?}", t0.elapsed());
 
         let t0 = Instant::now();
+        // let mut arr = Array2::zeros((766 *356, 1564));
+        // let mut it = arr.iter_mut();
+        // tlc_data.filtering()?;
+        // tlc_data.get_raw_g2d()?.axis_iter(Axis(1)).for_each(|col| {
+        //     col.iter().for_each(|x| {
+        //         *it.next().unwrap() = *x;
+        //     })
+        // });
         tlc_data.filtering()?;
         println!("{:?}", t0.elapsed());
 
-        let g2d = tlc_data.get_raw_g2d()?;
-        let column_num: usize = 180000;
-        for g in g2d.column(column_num) {
-            raw.push(*g as usize);
-        }
+        // let g2d = tlc_data.get_raw_g2d()?;
+        // let column_num: usize = 180000;
+        // for g in g2d.column(column_num) {
+        //     raw.push(*g as usize);
+        // }
 
-        for g in g2d.column(column_num) {
-            filtered.push(*g as usize);
-        }
+        // for g in g2d.column(column_num) {
+        //     filtered.push(*g as usize);
+        // }
 
-        let root = BitMapBackend::new("./cache/1.png", (2400, 800)).into_drawing_area();
-        root.fill(&WHITE)?;
-        let mut chart = ChartBuilder::on(&root).build_cartesian_2d(0..g2d.nrows(), 0usize..50)?;
-        chart.draw_series(LineSeries::new(raw.into_iter().enumerate(), &RED))?;
-        chart.draw_series(LineSeries::new(filtered.into_iter().enumerate(), &BLUE))?;
+        // let root = BitMapBackend::new("./cache/1.png", (2400, 800)).into_drawing_area();
+        // root.fill(&WHITE)?;
+        // let mut chart = ChartBuilder::on(&root).build_cartesian_2d(0..g2d.nrows(), 0usize..50)?;
+        // chart.draw_series(LineSeries::new(raw.into_iter().enumerate(), &RED))?;
+        // chart.draw_series(LineSeries::new(filtered.into_iter().enumerate(), &BLUE))?;
 
-        chart.configure_series_labels().draw()?;
+        // chart.configure_series_labels().draw()?;
 
         Ok(())
     }

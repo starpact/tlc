@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import IButton from "./Button";
 import IInput from "./Input";
 
-function SelectInterp({ value, onSubmit, awsl }) {
+function SelectInterp({ value, onSubmit, setErrMsg }) {
   const [type, setType] = useState(() => {
     if (!!value.Bilinear) return "Bilinear";
     if (!!value.BilinearExtra) return "BilinearExtra";
@@ -43,8 +43,8 @@ function SelectInterp({ value, onSubmit, awsl }) {
               value={shape[0]}
               onBlur={v => {
                 const vv = parseInt(v);
-                if (!vv || vv < 2) {
-                  awsl(`不合法的热电偶行数：${v}`);
+                if (isNaN(vv) || vv < 2) {
+                  setErrMsg(`不合法的热电偶行数：${v}`);
                   return;
                 }
                 setShape([vv, shape[1]]);
@@ -58,8 +58,8 @@ function SelectInterp({ value, onSubmit, awsl }) {
               value={shape[1]}
               onBlur={v => {
                 const vv = parseInt(v);
-                if (!vv || vv < 2) {
-                  awsl(`不合法的热电偶列数：${v}`);
+                if (isNaN(vv) || vv < 2) {
+                  setErrMsg(`不合法的热电偶列数：${v}`);
                   return;
                 }
                 setShape([shape[0], vv]);

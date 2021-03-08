@@ -7,7 +7,7 @@ import ReactEcharts from "echarts-for-react";
 
 const SCALING = 5;
 
-function InterpImg({ interp }) {
+function InterpDistribution({ interp, setPos }) {
   function getOption() {
     const data = [];
     const xData = [];
@@ -29,6 +29,13 @@ function InterpImg({ interp }) {
     }
 
     const option = {
+      title: {
+        text: "参考温度插值",
+        textStyle: {
+          color: "#fbf1c7",
+        },
+        x: "center"
+      },
       tooltip: {
         trigger: "item",
         formatter: function (p) {
@@ -39,7 +46,10 @@ function InterpImg({ interp }) {
         },
       },
       grid: {
-        left: 120
+        top: "20%",
+        left: "13%",
+        right: "0%",
+        bottom: "2%",
       },
       xAxis: {
         type: 'category',
@@ -56,7 +66,7 @@ function InterpImg({ interp }) {
         },
         type: "continuous",
         precision: 2,
-        top: "center",
+        top: "bottom",
         align: "right",
         min: minT,
         max: maxT,
@@ -75,21 +85,29 @@ function InterpImg({ interp }) {
         type: 'heatmap',
         data: data,
         progressive: 600,
-        animation: false
+        animation: false,
       }]
     };
 
     return option;
   }
 
+  const onEvents = {
+    "click": params => {
+      const [x, y] = params.data
+      setPos([x * SCALING, (interp.dim[0] - y - 1) * SCALING]);
+    },
+  };
+
   return (
     <div>
       <ReactEcharts
         option={getOption()}
-      // style={{ width: "900px", height: "225px" }}
+        onEvents={onEvents}
+        style={{ width: "800px", height: "270px" }}
       />
     </div>
   )
 }
 
-export default InterpImg
+export default InterpDistribution

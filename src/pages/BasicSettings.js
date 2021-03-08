@@ -16,12 +16,12 @@ import VideoCanvas from "../components/VideoCanvas";
 import Daq from "../components/Daq";
 import ITag from "../components/Tag";
 
-function BasicSettings({ config, setConfig, awsl }) {
+function BasicSettings({ config, setConfig, setErrMsg }) {
   const [frameIndex, setFrameIndex] = useState(0);
   const [scrollToColumn, setScrollToColumn] = useState(-1);
   const [scrollToRow, setScrollToRow] = useState(-1);
 
-  useEffect(() => { if (config === "") loadDefaultConfig() }, []);
+  useEffect(() => { if (config === "") loadDefaultConfig(); }, []);
 
   function loadConfig() {
     dialog.open({ filter: "json" }).then(path => {
@@ -30,23 +30,23 @@ function BasicSettings({ config, setConfig, awsl }) {
         body: { String: path },
       })
         .then(ok => setConfig(ok))
-        .catch(err => awsl(err));
+        .catch(err => setErrMsg(err));
     });
   }
 
   function loadDefaultConfig() {
     tauri.promisified({ cmd: "loadDefaultConfig" })
       .then(ok => setConfig(ok))
-      .catch(err => awsl(err));
+      .catch(err => setErrMsg(err));
   }
 
   function saveConfig() {
     if (config.save_dir === "") {
-      awsl("请先确定保存根目录");
+      setErrMsg("请先确定保存根目录");
       return;
     }
     tauri.promisified({ cmd: "saveConfig" })
-      .catch(err => awsl(err));
+      .catch(err => setErrMsg(err));
   }
 
   function setSaveDir() {
@@ -56,7 +56,7 @@ function BasicSettings({ config, setConfig, awsl }) {
         body: { String: save_dir },
       })
         .then(ok => setConfig(ok))
-        .catch(err => awsl(err));
+        .catch(err => setErrMsg(err));
     });
   }
 
@@ -71,8 +71,8 @@ function BasicSettings({ config, setConfig, awsl }) {
           cmd: "setVideoPath",
           body: { String: video_path },
         })
-          .then(ok => { awsl(""); setConfig(ok); })
-          .catch(err => awsl(err));
+          .then(ok => setConfig(ok))
+          .catch(err => setErrMsg(err));
       });
   }
 
@@ -87,15 +87,18 @@ function BasicSettings({ config, setConfig, awsl }) {
           cmd: "setDaqPath",
           body: { String: daq_path },
         })
-          .then(ok => { awsl(""); setConfig(ok); })
-          .catch(err => awsl(err));
+          .then(ok => {
+            setConfig(ok);
+            setErrMsg("");
+          })
+          .catch(err => setErrMsg(err));
       });
   }
 
   function setStartFrame(start_frame) {
     if (start_frame === config.start_frame) return;
     if (start_frame < 0) {
-      awsl("帧数须为正值");
+      setErrMsg("帧数须为正值");
       return;
     }
     tauri.promisified({
@@ -103,13 +106,13 @@ function BasicSettings({ config, setConfig, awsl }) {
       body: { Uint: start_frame },
     })
       .then(ok => setConfig(ok))
-      .catch(err => awsl(err));
+      .catch(err => setErrMsg(err));
   }
 
   function setStartRow(start_row) {
     if (start_row === config.start_row) return;
     if (start_row < 0) {
-      awsl("行数须为正值");
+      setErrMsg("行数须为正值");
       return;
     }
     tauri.promisified({
@@ -117,12 +120,12 @@ function BasicSettings({ config, setConfig, awsl }) {
       body: { Uint: start_row },
     })
       .then(ok => setConfig(ok))
-      .catch(err => awsl(err));
+      .catch(err => setErrMsg(err));
   }
 
   function synchronize() {
     if (scrollToRow < 0) {
-      awsl("未选中数据行");
+      setErrMsg("未选中数据行");
       return;
     }
     tauri.promisified({
@@ -130,12 +133,12 @@ function BasicSettings({ config, setConfig, awsl }) {
       body: { UintVec: [frameIndex, scrollToRow] },
     })
       .then(ok => setConfig(ok))
-      .catch(err => awsl(err));
+      .catch(err => setErrMsg(err));
   }
 
   function addThermocouple() {
     if (scrollToColumn < 0) {
-      awsl("未选中数据列");
+      setErrMsg("未选中数据列");
       return;
     }
     config.thermocouples.push({
@@ -226,7 +229,7 @@ function BasicSettings({ config, setConfig, awsl }) {
               setFrameIndex={setFrameIndex}
               config={config}
               setConfig={setConfig}
-              awsl={awsl}
+              setErrMsg={setErrMsg}
             />
           </GridItem>
           <GridItem rowSpan={1} colSpan={1}>
@@ -251,14 +254,17 @@ function BasicSettings({ config, setConfig, awsl }) {
             <IButton
               text="添加热电偶"
               onClick={addThermocouple}
-              hover="添加表格选中列对应的热电偶，通过右键图像中的热电偶或左下角图标进行删除"
+              hover="添加表格选中列对应的热电偶，热电偶会刷新在图像的中心位置，
+                     通过右键图像中的热电偶或左下角图标进行删除"
               size="sm"
             />
           </GridItem>
           <GridItem rowSpan={7} colSpan={11}>
             <Daq
+              // 这里希望视频路径设置好后自动check一下daq的路径
+              key={config.daq_path + config.video_path}
               config={config}
-              awsl={awsl}
+              setErrMsg={setErrMsg}
               scrollToColumn={scrollToColumn}
               setScrollToColumn={setScrollToColumn}
               scrollToRow={scrollToRow}

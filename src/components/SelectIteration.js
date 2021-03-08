@@ -3,7 +3,7 @@ import { useState } from "react";
 import IButton from "./Button";
 import IInput from "./Input";
 
-function SelectIteration({ value, onSubmit, awsl }) {
+function SelectIteration({ value, onSubmit, setErrMsg }) {
   const [type, setType] = useState(Object.keys(value)[0]);
   const [h0, setH0] = useState(Object.values(Object.values(value)[0])[0]);
   const [maxIterNum, setMaxIterNum] = useState(Object.values(Object.values(value)[0])[1]);
@@ -29,8 +29,8 @@ function SelectIteration({ value, onSubmit, awsl }) {
           value={!!h0 && h0.toFixed(1)}
           onBlur={v => {
             const vv = parseFloat(v);
-            if (!vv) {
-              awsl(`不合法的迭代初值：${v}`);
+            if (isNaN(vv)) {
+              setErrMsg(`不合法的迭代初值：${v}`);
               return;
             }
             setH0(vv);
@@ -45,8 +45,8 @@ function SelectIteration({ value, onSubmit, awsl }) {
           value={maxIterNum}
           onBlur={v => {
             const vv = parseInt(v);
-            if (!vv || vv <= 0) {
-              awsl(`不合法的最大迭代步数：${v}`);
+            if (isNaN(vv) || vv <= 0) {
+              setErrMsg(`不合法的最大迭代步数：${v}`);
               return;
             }
             setMaxIterNum(vv);
