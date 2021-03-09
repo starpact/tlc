@@ -8,7 +8,7 @@ use std::sync::mpsc;
 use tlc::view::{handle::init, request::Request};
 
 fn main() {
-    let (tx, rx) = mpsc::sync_channel(2);
+    let (tx, rx) = mpsc::sync_channel(3);
     init(rx);
 
     tauri::AppBuilder::new()

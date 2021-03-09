@@ -115,4 +115,5 @@ mod cal {
         chart.configure_series_labels().draw()?;
 
         Ok(())
-    }}
+    }
+}

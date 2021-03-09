@@ -278,9 +278,11 @@ impl TLCData {
         top_left_pos: (usize, usize),
         region_shape: (usize, usize),
     ) -> &mut Self {
-        self.config.top_left_pos = top_left_pos;
-        self.config.region_shape = region_shape;
-        delete!(self @ raw_g2d, filtered_g2d, peak_frames, interp, nu2d, nu_ave);
+        if top_left_pos != self.config.top_left_pos || region_shape != self.config.region_shape {
+            self.config.top_left_pos = top_left_pos;
+            self.config.region_shape = region_shape;
+            delete!(self @ raw_g2d, filtered_g2d, peak_frames, interp, nu2d, nu_ave);
+        }
 
         self
     }
@@ -348,7 +350,7 @@ impl TLCData {
     }
 
     pub fn set_thermocouples(&mut self, thermocouples: Vec<Thermocouple>) -> &mut Self {
-        self.config.set_thermocouples( thermocouples);
+        self.config.set_thermocouples(thermocouples);
         delete!(self @ t2d, interp, nu2d, nu_ave);
 
         self
