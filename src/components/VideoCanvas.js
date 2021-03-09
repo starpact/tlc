@@ -46,7 +46,6 @@ const from = pos => pos / 2;
 const into = pos => pos * 2;
 
 function VideoCanvas({
-  canvasKey,
   frameIndex,
   setFrameIndex,
   config,
@@ -380,8 +379,11 @@ function VideoCanvas({
           max={config.total_frames - 1}
           onChange={v => {
             const vv = parseInt(v);
-            setFrameIndex(vv);
             getFrame(vv);
+          }}
+          onChangeEnd={v => {
+            const vv = parseInt(v);
+            setFrameIndex(vv);
           }}
         >
           <SliderTrack bgColor="#665c54">
@@ -402,7 +404,7 @@ function VideoCanvas({
         <Box w="7px"></Box>
         {showPos && <IButton text="提交" onClick={onSubmit} size="sm" />}
         <Box w="7px"></Box>
-        {showPos && tcs && tcs.current.map(({ id, tag, x, y }) =>
+        {showPos && tcs.current && tcs.current.map(({ id, tag, x, y }) =>
           <Popover>
             <PopoverTrigger>
               <Box>
