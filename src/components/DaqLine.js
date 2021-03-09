@@ -1,16 +1,16 @@
-import "echarts/lib/chart/line";
-import "echarts/lib/component/tooltip";
-import "echarts/lib/component/title";
-import "echarts/lib/component/legend";
-import "echarts/lib/component/markPoint";
-import ReactEcharts from "echarts-for-react";
+import * as echarts from 'echarts';
+import { useEffect, useRef } from "react";
 
 function DaqLine({
   daq,
   scrollToColumn,
   setScrollToRow,
 }) {
-  function getOption() {
+  const myCharts = useRef(null);
+
+  useEffect(() => {
+    if (!myCharts.current) myCharts.current = echarts.init(document.getElementById("daqLine"));
+
     const yData = [];
     if (scrollToColumn >= 0) {
       for (let i = scrollToColumn; i < daq.data.length; i += daq.dim[1]) {
@@ -18,12 +18,9 @@ function DaqLine({
       }
     }
     const xData = yData.map((_, i) => i + 1);
-    const title = scrollToColumn >= 0 ? `第${scrollToColumn + 1}列` : "请选择需要预览的列";
-    const show = scrollToColumn >= 0;
-
     const option = {
       title: {
-        text: title,
+        text: scrollToColumn >= 0 ? `第${scrollToColumn + 1}列` : "请选择需要预览的列",
         textStyle: {
           color: "#fbf1c7",
         },
@@ -43,7 +40,7 @@ function DaqLine({
         color: "#fbf1c7",
       },
       dataZoom: [{
-        show,
+        show: scrollToColumn >= 0,
         type: "slider",
       }],
       grid: {
@@ -60,22 +57,18 @@ function DaqLine({
       ]
     };
 
-    return option;
-  }
-
-  const onEvents = {
-    "click": params => setScrollToRow(params.dataIndex),
-  };
+    myCharts.current.setOption(option);
+    myCharts.current.on("click", params => setScrollToRow(params.dataIndex));
+  }, [scrollToColumn]);
 
   return (
-    <div>
-      <ReactEcharts
-        option={getOption()}
-        onEvents={onEvents}
-        style={{ width: "900px", height: "225px" }}
-      />
+    <div
+      id="daqLine"
+      style={{ width: "900px", height: "225px" }}
+    >
     </div>
   )
 }
+
 
 export default DaqLine

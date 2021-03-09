@@ -68,7 +68,7 @@ function SelectInterp({ value, onSubmit, setErrMsg }) {
             />
           </Box>
         </HStack>}
-      <IButton text="提交" onClick={() => {
+      <IButton text="插值" onClick={() => {
         let interpMethod = {};
         interpMethod[type] = (type === "Bilinear" || type === "BilinearExtra") ? shape : null;
         onSubmit(interpMethod);

@@ -11,7 +11,7 @@ function SelectIteration({ value, onSubmit, setErrMsg }) {
   return (
     <HStack>
       <Select
-        w="200px"
+        w="130px"
         value={type}
         bg="#689d6a"
         color="#32302f"
@@ -54,7 +54,7 @@ function SelectIteration({ value, onSubmit, setErrMsg }) {
           mutable
         />
       </Box>
-      <IButton text="提交" onClick={() => {
+      <IButton text="求解" onClick={() => {
         if (type === "NewtonTangent") onSubmit({ NewtonTangent: { h0, max_iter_num: maxIterNum } })
         else onSubmit({ NewtonDown: { h0, max_iter_num: maxIterNum } })
       }} />

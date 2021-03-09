@@ -1,13 +1,12 @@
-import "echarts/lib/chart/line";
-import "echarts/lib/component/tooltip";
-import "echarts/lib/component/title";
-import "echarts/lib/component/legend";
-import "echarts/lib/component/markPoint";
-import ReactEcharts from "echarts-for-react";
+import * as echarts from "echarts";
+import { useEffect, useRef } from "react";
 
 function GreenHistoryLine({ history, pos }) {
-  function getOption() {
-    const option = {
+  const myCharts = useRef(null);
+
+  useEffect(() => {
+    if (!myCharts.current) myCharts.current = echarts.init(document.getElementById("history"));
+    myCharts.current.setOption({
       title: {
         text: `绿色通道历史(x: ${pos[0]} y: ${pos[1]})`,
         textStyle: {
@@ -35,8 +34,8 @@ function GreenHistoryLine({ history, pos }) {
       grid: {
         show: true,
         top: "15%",
-        left: "4%",
-        right: "0%",
+        left: "13%",
+        right: "2%",
         bottom: "35%",
       },
       series: [
@@ -45,17 +44,14 @@ function GreenHistoryLine({ history, pos }) {
           data: history,
         }
       ]
-    };
-
-    return option;
-  }
+    });
+  }, [history]);
 
   return (
-    <div>
-      <ReactEcharts
-        option={getOption()}
-        style={{ width: "800px", height: "200px" }}
-      />
+    <div
+      id="history"
+      style={{ width: "800px", height: "200px" }}
+    >
     </div>
   )
 }

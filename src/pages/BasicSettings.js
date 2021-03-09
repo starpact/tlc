@@ -225,7 +225,6 @@ function BasicSettings({ config, setConfig, setErrMsg }) {
           <GridItem rowSpan={13}>
             <VideoCanvas
               key={config.video_path}
-              frameIndex={frameIndex}
               setFrameIndex={setFrameIndex}
               config={config}
               setConfig={setConfig}

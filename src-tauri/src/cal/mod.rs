@@ -27,7 +27,7 @@ const DEFAULT_CONFIG_PATH: &'static str = "./cache/default_config.json";
 pub struct Thermocouple {
     /// 热电偶在数采文件中的列数
     pub column_num: usize,
-    /// 热电偶的位置
+    /// 热电偶的位置(y, x)
     pub pos: (i32, i32),
 }
 
@@ -259,18 +259,36 @@ impl TLCData {
         self
     }
 
-    pub fn set_interp_method(&mut self, interp_method: InterpMethod) -> &mut Self {
+    pub fn set_interp_method(&mut self, interp_method: InterpMethod) -> TLCResult<&mut Self> {
+        use InterpMethod::*;
+        let tcs = &mut self.config.thermocouples;
+        match interp_method {
+            Horizontal | HorizontalExtra => tcs.sort_unstable_by_key(|tc| tc.pos.1),
+            Vertical | VerticalExtra => tcs.sort_unstable_by_key(|tc| tc.pos.0),
+            Bilinear((h, w)) | BilinearExtra((h, w)) => {
+                if h * w != tcs.len() {
+                    return Err(awsl!(HandleError,format!("热电偶行数({})列数({})之积不等于热电偶数量", h, w)));
+                }
+                // 先按y排序
+                tcs.sort_unstable_by_key(|tc| tc.pos.0);
+                // 行内按x排序
+                for i in (0..).step_by(w).take(h) {
+                    &mut tcs[i..i + w].sort_unstable_by_key(|tc| tc.pos.1);
+                }
+            }
+        }
+        println!("{:?}", tcs);
         self.config.interp_method = interp_method;
         delete!(self @ interp, nu2d, nu_ave);
 
-        self
+        Ok(self)
     }
 
-    pub fn set_iteration_method(&mut self, iteration_method: IterationMethod) -> &mut Self {
+    pub fn set_iteration_method(&mut self, iteration_method: IterationMethod) -> TLCResult<&mut Self> {
         self.config.iteration_method = iteration_method;
-        delete!(self @ nu2d, nu_ave);
+        self.solve()?;
 
-        self
+        Ok(self)
     }
 
     pub fn set_region(

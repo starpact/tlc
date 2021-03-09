@@ -228,7 +228,9 @@ fn set_filter_method(data: &mut TLCData, req: Request) -> TLCResult<String> {
 
 fn set_interp_method(data: &mut TLCData, req: Request) -> TLCResult<String> {
     let res = match req.body {
-        Value::Interp(interp_method) => Ok(data.set_interp_method(interp_method).get_config()),
+        Value::Interp(interp_method) => data
+            .set_interp_method(interp_method)
+            .map(|data| data.get_config()),
         _ => Err(awsl!(req.body)),
     };
 
@@ -236,14 +238,19 @@ fn set_interp_method(data: &mut TLCData, req: Request) -> TLCResult<String> {
 }
 
 fn set_iteration_method(data: &mut TLCData, req: Request) -> TLCResult<String> {
-    let res = match req.body {
-        Value::Iteration(iteration_method) => {
-            Ok(data.set_iteration_method(iteration_method).get_config())
+    fn f(data: &mut TLCData, body: Value) -> TLCResult<(ArrayView2<f32>, f32)> {
+        match body {
+            Value::Iteration(iteration_method) => {
+                data.set_iteration_method(iteration_method)?;
+                let nu2d = data.get_nu2d()?;
+                let nu_ave = data.get_nu_ave()?;
+                Ok((nu2d, nu_ave))
+            }
+            _ => Err(awsl!(body)),
         }
-        _ => Err(awsl!(req.body)),
-    };
+    }
 
-    Request::format_callback(res, req.callback, req.error)
+    Request::format_callback(f(data, req.body), req.callback, req.error)
 }
 
 fn set_region(data: &mut TLCData, req: Request) -> TLCResult<String> {

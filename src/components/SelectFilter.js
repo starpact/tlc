@@ -17,7 +17,7 @@ function SelectFilter({ value, onSubmit, setErrMsg }) {
   return (
     <HStack>
       <Select
-        w="110px"
+        w="95px"
         value={!!innerValue.Median ? "Median" : !!innerValue.Wavelet ? "Wavelet" : innerValue}
         bg="#689d6a"
         color="#32302f"
@@ -64,7 +64,11 @@ function SelectFilter({ value, onSubmit, setErrMsg }) {
           />
         </Box>
       }
-      <IButton text="提交" onClick={() => onSubmit(innerValue)} />
+      <IButton
+        text="滤波"
+        hover="由于对全部数据点滤波耗时较长，此处仅对当前数据点进行滤波，完整滤波在求解时进行"
+        onClick={() => onSubmit(innerValue)}
+      />
     </HStack>
   )
 }

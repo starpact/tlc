@@ -1,36 +1,33 @@
 import * as echarts from "echarts";
 import { useEffect, useRef } from "react";
 
-const SCALING = 5;
+const SCALING = 1;
 
-function InterpDistribution({ interp, setPos }) {
+function Nu2dDistribution({ result }) {
   const myCharts = useRef(null);
 
   useEffect(() => {
-    if (!myCharts.current) myCharts.current = echarts.init(document.getElementById("interp"));
+    if (!myCharts.current) myCharts.current = echarts.init(document.getElementById("nu2d"));
 
+    const [nu2d, nuAve] = result;
     const data = [];
     const xData = [];
     const yData = [];
-    let [minT, maxT] = [interp.data[0], interp.data[0]];
-    for (let i = 0; i < interp.dim[0]; i++) {
-      for (let j = 0; j < interp.dim[1]; j++) {
-        const t = interp.data[i * interp.dim[1] + j];
-        minT = Math.min(t, minT);
-        maxT = Math.max(t, maxT);
-        data.push([j, i, t]);
+    for (let i = 0; i < nu2d.dim[0]; i++) {
+      for (let j = 0; j < nu2d.dim[1]; j++) {
+        data.push([j, i, nu2d.data[i * nu2d.dim[1] + j]]);
       }
     }
-    for (let i = interp.dim[0] - 1; i >= 0; i--) {
+    for (let i = nu2d.dim[0] - 1; i >= 0; i--) {
       yData.push(i * SCALING);
     }
-    for (let j = 0; j < interp.dim[1]; j++) {
+    for (let j = 0; j < nu2d.dim[1]; j++) {
       xData.push(j * SCALING);
     }
 
     myCharts.current.setOption({
       title: {
-        text: "参考温度插值",
+        text: "努塞尔数分布",
         textStyle: {
           color: "#fbf1c7",
         },
@@ -39,7 +36,7 @@ function InterpDistribution({ interp, setPos }) {
       tooltip: {
         trigger: "item",
         formatter: function (p) {
-          return "参考温度: " + p.data[2].toFixed(2);
+          return "Nu: " + p.data[2].toFixed(2);
         },
         axisPointer: {
           type: "cross"
@@ -68,8 +65,8 @@ function InterpDistribution({ interp, setPos }) {
         precision: 2,
         top: "bottom",
         align: "right",
-        min: minT,
-        max: maxT,
+        min: nuAve * 0.6,
+        max: nuAve * 2,
         calculable: true,
         realtime: false,
         inRange: {
@@ -81,27 +78,22 @@ function InterpDistribution({ interp, setPos }) {
         }
       },
       series: [{
-        name: '参考温度',
+        name: '努塞尔数',
         type: 'heatmap',
         data: data,
         progressive: 800,
         animation: false,
       }]
     });
-
-    myCharts.current.on("click", params => {
-      const [x, y] = params.data;
-      setPos([x * SCALING, (interp.dim[0] - y - 1) * SCALING]);
-    });
-  }, [interp]);
+  }, [result]);
 
   return (
     <div
-      id="interp"
-      style={{ width: "800px", height: "270px" }}
+      id="nu2d"
+      style={{ width: "800px", height: "400px" }}
     >
     </div>
   )
 }
 
-export default InterpDistribution
+export default Nu2dDistribution

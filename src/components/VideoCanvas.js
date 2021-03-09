@@ -40,13 +40,12 @@ const ZOOM = {
 const RADIUS = 10;
 
 // 区域选框触发缩放操作的宽度
-const D = 10;
+const D = 20;
 
 const from = pos => pos / 2;
 const into = pos => pos * 2;
 
 function VideoCanvas({
-  frameIndex,
   setFrameIndex,
   config,
   setConfig,
@@ -54,6 +53,7 @@ function VideoCanvas({
 }) {
   const [frame, setFrame] = useState("");
   const [showPos, setShowPos] = useState(false);
+  const [innerFrameIndex, setInnerFrameIndex] = useState(0);
   const canvas = useRef(null);
   const region = useRef(null); // 区域选框
   const tcs = useRef(null); // 各热电偶
@@ -96,27 +96,25 @@ function VideoCanvas({
       .catch(err => setErrMsg(err));
   }
 
-  function onSubmit() {
+  async function onSubmit() {
     const { x, y, w, h } = region.current;
-    tauri.promisified({
-      cmd: "setRegion",
-      body: { UintVec: [into(y), into(x), into(h), into(w)] },
-    })
-      .catch(err => { setErrMsg(err); return; });
-
-    tauri.promisified({
-      cmd: "setThermocouples",
-      body: {
-        Thermocouples: tcs.current.map(({ tag, x, y }) => {
-          return {
-            column_num: tag - 1,
-            pos: [into(y), into(x)]
-          };
-        })
-      }
-    })
-      .then(ok => setConfig(ok))
-      .catch(err => setErrMsg(err));
+    try {
+      await tauri.promisified({
+        cmd: "setRegion",
+        body: { UintVec: [into(y), into(x), into(h), into(w)] },
+      });
+      const ok = await tauri.promisified({
+        cmd: "setThermocouples",
+        body: {
+          Thermocouples: tcs.current.map(({ tag, x, y }) => {
+            return { column_num: tag - 1, pos: [into(y), into(x)] };
+          })
+        }
+      });
+      setConfig(ok);
+    } catch (err) {
+      setErrMsg(err);
+    }
   }
 
   function deleteThermocouple(targetId) {
@@ -343,19 +341,11 @@ function VideoCanvas({
     zoom.current = null;
   }
 
-  // 鼠标移出canvas时更新config数据
-  // 保证在拖动时不会触发重新渲染的前提下，其他组件能拿到ref里的最新数据
+  // 鼠标移出canvas时提交更新config数据
+  // 在拖动时不会触发重新渲染的前提下，保证其他组件能拿到ref里的最新数据
+  // 防止因为忘记提交而造成前后端数据不一致
   function handleMouseOut() {
-    const { x, y, w, h } = region.current;
-    config.top_left_pos = [into(y), into(x)];
-    config.region_shape = [into(h), into(w)];
-    config.thermocouples = tcs.current.map(({ tag, x, y }) => {
-      return {
-        column_num: tag - 1,
-        pos: [into(y), into(x)]
-      };
-    })
-    setConfig(Object.assign({}, config));
+    onSubmit();
   }
 
   return (
@@ -371,7 +361,7 @@ function VideoCanvas({
       >
       </canvas>
       <HStack>
-        <ITag text={frameIndex + 1} w="60px" />
+        <ITag text={innerFrameIndex + 1} w="60px" />
         <Box w={3} />
         <Slider
           defaultValue={0}
@@ -380,6 +370,7 @@ function VideoCanvas({
           onChange={v => {
             const vv = parseInt(v);
             getFrame(vv);
+            setInnerFrameIndex(vv);
           }}
           onChangeEnd={v => {
             const vv = parseInt(v);
@@ -402,7 +393,6 @@ function VideoCanvas({
           显示计算区域和热电偶
         </Checkbox>
         <Box w="7px"></Box>
-        {showPos && <IButton text="提交" onClick={onSubmit} size="sm" />}
         <Box w="7px"></Box>
         {showPos && tcs.current && tcs.current.map(({ id, tag, x, y }) =>
           <Popover>
