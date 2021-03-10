@@ -7,7 +7,6 @@
     "@emotion/react": "^11.0.0",
     "@emotion/styled": "^11.0.0",
     "echarts": "^5.0.2",
-    "echarts-for-react": "^3.0.1",
     "framer-motion": ">=3.0.0",
     "react": "^17.0.1",
     "react-dom": "^17.0.1",

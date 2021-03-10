@@ -1,5 +1,6 @@
 import {
   Box,
+  Center,
   Grid,
   GridItem,
   HStack,
@@ -28,6 +29,9 @@ function SolveSettings({ config, setConfig, setErrMsg }) {
     parseInt(config.region_shape[0] / 2),
   ]);
   const [history, setHistory] = useState(null);
+  let [H, W] = config.region_shape;
+  H = 670 * H / W;
+  W = 670;
 
   // 先主动触发后端对热电偶的排序
   useEffect(() => setInterpMethod(config.interp_method), []);
@@ -161,11 +165,11 @@ function SolveSettings({ config, setConfig, setErrMsg }) {
       {config !== "" &&
         <Grid
           templateRows="repeat(5, 1fr)"
-          templateColumns="repeat(3, 1fr)"
+          templateColumns="repeat(9, 1fr)"
           gap={2}
           marginX="25px"
         >
-          <GridItem colSpan={1}>
+          <GridItem colSpan={3}>
             <IInput
               leftTag="峰值温度"
               value={!!config.peak_temp ? config.peak_temp.toPrecision(4) : ""}
@@ -174,37 +178,7 @@ function SolveSettings({ config, setConfig, setErrMsg }) {
               rightTag="°C"
             />
           </GridItem>
-          <GridItem colSpan={1}>
-            <IInput
-              leftTag="固体导热系数"
-              value={!!config.solid_thermal_conductivity
-                ? config.solid_thermal_conductivity.toPrecision(3) : ""}
-              onBlur={v => setSolidThermalConductivity(parseFloat(v))}
-              mutable
-              rightTag="W/(m·K)"
-            />
-          </GridItem>
-          <GridItem colSpan={1}>
-            <IInput
-              leftTag="固体热扩散系数"
-              value={!!config.solid_thermal_diffusivity
-                ? config.solid_thermal_diffusivity.toPrecision(4) : ""}
-              rightTag="m2/s"
-              onBlur={v => setSolidThermalDiffusivity(parseFloat(v))}
-              mutable
-            />
-          </GridItem>
-          <GridItem colSpan={1} rowSpan={1}>
-            <IInput
-              leftTag="气体导热系数"
-              value={!!config.air_thermal_conductivity
-                ? config.air_thermal_conductivity.toPrecision(3) : ""}
-              onBlur={v => setAirThermalConductivity(parseFloat(v))}
-              mutable
-              rightTag="W/(m·K)"
-            />
-          </GridItem>
-          <GridItem colSpan={1} rowSpan={1}>
+          <GridItem colSpan={3} rowSpan={1}>
             <IInput
               leftTag="特征长度"
               value={!!config.characteristic_length
@@ -214,7 +188,7 @@ function SolveSettings({ config, setConfig, setErrMsg }) {
               rightTag="m"
             />
           </GridItem>
-          <GridItem colSpan={1} rowSpan={1}>
+          <GridItem colSpan={3} rowSpan={1}>
             <IInput
               leftTag="当前插值帧数"
               hover="从同步后的起始帧数开始计数"
@@ -232,9 +206,40 @@ function SolveSettings({ config, setConfig, setErrMsg }) {
                 setCurrentFrame(vv);
               }}
               mutable
+              rightTag={`(1, ${config.frame_num})`}
             />
           </GridItem>
-          <GridItem colSpan={2} rowSpan={1}>
+          <GridItem colSpan={3}>
+            <IInput
+              leftTag="固体导热系数"
+              value={!!config.solid_thermal_conductivity
+                ? config.solid_thermal_conductivity.toPrecision(3) : ""}
+              onBlur={v => setSolidThermalConductivity(parseFloat(v))}
+              mutable
+              rightTag="W/(m·K)"
+            />
+          </GridItem>
+          <GridItem colSpan={3}>
+            <IInput
+              leftTag="固体热扩散系数"
+              value={!!config.solid_thermal_diffusivity
+                ? config.solid_thermal_diffusivity.toPrecision(4) : ""}
+              rightTag="m2/s"
+              onBlur={v => setSolidThermalDiffusivity(parseFloat(v))}
+              mutable
+            />
+          </GridItem>
+          <GridItem colSpan={3} rowSpan={1}>
+            <IInput
+              leftTag="气体导热系数"
+              value={!!config.air_thermal_conductivity
+                ? config.air_thermal_conductivity.toPrecision(3) : ""}
+              onBlur={v => setAirThermalConductivity(parseFloat(v))}
+              mutable
+              rightTag="W/(m·K)"
+            />
+          </GridItem>
+          <GridItem colSpan={4} rowSpan={1}>
             {!!config !== "" &&
               <SelectInterp
                 value={config.interp_method}
@@ -242,34 +247,59 @@ function SolveSettings({ config, setConfig, setErrMsg }) {
                 setErrMsg={setErrMsg}
               />}
           </GridItem>
-          <GridItem colSpan={2} rowSpan={1}>
+          <GridItem colSpan={4} rowSpan={1}>
             <SelectFilter
               value={config.filter_method}
               onSubmit={setFilterMethod}
               setErrMsg={setErrMsg}
             />
           </GridItem>
-          <GridItem colSpan={2} rowSpan={1}>
+          <GridItem colSpan={4} rowSpan={1}>
             <SelectIteration
               value={config.iteration_method}
               onSubmit={setIterationMethod}
               setErrMsg={setErrMsg}
             />
           </GridItem>
-          <GridItem rowStart={3} colStart={3} colSpan={1} rowSpan={3}>
-            {showRegulator &&
+          <GridItem rowStart={3} colStart={5} colSpan={5} rowSpan={3}>
+            {showRegulator ?
               <Regulator
                 regulator={config.regulator}
                 onSubmit={setRegulator}
+              />
+              :
+              !!history &&
+              <GreenHistoryLine
+                history={history}
+                pos={pos}
               />}
           </GridItem>
         </Grid>}
       <HStack>
-        <Stack w="820px" marginX="25px">
-          {!!interp && <InterpDistribution interp={interp} setPos={setPos} />}
-          {!!history && <GreenHistoryLine history={history} pos={pos} />}
+        {!!interp &&
+          <InterpDistribution
+            interp={interp}
+            setPos={setPos}
+            w={W}
+            h={H}
+          />}
+        <Box w="40px" />
+        <Stack spacing={0}>
+          <Center
+            color="#fbf1c7"
+            fontSize="lg"
+            fontWeight="bold"
+            h={50}
+          >
+            努塞尔数分布
+          </Center>
+          {!!interp &&
+            <NuDistribution
+              result={result}
+              w={W}
+              h={H}
+            />}
         </Stack>
-        {!!result && <NuDistribution result={result} />}
       </HStack>
     </Box>
   )

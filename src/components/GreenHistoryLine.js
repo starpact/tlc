@@ -12,7 +12,7 @@ function GreenHistoryLine({ history, pos }) {
         textStyle: {
           color: "#fbf1c7",
         },
-        x: "center"
+        x: "center",
       },
       tooltip: {
         trigger: "axis",
@@ -28,15 +28,16 @@ function GreenHistoryLine({ history, pos }) {
         color: "#fbf1c7",
       },
       dataZoom: [{
+        yAxisIndex: [0],
         show: true,
         type: "slider",
       }],
       grid: {
         show: true,
-        top: "15%",
-        left: "13%",
-        right: "2%",
-        bottom: "35%",
+        top: "19%",
+        left: "12.7%",
+        right: "5%",
+        bottom: "5%",
       },
       series: [
         {
@@ -50,7 +51,7 @@ function GreenHistoryLine({ history, pos }) {
   return (
     <div
       id="history"
-      style={{ width: "800px", height: "200px" }}
+      style={{ width: "812px", height: "160px" }}
     >
     </div>
   )

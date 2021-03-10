@@ -1,12 +1,10 @@
-use std::io::BufReader;
+use std::cell::Ref;
+use std::fs::{create_dir_all, File};
+use std::io::{BufReader, Read};
 use std::lazy::SyncLazy;
 use std::ops::{Deref, DerefMut};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
-use std::{
-    cell::Ref,
-    fs::{create_dir_all, File},
-};
 use std::{cell::RefCell, io::BufWriter};
 
 use ndarray::parallel::prelude::*;
@@ -25,7 +23,7 @@ use calamine::{open_workbook, Reader, Xlsx};
 
 use csv::{ReaderBuilder, StringRecord, WriterBuilder};
 
-use super::{error::TLCResult, DEFAULT_CONFIG_PATH};
+use super::{error::TLCResult, postprocess, DEFAULT_CONFIG_PATH};
 use super::{TLCConfig, TLCData, Thermocouple};
 use crate::awsl;
 
@@ -241,6 +239,25 @@ impl TLCData {
         // 解码相关内存析构
         self.video_ctx.take();
         self.decoder_tool.take();
+    }
+
+    pub fn get_nu_img(&mut self, range: Option<(f32, f32)>) -> TLCResult<String> {
+        let (vmin, vmax) = match range {
+            Some(range) => range,
+            None => {
+                let nu_nan_mean = self.get_nu_ave()?;
+                (nu_nan_mean * 0.6, nu_nan_mean * 2.)
+            }
+        };
+        postprocess::plot_area(&self.config.plots_path, self.get_nu2d()?, vmin, vmax)?;
+        let mut buf = Vec::new();
+        File::open(&self.config.plots_path)
+            .map_err(|err| awsl!(err))?
+            .read_to_end(&mut buf)
+            .map_err(|err| awsl!(err))?;
+        let base64_string = base64::encode(&buf);
+
+        Ok(base64_string)
     }
 }
 

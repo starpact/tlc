@@ -238,13 +238,12 @@ fn set_interp_method(data: &mut TLCData, req: Request) -> TLCResult<String> {
 }
 
 fn set_iteration_method(data: &mut TLCData, req: Request) -> TLCResult<String> {
-    fn f(data: &mut TLCData, body: Value) -> TLCResult<(ArrayView2<f32>, f32)> {
+    fn f(data: &mut TLCData, body: Value) -> TLCResult<String> {
         match body {
             Value::Iteration(iteration_method) => {
-                data.set_iteration_method(iteration_method)?;
-                let nu2d = data.get_nu2d()?;
-                let nu_ave = data.get_nu_ave()?;
-                Ok((nu2d, nu_ave))
+                data.set_iteration_method(iteration_method)?.solve()?;
+                let nu2d_string = data.get_nu_img(None)?;
+                Ok(nu2d_string)
             }
             _ => Err(awsl!(body)),
         }

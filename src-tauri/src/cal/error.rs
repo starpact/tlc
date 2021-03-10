@@ -53,15 +53,12 @@ macro_rules! awsl {
     () => {
         $crate::cal::error::TLCError::UnKnown("bakana!".to_owned())
     };
-
     ($context:expr) => {
         $crate::cal::error::TLCError::UnKnown(format!("可能原因：{:?}", $context))
     };
-
     ($member:tt, $context:expr $(,)*) => {
         $crate::cal::error::TLCError::$member(format!("{:?}", $context))
     };
-
     ($member:tt, $raw_err:expr, $context:expr $(,)*) => {
         $crate::cal::error::TLCError::$member {
             raw_err: format!("{:?}", $raw_err),

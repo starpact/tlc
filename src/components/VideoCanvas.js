@@ -19,7 +19,6 @@ import {
   Text,
 } from "@chakra-ui/react";
 import * as tauri from "tauri/api/tauri";
-import IButton from "./Button";
 import ITag from "./Tag";
 import IPopover from "./Popover";
 

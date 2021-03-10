@@ -286,7 +286,6 @@ impl TLCData {
 
     pub fn set_iteration_method(&mut self, iteration_method: IterationMethod) -> TLCResult<&mut Self> {
         self.config.iteration_method = iteration_method;
-        self.solve()?;
 
         Ok(self)
     }
@@ -388,31 +387,5 @@ impl TLCData {
         io::save_data(self.get_nu2d()?, &self.config.data_path)?;
 
         Ok(self)
-    }
-
-    pub fn plot_nu(&mut self, range: Option<(f32, f32)>) -> TLCResult<&mut Self> {
-        if self.nu2d.is_none() {
-            self.solve()?;
-        }
-
-        let nu_nan_mean = self.get_nu_ave()?;
-        let (vmin, vmax) = range.unwrap_or((nu_nan_mean * 0.6, nu_nan_mean * 2.));
-        postprocess::plot_area(self.get_nu2d()?, vmin, vmax, &self.config.plots_path)?;
-
-        Ok(self)
-    }
-
-    pub fn plot_temps_single_frame(
-        &mut self,
-        frame_index: usize,
-        range: Option<(f32, f32)>,
-    ) -> TLCResult<()> {
-        let path = format!("./cache/{}_{}.png", self.config.case_name, frame_index + 1);
-        let temps_single_frame = self.interp_single_frame(frame_index)?;
-        let mean = postprocess::cal_average(temps_single_frame.view());
-        let (vmin, vmax) = range.unwrap_or((mean * 0.5, mean * 1.2));
-        postprocess::plot_area(temps_single_frame.view(), vmin, vmax, path)?;
-
-        Ok(())
     }
 }

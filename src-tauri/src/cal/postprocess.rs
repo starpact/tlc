@@ -8,7 +8,7 @@ use super::colormap::JET;
 use super::error::TLCResult;
 use crate::awsl;
 
-pub fn cal_average<D: Dimension>(data: ArrayView<f32, D>) -> f32 {
+pub fn cal_nan_mean<D: Dimension>(data: ArrayView<f32, D>) -> f32 {
     let (sum, cnt) = data.iter().fold((0., 0), |(s, cnt), &x| {
         if x.is_nan() {
             (s, cnt)
@@ -22,38 +22,32 @@ pub fn cal_average<D: Dimension>(data: ArrayView<f32, D>) -> f32 {
 }
 
 pub fn plot_area<P: AsRef<Path>>(
+    plot_path: P,
     area: ArrayView2<f32>,
     vmin: f32,
     vmax: f32,
-    plot_path: P,
 ) -> TLCResult<()> {
-    let (height, width) = area.dim();
-    let root = BitMapBackend::new(&plot_path, (width as u32, height as u32)).into_drawing_area();
-    root.fill(&WHITE).map_err(|err| awsl!(PlotError, err))?;
-    let mut chart = ChartBuilder::on(&root)
-        .build_cartesian_2d(0..width, 0..height)
-        .map_err(|err| awsl!(PlotError, err))?;
-    chart
-        .configure_mesh()
-        .disable_x_mesh()
-        .disable_y_mesh()
-        .draw()
+    let (h, w) = area.dim();
+    let root = BitMapBackend::new(&plot_path, (w as u32, h as u32)).into_drawing_area();
+    let chart = ChartBuilder::on(&root)
+        .build_cartesian_2d(0..w, 0..h)
         .map_err(|err| awsl!(PlotError, err))?;
     let pix_plotter = chart.plotting_area();
 
     let delta = vmax - vmin;
 
     let mut it = area.iter();
-    for y in (0..height).rev() {
-        for x in 0..width {
+    for y in 0..h {
+        for x in 0..w {
             if let Some(nu) = it.next() {
                 if nu.is_nan() {
                     continue;
                 }
                 let color_index = ((nu.max(vmin).min(vmax) - vmin) / delta * 255.) as usize;
-                let rgb: Vec<_> = JET[color_index].iter().map(|c| (c * 255.) as u8).collect();
+                let mut rgb = JET[color_index];
+                rgb.iter_mut().for_each(|c| *c = *c * 255.);
                 pix_plotter
-                    .draw_pixel((x, y), &RGBColor(rgb[0], rgb[1], rgb[2]))
+                    .draw_pixel((x, y), &RGBColor(rgb[0] as u8, rgb[1] as u8, rgb[2] as u8))
                     .map_err(|err| awsl!(PlotError, err))?;
             }
         }

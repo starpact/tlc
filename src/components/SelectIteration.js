@@ -23,9 +23,9 @@ function SelectIteration({ value, onSubmit, setErrMsg }) {
         <option value="NewtonTangent">牛顿切线</option>
         <option value="NewtonDown">牛顿下山</option>
       </Select>
-      <Box w="350px" marginRight="9px">
+      <Box w="330px" marginRight="9px">
         <IInput
-          leftTag="对流换热系数初值"
+          leftTag="迭代初值"
           value={!!h0 && h0.toFixed(1)}
           onBlur={v => {
             const vv = parseFloat(v);
@@ -39,7 +39,7 @@ function SelectIteration({ value, onSubmit, setErrMsg }) {
           rightTag="W/(m2·K)"
         />
       </Box>
-      <Box w="200px" marginRight="9px">
+      <Box w="230px" marginRight="9px">
         <IInput
           leftTag="最大迭代步数"
           value={maxIterNum}

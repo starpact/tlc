@@ -3,7 +3,7 @@ import { useEffect, useRef } from "react";
 
 const SCALING = 5;
 
-function InterpDistribution({ interp, setPos }) {
+function InterpDistribution({ interp, setPos, w, h }) {
   const myCharts = useRef(null);
 
   useEffect(() => {
@@ -46,10 +46,10 @@ function InterpDistribution({ interp, setPos }) {
         },
       },
       grid: {
-        top: "20%",
-        left: "13%",
-        right: "2%",
-        bottom: "2%",
+        top: 50,
+        left: 110,
+        right: 0,
+        bottom: 0,
       },
       xAxis: {
         type: 'category',
@@ -98,7 +98,7 @@ function InterpDistribution({ interp, setPos }) {
   return (
     <div
       id="interp"
-      style={{ width: "800px", height: "270px" }}
+      style={{ width: w + 110, height: h + 50 }}
     >
     </div>
   )

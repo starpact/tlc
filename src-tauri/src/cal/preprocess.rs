@@ -185,6 +185,8 @@ impl Default for InterpMethod {
     }
 }
 
+use InterpMethod::*;
+
 #[derive(Debug)]
 pub struct Interp(Array2<f32>);
 
@@ -197,7 +199,7 @@ impl Interp {
         region_shape: (usize, usize),
     ) -> TLCResult<Self> {
         match interp_method {
-            InterpMethod::Bilinear(_) | InterpMethod::BilinearExtra(_) => Self::interp_bilinear(
+            Bilinear(_) | BilinearExtra(_) => Self::interp_bilinear(
                 t2d,
                 interp_method,
                 region_shape,
@@ -276,11 +278,11 @@ impl Interp {
         let frame_num = t2d.ncols();
 
         let (interp_len, tc_pos): (_, Vec<_>) = match interp_method {
-            InterpMethod::Horizontal | InterpMethod::HorizontalExtra => (
+            Horizontal | HorizontalExtra => (
                 cal_w,
                 tcs.iter().map(|tc| tc.pos.1 - tl_pos.1 as i32).collect(),
             ),
-            InterpMethod::Vertical | InterpMethod::VerticalExtra => (
+            Vertical | VerticalExtra => (
                 cal_h,
                 tcs.iter().map(|tc| tc.pos.0 - tl_pos.0 as i32).collect(),
             ),
@@ -288,7 +290,7 @@ impl Interp {
         };
 
         let do_extra = match interp_method {
-            InterpMethod::HorizontalExtra | InterpMethod::VerticalExtra => true,
+            HorizontalExtra | VerticalExtra => true,
             _ => false,
         };
 
@@ -341,8 +343,8 @@ impl Interp {
         tl_pos: (usize, usize),
     ) -> Option<Interp> {
         let (tc_shape, do_extra) = match interp_method {
-            InterpMethod::Bilinear(tc_shape) => (tc_shape, false),
-            InterpMethod::BilinearExtra(tc_shape) => (tc_shape, true),
+            Bilinear(tc_shape) => (tc_shape, false),
+            BilinearExtra(tc_shape) => (tc_shape, true),
             _ => unreachable!(),
         };
         let (tc_h, tc_w) = tc_shape;
@@ -434,7 +436,7 @@ impl Interp {
 fn interp_bilinear() -> Result<(), Box<dyn std::error::Error>> {
     let t2d = array![[1.], [2.], [3.], [4.], [5.], [6.]];
     println!("{:?}", t2d.shape());
-    let interp_method = InterpMethod::BilinearExtra((2, 3));
+    let interp_method = BilinearExtra((2, 3));
     let region_shape = (14, 14);
     let tcs: Vec<Thermocouple> = [(10, 10), (10, 15), (10, 20), (20, 10), (20, 15), (20, 20)]
         .iter()

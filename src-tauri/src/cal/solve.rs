@@ -240,10 +240,11 @@ impl TLCData {
             })
             .ok_or(awsl!())?;
 
-        let nu2d = Array1::from(nus)
+        let mut nu2d = Array1::from(nus)
             .into_shape(region_shape)
             .map_err(|err| awsl!(err))?;
-        self.nu_ave.insert(postprocess::cal_average(nu2d.view()));
+        nu2d.invert_axis(Axis(0));
+        self.nu_ave.insert(postprocess::cal_nan_mean(nu2d.view()));
         self.nu2d.insert(nu2d);
 
         Ok(self)
