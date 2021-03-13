@@ -1,4 +1,4 @@
-import { Box, HStack, Select, Stack } from "@chakra-ui/react";
+import { Box, HStack, Select } from "@chakra-ui/react";
 import { useState } from "react";
 import IButton from "./Button";
 import IInput from "./Input";
@@ -11,7 +11,7 @@ function SelectIteration({ value, onSubmit, setErrMsg }) {
   return (
     <HStack>
       <Select
-        w="130px"
+        w="150px"
         value={type}
         bg="#689d6a"
         color="#32302f"
@@ -23,7 +23,7 @@ function SelectIteration({ value, onSubmit, setErrMsg }) {
         <option value="NewtonTangent">牛顿切线</option>
         <option value="NewtonDown">牛顿下山</option>
       </Select>
-      <Box w="330px" marginRight="9px">
+      <Box w="340px" marginRight="9px">
         <IInput
           leftTag="迭代初值"
           value={!!h0 && h0.toFixed(1)}

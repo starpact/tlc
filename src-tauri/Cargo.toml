@@ -26,6 +26,7 @@ thiserror = "1.0"
 tauri = { version = "0.11", features = [ "all-api" ] }
 base64 = "0.13.0"
 image = "0.23.10"
+dwt = "0.5.2"
 
 [target."cfg(windows)".build-dependencies]
 winres = "0.1"

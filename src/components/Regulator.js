@@ -4,7 +4,6 @@ import {
   SliderThumb,
   SliderFilledTrack,
   Text,
-  Center,
   Tag,
   Stack,
   HStack,

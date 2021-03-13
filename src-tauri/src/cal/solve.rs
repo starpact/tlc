@@ -24,7 +24,7 @@ const DEFAULT_MAX_ITER_NUM: usize = 10;
 const FIRST_FEW_TO_CAL_T0: usize = 4;
 
 /// 迭代方法（初值，最大迭代步数）
-#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum IterationMethod {
     NewtonTangent { h0: f32, max_iter_num: usize },
     NewtonDown { h0: f32, max_iter_num: usize },
@@ -155,11 +155,11 @@ fn newton_down(h0: f32, max_iter_num: usize) -> impl Fn(PointData) -> f32 {
             let mut lambda = 1.;
             loop {
                 let next_h = h - lambda * f / df;
+                if (next_h - h).abs() < 1e-3 {
+                    return next_h;
+                }
                 let (next_f, next_df) = point_data.thermal_equation(next_h);
                 if next_f.abs() < f.abs() {
-                    if (next_h - h).abs() < 1e-3 {
-                        return next_h;
-                    }
                     h = next_h;
                     f = next_f;
                     df = next_df;
@@ -170,7 +170,7 @@ fn newton_down(h0: f32, max_iter_num: usize) -> impl Fn(PointData) -> f32 {
                     return NAN;
                 }
             }
-            if h > 10000. {
+            if h.abs() > 10000. {
                 return NAN;
             }
         }
@@ -181,6 +181,13 @@ fn newton_down(h0: f32, max_iter_num: usize) -> impl Fn(PointData) -> f32 {
 
 impl TLCData {
     pub fn solve(&mut self) -> TLCResult<&mut Self> {
+        if self.peak_frames.is_none() {
+            self.detect_peak()?;
+        }
+        if self.interp.is_none() {
+            self.interp()?;
+        }
+
         use IterationMethod::*;
         match self.config.iteration_method {
             NewtonTangent { h0, max_iter_num } => self.solve_core(newton_tangent(h0, max_iter_num)),
@@ -192,12 +199,6 @@ impl TLCData {
     where
         F: Fn(PointData) -> f32 + Send + Sync,
     {
-        if self.peak_frames.is_none() {
-            self.detect_peak()?;
-        }
-        if self.interp.is_none() {
-            self.interp()?;
-        }
         let peak_frames = self.get_peak_frames()?;
         let interp = self.get_interp()?;
 
@@ -244,7 +245,8 @@ impl TLCData {
             .into_shape(region_shape)
             .map_err(|err| awsl!(err))?;
         nu2d.invert_axis(Axis(0));
-        self.nu_ave.insert(postprocess::cal_nan_mean(nu2d.view()));
+        self.nu_nan_mean
+            .insert(postprocess::cal_nan_mean(nu2d.view()));
         self.nu2d.insert(nu2d);
 
         Ok(self)

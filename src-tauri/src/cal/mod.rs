@@ -85,6 +85,7 @@ pub struct TLCConfig {
     #[serde(default)]
     region_shape: (usize, usize),
     /// 各热电偶
+    #[serde(default)]
     thermocouples: Vec<Thermocouple>,
     /// 参考温度调节系数
     #[serde(default)]
@@ -156,7 +157,7 @@ pub struct TLCData {
     /// 努塞尔数二维矩阵
     nu2d: Option<Array2<f32>>,
     /// 努赛尔数平均值
-    nu_ave: Option<f32>,
+    nu_nan_mean: Option<f32>,
 }
 
 /// 当某项数据所依赖的配置信息发生变化时，清空数据
@@ -183,7 +184,7 @@ impl TLCData {
             t2d: None,
             interp: None,
             nu2d: None,
-            nu_ave: None,
+            nu_nan_mean: None,
         })
     }
 
@@ -227,8 +228,8 @@ impl TLCData {
         self.nu2d.as_ref().map(|v| v.view()).ok_or(awsl!())
     }
 
-    pub fn get_nu_ave(&self) -> TLCResult<f32> {
-        self.nu_ave.ok_or(awsl!())
+    pub fn get_nu_nan_mean(&self) -> TLCResult<f32> {
+        self.nu_nan_mean.ok_or(awsl!())
     }
 
     pub fn set_save_dir(&mut self, save_dir: String) -> TLCResult<&mut Self> {
@@ -240,21 +241,21 @@ impl TLCData {
     pub fn set_video_path(&mut self, video_path: String) -> TLCResult<&mut Self> {
         self.config.set_video_path(video_path)?;
         delete!(self @ video_ctx, decoder_tool, raw_g2d, filtered_g2d, 
-            peak_frames, t2d, interp, nu2d, nu_ave);
+            peak_frames, t2d, interp, nu2d, nu_nan_mean);
 
         Ok(self)
     }
 
     pub fn set_daq_path(&mut self, daq_path: String) -> TLCResult<&mut Self> {
         self.config.set_daq_path(daq_path)?;
-        delete!(self @ raw_g2d, filtered_g2d, peak_frames, daq, t2d, interp, nu2d, nu_ave);
+        delete!(self @ raw_g2d, filtered_g2d, peak_frames, daq, t2d, interp, nu2d, nu_nan_mean);
 
         Ok(self)
     }
 
     pub fn set_filter_method(&mut self, filter_method: FilterMethod) -> &mut Self {
         self.config.filter_method = filter_method;
-        delete!(self @ filtered_g2d, peak_frames, nu2d, nu_ave);
+        delete!(self @ filtered_g2d, peak_frames, nu2d, nu_nan_mean);
 
         self
     }
@@ -277,17 +278,17 @@ impl TLCData {
                 }
             }
         }
-        println!("{:?}", tcs);
         self.config.interp_method = interp_method;
-        delete!(self @ interp, nu2d, nu_ave);
+        delete!(self @ interp, nu2d, nu_nan_mean);
 
         Ok(self)
     }
 
-    pub fn set_iteration_method(&mut self, iteration_method: IterationMethod) -> TLCResult<&mut Self> {
+    pub fn set_iteration_method(&mut self, iteration_method: IterationMethod) -> &mut Self {
         self.config.iteration_method = iteration_method;
+        delete!(self @ nu2d, nu_nan_mean);
 
-        Ok(self)
+        self
     }
 
     pub fn set_region(
@@ -298,7 +299,7 @@ impl TLCData {
         if top_left_pos != self.config.top_left_pos || region_shape != self.config.region_shape {
             self.config.top_left_pos = top_left_pos;
             self.config.region_shape = region_shape;
-            delete!(self @ raw_g2d, filtered_g2d, peak_frames, interp, nu2d, nu_ave);
+            delete!(self @ raw_g2d, filtered_g2d, peak_frames, interp, nu2d, nu_nan_mean);
         }
 
         self
@@ -306,56 +307,56 @@ impl TLCData {
 
     pub fn set_regulator(&mut self, regulator: Vec<f32>) -> &mut Self {
         self.config.regulator = regulator;
-        delete!(self @ t2d, interp, nu2d, nu_ave);
+        delete!(self @ t2d, interp, nu2d, nu_nan_mean);
 
         self
     }
 
     pub fn set_peak_temp(&mut self, peak_temp: f32) -> &mut Self {
         self.config.peak_temp = peak_temp;
-        delete!(self @ nu2d, nu_ave);
+        delete!(self @ nu2d, nu_nan_mean);
 
         self
     }
 
     pub fn set_solid_thermal_conductivity(&mut self, solid_thermal_conductivity: f32) -> &mut Self {
         self.config.solid_thermal_conductivity = solid_thermal_conductivity;
-        delete!(self @ nu2d, nu_ave);
+        delete!(self @ nu2d, nu_nan_mean);
 
         self
     }
 
     pub fn set_solid_thermal_diffusivity(&mut self, solid_thermal_diffusivity: f32) -> &mut Self {
         self.config.solid_thermal_diffusivity = solid_thermal_diffusivity;
-        delete!(self @ nu2d, nu_ave);
+        delete!(self @ nu2d, nu_nan_mean);
 
         self
     }
 
     pub fn set_air_thermal_conductivity(&mut self, air_thermal_conductivity: f32) -> &mut Self {
         self.config.air_thermal_conductivity = air_thermal_conductivity;
-        delete!(self @ nu2d, nu_ave);
+        delete!(self @ nu2d, nu_nan_mean);
 
         self
     }
 
     pub fn set_characteristic_length(&mut self, characteristic_length: f32) -> &mut Self {
         self.config.characteristic_length = characteristic_length;
-        delete!(self @ nu2d, nu_ave);
+        delete!(self @ nu2d, nu_nan_mean);
 
         self
     }
 
     pub fn set_start_frame(&mut self, start_frame: usize) -> TLCResult<&mut Self> {
         self.config.set_start_frame(start_frame)?;
-        delete!(self @ raw_g2d, filtered_g2d, peak_frames, t2d, interp, nu2d, nu_ave);
+        delete!(self @ raw_g2d, filtered_g2d, peak_frames, t2d, interp, nu2d, nu_nan_mean);
 
         Ok(self)
     }
 
     pub fn set_start_row(&mut self, start_row: usize) -> TLCResult<&mut Self> {
         self.config.set_start_row(start_row)?;
-        delete!(self @ raw_g2d, filtered_g2d, peak_frames, t2d, interp, nu2d, nu_ave);
+        delete!(self @ raw_g2d, filtered_g2d, peak_frames, t2d, interp, nu2d, nu_nan_mean);
 
         Ok(self)
     }
@@ -368,7 +369,7 @@ impl TLCData {
 
     pub fn set_thermocouples(&mut self, thermocouples: Vec<Thermocouple>) -> &mut Self {
         self.config.set_thermocouples(thermocouples);
-        delete!(self @ t2d, interp, nu2d, nu_ave);
+        delete!(self @ t2d, interp, nu2d, nu_nan_mean);
 
         self
     }

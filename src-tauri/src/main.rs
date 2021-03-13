@@ -13,8 +13,8 @@ fn main() {
 
     tauri::AppBuilder::new()
         .invoke_handler(move |webview, arg| {
-            let req: Request = serde_json::from_str(arg).unwrap();
-            println!("{}: {:?}", req.cmd, req.body);
+            let req: Request = serde_json::from_str(arg).map_err(|err| err.to_string())?;
+            println!("{} {:?}", req.cmd, req.body);
             let _ = tx.try_send((webview.as_mut(), req));
 
             Ok(())

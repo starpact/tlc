@@ -60,11 +60,11 @@ function VideoCanvas({
   const dragTarget = useRef(null); // 可能是区域选框或某一个热电偶
   const startX = useRef(null);
   const startY = useRef(null);
-  const W = from(!!config && config.video_shape[1]);
-  const H = from(!!config && config.video_shape[0]);
+  const W = from(config.video_shape[1] > 0 ? config.video_shape[1] : 1280);
+  const H = from(config.video_shape[0] > 0 ? config.video_shape[0] : 1024);
 
   useEffect(() => {
-    setTimeout(() => getFrame(0), 200);
+    setTimeout(() => getFrame(0), 500);
   }, []);
 
   useEffect(() => {
@@ -95,7 +95,7 @@ function VideoCanvas({
       .catch(err => setErrMsg(err));
   }
 
-  async function onSubmit() {
+  async function submit() {
     const { x, y, w, h } = region.current;
     try {
       await tauri.promisified({
@@ -156,7 +156,7 @@ function VideoCanvas({
     }
 
     const img = new Image();
-    img.src = `data: image/jpeg;base64,${frame}`;
+    img.src = `data:image/jpeg;base64,${frame}`;
     img.onload = () => {
       ctx.drawImage(img, 0, 0, W, H);
 
@@ -340,11 +340,12 @@ function VideoCanvas({
     zoom.current = null;
   }
 
+  // 暂定
   // 鼠标移出canvas时提交更新config数据
   // 在拖动时不会触发重新渲染的前提下，保证其他组件能拿到ref里的最新数据
   // 防止因为忘记提交而造成前后端数据不一致
   function handleMouseOut() {
-    onSubmit();
+    submit();
   }
 
   return (

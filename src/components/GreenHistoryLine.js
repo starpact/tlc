@@ -16,6 +16,7 @@ function GreenHistoryLine({ history, pos }) {
       },
       tooltip: {
         trigger: "axis",
+        backgroundColor: "#fbf1c7",
       },
       xAxis: {
         data: history.map((_, i) => i + 1),
@@ -34,10 +35,10 @@ function GreenHistoryLine({ history, pos }) {
       }],
       grid: {
         show: true,
-        top: "19%",
+        top: "21%",
         left: "12.7%",
         right: "5%",
-        bottom: "5%",
+        bottom: "15%",
       },
       series: [
         {
@@ -51,7 +52,7 @@ function GreenHistoryLine({ history, pos }) {
   return (
     <div
       id="history"
-      style={{ width: "812px", height: "160px" }}
+      style={{ width: "812px", height: "130px" }}
     >
     </div>
   )

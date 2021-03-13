@@ -35,7 +35,7 @@ version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f0e60b75072ecd4168020818c0107f2857bb6c4e64252d8d3983f6263b40a5c3"
 dependencies = [
- "num-traits",
+ "num-traits 0.2.14",
 ]
 
 [[package]]
@@ -268,7 +268,7 @@ checksum = "670ad68c9088c2a963aaa298cb369688cf3f9465ce5e2d4ca10e6e0098a1ce73"
 dependencies = [
  "libc",
  "num-integer",
- "num-traits",
+ "num-traits 0.2.14",
  "time",
  "winapi",
 ]
@@ -579,6 +579,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "dwt"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "537fc1f78e72b8d14a7fd0d918996a3a33220149b89ef88864256af2f5b25c3f"
+dependencies = [
+ "num-traits 0.1.43",
+]
+
+[[package]]
 name = "either"
 version = "1.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -866,7 +875,7 @@ dependencies = [
  "jpeg-decoder",
  "num-iter",
  "num-rational 0.2.4",
- "num-traits",
+ "num-traits 0.2.14",
  "png 0.15.3",
 ]
 
@@ -883,7 +892,7 @@ dependencies = [
  "jpeg-decoder",
  "num-iter",
  "num-rational 0.3.2",
- "num-traits",
+ "num-traits 0.2.14",
  "png 0.16.7",
  "scoped_threadpool",
  "tiff",
@@ -1103,7 +1112,7 @@ dependencies = [
  "matrixmultiply",
  "num-complex",
  "num-integer",
- "num-traits",
+ "num-traits 0.2.14",
  "rawpointer",
  "rayon",
  "serde",
@@ -1154,7 +1163,7 @@ version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "747d632c0c558b87dbabbe6a82f3b4ae03720d0646ac5b7b4dae89394be5f2c5"
 dependencies = [
- "num-traits",
+ "num-traits 0.2.14",
 ]
 
 [[package]]
@@ -1164,7 +1173,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d2cc698a63b549a70bc047073d2949cce27cd1c7b0a4a862d08a8031bc2801db"
 dependencies = [
  "autocfg",
- "num-traits",
+ "num-traits 0.2.14",
 ]
 
 [[package]]
@@ -1175,7 +1184,7 @@ checksum = "b2021c8337a54d21aca0d59a92577a029af9431cb59b909b03252b9c164fad59"
 dependencies = [
  "autocfg",
  "num-integer",
- "num-traits",
+ "num-traits 0.2.14",
 ]
 
 [[package]]
@@ -1186,7 +1195,7 @@ checksum = "5c000134b5dbf44adc5cb772486d335293351644b801551abe8f75c84cfa4aef"
 dependencies = [
  "autocfg",
  "num-integer",
- "num-traits",
+ "num-traits 0.2.14",
 ]
 
 [[package]]
@@ -1197,7 +1206,16 @@ checksum = "12ac428b1cb17fce6f731001d307d351ec70a6d202fc2e60f7d4c5e42d8f4f07"
 dependencies = [
  "autocfg",
  "num-integer",
- "num-traits",
+ "num-traits 0.2.14",
+]
+
+[[package]]
+name = "num-traits"
+version = "0.1.43"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "92e5113e9fd4cc14ded8e499429f396a20f98c772a47cc8622a736e1ec843c31"
+dependencies = [
+ "num-traits 0.2.14",
 ]
 
 [[package]]
@@ -1299,7 +1317,7 @@ version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3741934be594d77de1c8461ebcbbe866f585ea616a9753aa78f2bdc69f0e4579"
 dependencies = [
- "num-traits",
+ "num-traits 0.2.14",
 ]
 
 [[package]]
@@ -1406,7 +1424,7 @@ dependencies = [
  "font-kit",
  "image 0.23.11",
  "lazy_static",
- "num-traits",
+ "num-traits 0.2.14",
  "plotters-backend",
  "plotters-bitmap",
  "plotters-svg",
@@ -2238,6 +2256,7 @@ dependencies = [
  "base64 0.13.0",
  "calamine",
  "csv",
+ "dwt",
  "ffmpeg-next",
  "image 0.23.11",
  "libm 0.2.1",

@@ -1,10 +1,8 @@
 import {
   Box,
-  Center,
   Grid,
   GridItem,
   HStack,
-  Stack,
 } from "@chakra-ui/react";
 import * as tauri from "tauri/api/tauri";
 
@@ -23,8 +21,9 @@ function SolveSettings({ config, setConfig, setErrMsg }) {
   const [interp, setInterp] = useState(null);
   const [currentFrame, setCurrentFrame] = useState(parseInt(config.frame_num / 2));
   const [showRegulator, setShowRegulator] = useState(false);
-  const [result, setResult] = useState(null);
-  const [pos, setPos] = useState([
+  const [nu2d, setNu2d] = useState(null);
+  const [nuNanMean, setNuNanMean] = useState(null);
+  const [pos, setPos] = useState(!!config.region_shape && [
     parseInt(config.region_shape[1] / 2),
     parseInt(config.region_shape[0] / 2),
   ]);
@@ -38,13 +37,14 @@ function SolveSettings({ config, setConfig, setErrMsg }) {
 
   useEffect(() => {
     if (config === "") return;
+    setInterp(null);
     tauri.promisified({
       cmd: "getInterpSingleFrame",
       body: { Uint: currentFrame - 1 },
     })
       .then(ok => setInterp(ok))
       .catch(err => setErrMsg(err));
-  }, [config, currentFrame]);
+  }, [config.interp_method, currentFrame]);
 
   useEffect(() => {
     tauri.promisified({
@@ -53,7 +53,7 @@ function SolveSettings({ config, setConfig, setErrMsg }) {
     })
       .then(ok => setHistory(ok))
       .catch(err => setErrMsg(err));
-  }, [config, pos]);
+  }, [config.filter_method, config.region_shape, pos]);
 
   function setPeakTemp(peakTemp) {
     if (isNaN(peakTemp)) {
@@ -152,11 +152,18 @@ function SolveSettings({ config, setConfig, setErrMsg }) {
   }
 
   function setIterationMethod(iterationMethod) {
+    setNuNanMean(null);
+    setNu2d(null);
     tauri.promisified({
       cmd: "setIterationMethod",
       body: { Iteration: iterationMethod },
     })
-      .then(ok => setResult(ok))
+      .then(ok => {
+        config.iteration_method = iterationMethod;
+        setConfig(Object.assign({}, config));
+        setNuNanMean(ok[1]);
+        setNu2d(ok[0]);
+      })
       .catch(err => setErrMsg(err))
   }
 
@@ -198,6 +205,7 @@ function SolveSettings({ config, setConfig, setErrMsg }) {
                   setShowRegulator(true);
                   return;
                 }
+                setShowRegulator(false);
                 const vv = parseInt(v);
                 if (isNaN(vv) || vv <= 0 || vv > config.frame_num) {
                   setErrMsg(`不合法的帧数：${v}`);
@@ -240,12 +248,11 @@ function SolveSettings({ config, setConfig, setErrMsg }) {
             />
           </GridItem>
           <GridItem colSpan={4} rowSpan={1}>
-            {!!config !== "" &&
-              <SelectInterp
-                value={config.interp_method}
-                onSubmit={setInterpMethod}
-                setErrMsg={setErrMsg}
-              />}
+            <SelectInterp
+              value={config.interp_method}
+              onSubmit={setInterpMethod}
+              setErrMsg={setErrMsg}
+            />
           </GridItem>
           <GridItem colSpan={4} rowSpan={1}>
             <SelectFilter
@@ -267,15 +274,14 @@ function SolveSettings({ config, setConfig, setErrMsg }) {
                 regulator={config.regulator}
                 onSubmit={setRegulator}
               />
-              :
-              !!history &&
+              : !!history &&
               <GreenHistoryLine
                 history={history}
                 pos={pos}
               />}
           </GridItem>
         </Grid>}
-      <HStack>
+      <HStack marginTop={H < 360 ? 360 - H : 0}>
         {!!interp &&
           <InterpDistribution
             interp={interp}
@@ -283,23 +289,15 @@ function SolveSettings({ config, setConfig, setErrMsg }) {
             w={W}
             h={H}
           />}
-        <Box w="40px" />
-        <Stack spacing={0}>
-          <Center
-            color="#fbf1c7"
-            fontSize="lg"
-            fontWeight="bold"
-            h={50}
-          >
-            努塞尔数分布
-          </Center>
-          {!!interp &&
-            <NuDistribution
-              result={result}
-              w={W}
-              h={H}
-            />}
-        </Stack>
+        <Box w="20px" />
+        <NuDistribution
+          nu2d={nu2d}
+          setNu2d={setNu2d}
+          nuNanMean={nuNanMean}
+          w={W}
+          h={H}
+          setErrMsg={setErrMsg}
+        />
       </HStack>
     </Box>
   )

@@ -34,22 +34,26 @@ function InterpDistribution({ interp, setPos, w, h }) {
         textStyle: {
           color: "#fbf1c7",
         },
-        x: "center"
+        x: 375
       },
       tooltip: {
         trigger: "item",
+        backgroundColor: "#fbf1c7",
+        textStyle: {
+          fontStyle: "bold"
+        },
         formatter: function (p) {
-          return "参考温度: " + p.data[2].toFixed(2);
+          return `参考温度: ${p.data[2].toFixed(2)}`;
         },
         axisPointer: {
-          type: "cross"
+          type: "cross",
         },
       },
       grid: {
         top: 50,
         left: 110,
-        right: 0,
-        bottom: 0,
+        right: 20,
+        bottom: 10,
       },
       xAxis: {
         type: 'category',
@@ -98,7 +102,7 @@ function InterpDistribution({ interp, setPos, w, h }) {
   return (
     <div
       id="interp"
-      style={{ width: w + 110, height: h + 50 }}
+      style={{ width: w + 130, height: h + 60 }}
     >
     </div>
   )

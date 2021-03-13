@@ -41,6 +41,9 @@ pub fn plot_area<P: AsRef<Path>>(
         for x in 0..w {
             if let Some(nu) = it.next() {
                 if nu.is_nan() {
+                    pix_plotter
+                        .draw_pixel((x, y), &WHITE)
+                        .map_err(|err| awsl!(PlotError, err))?;
                     continue;
                 }
                 let color_index = ((nu.max(vmin).min(vmax) - vmin) / delta * 255.) as usize;

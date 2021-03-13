@@ -53,7 +53,7 @@ function SelectFilter({ value, onSubmit, setErrMsg }) {
             value={innerValue.Wavelet.toPrecision(2)}
             onBlur={v => {
               const vv = parseFloat(v);
-              if (isNaN(vv) || vv < 0 || vv > 1) {
+              if (isNaN(vv) || vv <= 0 || vv >= 1) {
                 setErrMsg(`不合法的滤波阈值：${v}`);
                 return;
               }

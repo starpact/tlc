@@ -2,6 +2,7 @@
     "cSpell.words": [
         "Chakra",
         "DAQIO",
+        "Daubechies",
         "allowlist",
         "bakana",
         "browserslist",
@@ -15,6 +16,7 @@
         "libm",
         "ncols",
         "promisified",
+        "pywavelets",
         "simd",
         "thiserror",
         "uget",

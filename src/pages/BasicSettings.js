@@ -20,6 +20,7 @@ function BasicSettings({ config, setConfig, setErrMsg }) {
   const [frameIndex, setFrameIndex] = useState(0);
   const [scrollToColumn, setScrollToColumn] = useState(-1);
   const [scrollToRow, setScrollToRow] = useState(-1);
+  const [synchronized, setSynchronized] = useState(false);
 
   useEffect(() => { if (config === "") loadDefaultConfig(); }, []);
 
@@ -132,7 +133,10 @@ function BasicSettings({ config, setConfig, setErrMsg }) {
       cmd: "synchronize",
       body: { UintVec: [frameIndex, scrollToRow] },
     })
-      .then(ok => setConfig(ok))
+      .then(ok => {
+        setSynchronized(true);
+        setConfig(ok);
+      })
       .catch(err => setErrMsg(err));
   }
 
@@ -187,8 +191,8 @@ function BasicSettings({ config, setConfig, setErrMsg }) {
             <IInput
               key={config.start_frame}
               leftTag="起始帧数"
-              value={config.frame_num > 0 ? config.start_frame + 1 : ""}
-              mutable
+              value={config.frame_num > 0 ? config.start_frame + 1 : 1}
+              mutable={synchronized}
               onBlur={v => setStartFrame(parseInt(v) - 1)}
               rightTag={config.frame_num > 0 ?
                 `[${config.start_frame + 1}, 
@@ -198,9 +202,9 @@ function BasicSettings({ config, setConfig, setErrMsg }) {
             <IInput
               key={config.start_row}
               leftTag="起始行数"
-              value={config.frame_num > 0 ? config.start_row + 1 : ""}
+              value={config.frame_num > 0 ? config.start_row + 1 : 1}
               onBlur={v => setStartRow(parseInt(v) - 1)}
-              mutable
+              mutable={synchronized}
               rightTag={config.frame_num > 0 ?
                 `[${config.start_row + 1}, 
                   ${Math.min(config.start_row + config.frame_num, config.total_rows)}] 
@@ -220,6 +224,7 @@ function BasicSettings({ config, setConfig, setErrMsg }) {
           templateRows="repeat(13, 1fr)"
           templateColumns="repeat(12, 1fr)"
           gap={2}
+          marginTop="10px"
           marginX="25px"
         >
           <GridItem rowSpan={13}>

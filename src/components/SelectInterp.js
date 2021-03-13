@@ -1,5 +1,5 @@
 import { HStack, Select, Box } from "@chakra-ui/react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import IButton from "./Button";
 import IInput from "./Input";
 

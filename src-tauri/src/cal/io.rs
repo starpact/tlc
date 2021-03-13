@@ -143,7 +143,7 @@ impl TLCData {
         let (src_h, src_w) = self.get_config().video_shape;
         let dst_h = src_h as u32 / COMPRESSION_RATIO;
         let dst_w = src_w as u32 / COMPRESSION_RATIO;
-        let mut buf = Vec::with_capacity((dst_h * dst_w * 3) as usize);
+        let mut buf = Vec::with_capacity((dst_h * dst_w >> 2) as usize);
 
         let mut jpeg_encoder = image::jpeg::JpegEncoder::new(&mut buf);
         jpeg_encoder
@@ -245,11 +245,17 @@ impl TLCData {
         let (vmin, vmax) = match range {
             Some(range) => range,
             None => {
-                let nu_nan_mean = self.get_nu_ave()?;
+                let nu_nan_mean = self.get_nu_nan_mean()?;
                 (nu_nan_mean * 0.6, nu_nan_mean * 2.)
             }
         };
-        postprocess::plot_area(&self.config.plots_path, self.get_nu2d()?, vmin, vmax)?;
+        postprocess::plot_area(
+            &self.config.plots_path,
+            self.get_nu2d()
+                .map_err(|_| awsl!(HandleError, "求解设置发生变化，需要重新求解"))?,
+            vmin,
+            vmax,
+        )?;
         let mut buf = Vec::new();
         File::open(&self.config.plots_path)
             .map_err(|err| awsl!(err))?
@@ -268,7 +274,9 @@ impl TLCConfig {
         let reader = BufReader::new(file);
         let mut cfg: TLCConfig =
             serde_json::from_reader(reader).map_err(|err| awsl!(ConfigError, err))?;
-
+        if cfg.region_shape == (0, 0) {
+            cfg.region_shape = (500, 500);
+        }
         if let Err(err @ VideoError { .. }) = cfg.init_video_metadata() {
             return Err(err);
         }
@@ -345,12 +353,6 @@ impl TLCConfig {
     }
 
     fn init_path(&mut self) -> TLCResult<&mut Self> {
-        self.case_name = Path::new(&self.video_path)
-            .file_stem()
-            .ok_or(awsl!(VideoIOError, &self.video_path))?
-            .to_str()
-            .ok_or(awsl!(VideoIOError, &self.video_path))?
-            .to_owned();
         if self.save_dir == "" {
             return Ok(self);
         }
@@ -363,6 +365,12 @@ impl TLCConfig {
         create_dir_all(&data_dir).map_err(|err| awsl!(CreateDirError, err, data_dir))?;
         create_dir_all(&plots_dir).map_err(|err| awsl!(CreateDirError, err, plots_dir))?;
 
+        self.case_name = Path::new(&self.video_path)
+            .file_stem()
+            .ok_or(awsl!(VideoIOError, &self.video_path))?
+            .to_str()
+            .ok_or(awsl!(VideoIOError, &self.video_path))?
+            .to_owned();
         let config_path = config_dir.join(&self.case_name).with_extension("json");
         self.config_path = config_path.to_str().ok_or(awsl!(config_path))?.to_owned();
         let data_path = data_dir.join(&self.case_name).with_extension("csv");
@@ -482,7 +490,6 @@ impl TLCConfig {
             ps.clear();
             *ps = Vec::with_capacity(total_frames);
             drop(ps);
-
             for (stream, packet) in input.packets() {
                 if stream.index() == video_stream_index {
                     PACKETS.lock().map_err(|err| awsl!(err))?.push(packet);

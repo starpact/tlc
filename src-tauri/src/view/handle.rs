@@ -63,16 +63,26 @@ pub fn init(rx: Receiver<(WebviewMut, Request)>) {
             get_interp_single_frame,
             drop_video,
             get_green_history,
+            set_color_range,
         );
 
-        let mut tlc_data = TLCData::new().unwrap();
+        let mut tlc_data = TLCData::new();
 
         loop {
             let (mut wm, req) = rx.recv().unwrap();
             let f = hm.get(req.cmd.as_str()).unwrap();
-            let callback_string = f(&mut tlc_data, req).unwrap();
-            wm.dispatch(move |w| w.eval(callback_string.as_str()))
-                .unwrap();
+
+            let callback_string = match tlc_data.as_mut() {
+                Ok(tlc_data) => f(tlc_data, req),
+                Err(err) => Request::format_callback(
+                    Result::<(), String>::Err(err.to_string()),
+                    req.callback,
+                    req.error,
+                ),
+            };
+            if let Ok(callback_string) = callback_string {
+                let _ = wm.dispatch(move |w| w.eval(callback_string.as_str()));
+            }
         }
     });
 }
@@ -238,12 +248,15 @@ fn set_interp_method(data: &mut TLCData, req: Request) -> TLCResult<String> {
 }
 
 fn set_iteration_method(data: &mut TLCData, req: Request) -> TLCResult<String> {
-    fn f(data: &mut TLCData, body: Value) -> TLCResult<String> {
+    fn f(data: &mut TLCData, body: Value) -> TLCResult<(String, f32)> {
         match body {
             Value::Iteration(iteration_method) => {
-                data.set_iteration_method(iteration_method)?.solve()?;
+                data.set_iteration_method(iteration_method)
+                    .solve()?
+                    .save_nu()?;
                 let nu2d_string = data.get_nu_img(None)?;
-                Ok(nu2d_string)
+                let nu_nan_mean = data.get_nu_nan_mean()?;
+                Ok((nu2d_string, nu_nan_mean))
             }
             _ => Err(awsl!(body)),
         }
@@ -327,6 +340,15 @@ fn drop_video(data: &mut TLCData, req: Request) -> TLCResult<String> {
 fn get_green_history(data: &mut TLCData, req: Request) -> TLCResult<String> {
     let res = match req.body {
         Value::Uint(pos) => data.filtering_single_point(pos),
+        _ => Err(awsl!(req.body)),
+    };
+
+    Request::format_callback(res, req.callback, req.error)
+}
+
+fn set_color_range(data: &mut TLCData, req: Request) -> TLCResult<String> {
+    let res = match req.body {
+        Value::FloatVec(range) => data.get_nu_img(Some((range[0], range[1]))),
         _ => Err(awsl!(req.body)),
     };
 

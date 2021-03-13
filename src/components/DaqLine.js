@@ -14,7 +14,7 @@ function DaqLine({
     const yData = [];
     if (scrollToColumn >= 0) {
       for (let i = scrollToColumn; i < daq.data.length; i += daq.dim[1]) {
-        yData.push(daq.data[i]);
+        yData.push(daq.data[i].toFixed(2));
       }
     }
     const xData = yData.map((_, i) => i + 1);
@@ -28,6 +28,7 @@ function DaqLine({
       },
       tooltip: {
         trigger: "axis",
+        backgroundColor: "#fbf1c7",
       },
       xAxis: {
         data: xData,

@@ -7,12 +7,14 @@ use serde::{Deserialize, Serialize};
 
 use packed_simd::f32x8;
 
+use dwt::{transform, wavelet::Wavelet, Operation};
+
 use super::{error::TLCResult, TLCConfig, TLCData, Thermocouple};
 use crate::awsl;
 
 const SCALING: usize = 5;
 
-#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum FilterMethod {
     No,
     Median(usize),
@@ -25,26 +27,108 @@ impl Default for FilterMethod {
     }
 }
 
+fn median_filter(mut data: ArrayViewMut1<u8>, window_size: usize) {
+    let mut filter = Filter::new(window_size);
+    data.iter_mut().for_each(|g| *g = filter.consume(*g));
+}
+
+/// [参考pywavelets官方文档](https://pywavelets.readthedocs.io/en/latest/ref)
+fn wavelet_prepare(data_len: usize, wavelet: &Wavelet<f32>) -> (usize, usize) {
+    let dwt_max_level = ((data_len / (wavelet.length - 1)) as f32).log2() as usize;
+    let level_2 = 1 << dwt_max_level;
+    let app_len = data_len / level_2;
+    let filtering_len = app_len * level_2;
+
+    (dwt_max_level, filtering_len)
+}
+
+fn wavelet_filter(
+    mut data: ArrayViewMut1<u8>,
+    wavelet: &Wavelet<f32>,
+    level: usize,
+    filter_len: usize,
+    threshold_ratio: f32,
+) {
+    let mut arr: Vec<_> = data.iter().take(filter_len).map(|v| *v as f32).collect();
+    // decomposition
+    transform(&mut arr[..filter_len], Operation::Forward, &wavelet, level);
+    let mut start = filter_len / (1 << level);
+    for _ in 0..level {
+        let end = start << 1;
+        let m = arr[start..end].iter().fold(0., |m, &v| f32::max(m, v));
+        let threshold = m * threshold_ratio;
+        for v in &mut arr[start..end] {
+            *v = v.signum() * f32::max(v.abs() - threshold, 0.);
+        }
+        start = end;
+    }
+    // reconstruction
+    transform(&mut arr[..filter_len], Operation::Inverse, &wavelet, level);
+    data.iter_mut().zip(arr).for_each(|(g, b)| *g = b as u8);
+}
+
+/// 小波基采用[Daubechies 8](http://wavelets.pybytes.com/wavelet/db8)。
+/// 重建滤波器水平翻转
+fn db8() -> Wavelet<f32> {
+    #[rustfmt::skip]
+    let lo = vec![
+        -0.00011747678400228192, 0.0006754494059985568,
+        -0.0003917403729959771,  -0.00487035299301066,
+        0.008746094047015655,    0.013981027917015516,
+        -0.04408825393106472,    -0.01736930100202211,
+        0.128747426620186,       0.00047248457399797254,
+        -0.2840155429624281,     -0.015829105256023893,
+        0.5853546836548691,      0.6756307362980128,
+        0.3128715909144659,      0.05441584224308161,
+    ];
+    #[rustfmt::skip]
+    let hi = vec![
+        -0.05441584224308161,    0.3128715909144659,    
+        -0.6756307362980128,     0.5853546836548691,
+        0.015829105256023893,    -0.2840155429624281,    
+        -0.00047248457399797254, 0.128747426620186,
+        0.01736930100202211,     -0.04408825393106472,   
+        -0.013981027917015516,   0.008746094047015655,
+        0.00487035299301066,     -0.0003917403729959771, 
+        -0.0006754494059985568,  -0.00011747678400228192,
+    ];
+
+    Wavelet {
+        length: lo.len(),
+        offset: 0,
+        dec_lo: lo.clone(),
+        dec_hi: hi.clone(),
+        rec_lo: lo,
+        rec_hi: hi,
+    }
+}
+
 impl TLCData {
     /// 对Green值矩阵沿时间轴滤波
     pub fn filtering(&mut self) -> TLCResult<&mut Self> {
         if self.raw_g2d.is_none() {
             self.read_video()?;
         }
-
         let mut filtered_g2d = self.get_raw_g2d()?.to_owned();
 
         match self.config.filter_method {
+            FilterMethod::No => {}
             FilterMethod::Median(window_size) => {
                 filtered_g2d
                     .axis_iter_mut(Axis(1))
                     .into_par_iter()
-                    .for_each(|mut col| {
-                        let mut filter = Filter::new(window_size);
-                        col.iter_mut().for_each(|g| *g = filter.consume(*g))
+                    .for_each(|col| median_filter(col, window_size));
+            }
+            FilterMethod::Wavelet(threshold_ratio) => {
+                let db8 = db8();
+                let (dwt_max_level, filtering_len) = wavelet_prepare(self.config.frame_num, &db8);
+                filtered_g2d
+                    .axis_iter_mut(Axis(1))
+                    .into_par_iter()
+                    .for_each(|col| {
+                        wavelet_filter(col, &db8, dwt_max_level, filtering_len, threshold_ratio)
                     });
             }
-            _ => {}
         }
         self.filtered_g2d.insert(filtered_g2d);
 
@@ -55,17 +139,25 @@ impl TLCData {
         if self.raw_g2d.is_none() {
             self.read_video()?;
         }
-        let mut filtered_g = self.get_raw_g2d()?.column(pos).to_vec();
+        let mut filtered_g = self.get_raw_g2d()?.column(pos).to_owned();
 
         match self.config.filter_method {
-            FilterMethod::Median(window_size) => {
-                let mut filter = Filter::new(window_size);
-                filtered_g.iter_mut().for_each(|g| *g = filter.consume(*g));
+            FilterMethod::No => {}
+            FilterMethod::Median(window_size) => median_filter(filtered_g.view_mut(), window_size),
+            FilterMethod::Wavelet(threshold_ratio) => {
+                let db8 = db8();
+                let (dwt_max_level, filtering_len) = wavelet_prepare(self.config.frame_num, &db8);
+                wavelet_filter(
+                    filtered_g.view_mut(),
+                    &db8,
+                    dwt_max_level,
+                    filtering_len,
+                    threshold_ratio,
+                );
             }
-            _ => {}
         }
 
-        Ok(filtered_g)
+        Ok(filtered_g.to_vec())
     }
 
     /// 峰值检测
@@ -432,40 +524,48 @@ impl Interp {
     }
 }
 
-#[test]
-fn interp_bilinear() -> Result<(), Box<dyn std::error::Error>> {
-    let t2d = array![[1.], [2.], [3.], [4.], [5.], [6.]];
-    println!("{:?}", t2d.shape());
-    let interp_method = BilinearExtra((2, 3));
-    let region_shape = (14, 14);
-    let tcs: Vec<Thermocouple> = [(10, 10), (10, 15), (10, 20), (20, 10), (20, 15), (20, 20)]
-        .iter()
-        .map(|&pos| Thermocouple { column_num: 0, pos })
-        .collect();
-    let tl_pos = (8, 8);
+#[cfg(test)]
+mod test {
+    use ndarray::prelude::*;
 
-    let interp =
-        Interp::interp_bilinear(t2d.view(), interp_method, region_shape, &tcs, tl_pos).unwrap();
+    use super::{Interp, InterpMethod::*, TLCData, Thermocouple};
+    use crate::cal::postprocess;
 
-    let res = interp.interp_single_frame(0, region_shape)?;
-    println!("{:?}", res);
+    #[test]
+    fn interp_bilinear() -> Result<(), Box<dyn std::error::Error>> {
+        let t2d = array![[1.], [2.], [3.], [4.], [5.], [6.]];
+        println!("{:?}", t2d.shape());
+        let interp_method = BilinearExtra((2, 3));
+        let region_shape = (14, 14);
+        let tcs: Vec<Thermocouple> = [(10, 10), (10, 15), (10, 20), (20, 10), (20, 15), (20, 20)]
+            .iter()
+            .map(|&pos| Thermocouple { column_num: 0, pos })
+            .collect();
+        let tl_pos = (8, 8);
 
-    Ok(())
-}
+        let interp =
+            Interp::interp_bilinear(t2d.view(), interp_method, region_shape, &tcs, tl_pos).unwrap();
 
-#[test]
-fn interp() -> Result<(), Box<dyn std::error::Error>> {
-    const CONFIG_PATH: &str = "./cache/default_config.json";
-    let mut tlc_data = TLCData::from_path(CONFIG_PATH).unwrap();
-    tlc_data.read_daq()?;
-    let t = std::time::Instant::now();
-    tlc_data.interp()?;
-    println!("{:?}", t.elapsed());
-    super::postprocess::plot_line(
-        tlc_data
-            .get_interp()?
-            .interp_single_point(1000, tlc_data.get_config().region_shape),
-    )?;
+        let res = interp.interp_single_frame(0, region_shape)?;
+        println!("{:?}", res);
 
-    Ok(())
+        Ok(())
+    }
+
+    #[test]
+    fn interp() -> Result<(), Box<dyn std::error::Error>> {
+        const CONFIG_PATH: &str = "./cache/default_config.json";
+        let mut tlc_data = TLCData::from_path(CONFIG_PATH).unwrap();
+        tlc_data.read_daq()?;
+        let t = std::time::Instant::now();
+        tlc_data.interp()?;
+        println!("{:?}", t.elapsed());
+        postprocess::plot_line(
+            tlc_data
+                .get_interp()?
+                .interp_single_point(1000, tlc_data.get_config().region_shape),
+        )?;
+
+        Ok(())
+    }
 }

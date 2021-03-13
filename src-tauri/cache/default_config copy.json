@@ -3,65 +3,65 @@
   "save_dir": "E:\\research\\EXP\\exp_20201206\\tmp_res",
   "video_path": "E:\\research\\EXP\\exp_20201206\\imp\\videos\\imp_40000_1_up.avi",
   "daq_path": "E:\\research\\EXP\\exp_20201206\\imp\\daq\\imp_40000_1.lvm",
-  "start_frame": 70,
+  "start_frame": 65,
   "total_frames": 1564,
   "frame_rate": 25,
-  "start_row": 128,
+  "start_row": 123,
   "total_rows": 1699,
-  "frame_num": 1494,
+  "frame_num": 1499,
   "video_shape": [
     1024,
     1280
   ],
   "top_left_pos": [
-    592,
-    44
+    632,
+    256
   ],
   "region_shape": [
-    432,
-    1212
+    356,
+    766
   ],
   "thermocouples": [
     {
       "column_num": 1,
       "pos": [
-        870,
+        864,
         168
       ]
     },
     {
       "column_num": 2,
       "pos": [
-        868,
-        346
+        866,
+        353
       ]
     },
     {
       "column_num": 3,
       "pos": [
-        868,
-        544
+        866,
+        547
       ]
     },
     {
       "column_num": 4,
       "pos": [
-        860,
-        732
+        870,
+        731
       ]
     },
     {
       "column_num": 5,
       "pos": [
-        866,
-        926
+        872,
+        920
       ]
     },
     {
       "column_num": 6,
       "pos": [
-        872,
-        1112
+        870,
+        1106
       ]
     }
   ],
@@ -74,7 +74,9 @@
     1.0
   ],
   "interp_method": "Horizontal",
-  "filter_method": "No",
+  "filter_method": {
+    "Wavelet": 0.5
+  },
   "iteration_method": {
     "NewtonTangent": {
       "h0": 50.0,
