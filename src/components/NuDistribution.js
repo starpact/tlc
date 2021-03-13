@@ -10,6 +10,8 @@ import * as tauri from "tauri/api/tauri";
 
 function Nu2dDistribution({
   nu2d,
+  regionShape,
+  setPos,
   setNu2d,
   nuNanMean,
   w,
@@ -25,22 +27,55 @@ function Nu2dDistribution({
     setVmax((nuNanMean * 2.0).toFixed(2));
   }, [nuNanMean]);
 
-  useEffect(() => draw(), [nu2d]);
+  useEffect(() => drawNu2d(), [nu2d]);
 
-  function draw() {
+  function drawHeader(nu) {
+    const ctx = canvas.current.getContext("2d");
+    ctx.fillStyle = "#282828";
+    ctx.fillRect(0, 0, w, 20);
+    if (!!nu) {
+      ctx.fillStyle = "#cc241d";
+      ctx.font = "16px serif";
+      ctx.fillText(`Nu: ${nu.toFixed(2)}`, 5, 16);
+    }
+  }
+
+  function drawNu2d() {
     const ctx = canvas.current.getContext("2d");
     if (!nu2d) {
       ctx.fillStyle = "#3c3836";
-      ctx.fillRect(0, 0, w, h);
+      ctx.fillRect(0, 20, w, h);
       ctx.fillStyle = "#fbf1c7";
       ctx.font = "30px serif";
-      ctx.fillText("待求解", w / 2 - 50, h / 2);
+      ctx.fillText("待求解", w / 2 - 50, h / 2 + 20);
       return;
     }
 
     const img = new Image();
     img.src = `data:image/png;base64,${nu2d}`;
-    img.onload = () => ctx.drawImage(img, 0, 0, w, h);
+    img.onload = () => ctx.drawImage(img, 0, 20, w, h);
+  }
+
+  async function handleClick(e) {
+    const x = e.nativeEvent.offsetX - canvas.current.clientLeft;
+    const y = e.nativeEvent.offsetY - canvas.current.clientTop;
+    const nu = await getPointNu(x, y);
+    drawHeader(nu);
+  }
+
+  function handleMouseOut() {
+    drawHeader(null);
+  }
+
+  async function getPointNu(x, y) {
+    const [rh, rw] = regionShape;
+    const [yy, xx] = [parseInt((y - 20) / h * rh), parseInt(x / w * rw)];
+    const nu = await tauri.promisified({
+      cmd: "getPointNu",
+      body: { UintVec: [rh - yy, xx] },
+    });
+    setPos([xx, yy]);
+    return parseFloat(nu);
   }
 
   function setColorRange() {
@@ -69,16 +104,19 @@ function Nu2dDistribution({
           color="#fbf1c7"
           fontSize="lg"
           fontWeight="bold"
-          h="40px"
+          h="52px"
         >
           {"努塞尔数分布" + (nuNanMean ? `(ave: ${nuNanMean.toFixed(2)})` : "")}
         </Center>
         <canvas
           width={w}
-          height={h}
+          height={h + 20}
+          onClick={handleClick}
+          onMouseOut={handleMouseOut}
           ref={canvas}
         >
         </canvas>
+        <Box h="32px"></Box>
       </Stack>
       {!!nuNanMean &&
         <Stack>

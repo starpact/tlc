@@ -22,7 +22,7 @@ function App() {
 
   useEffect(() => {
     if (appState > 0) {
-      tauri.promisified({ cmd: "dropVideo" });
+      tauri.promisified({ cmd: "tryDropVideo" });
     }
   }, [appState]);
 
@@ -32,8 +32,28 @@ function App() {
         <IAlert errMsg={errMsg} onClose={() => setErrMsg("")} />
         {errMsg === "" &&
           <SimpleGrid columns={2}>
-            <Button rounded={false} bg="#98971a" color="#32302f" onClick={() => setAppState(0)}>路径与同步</Button>
-            <Button rounded={false} bg="#458588" color="#32302f" onClick={() => setAppState(1)}>求解设置</Button>
+            <Button
+              rounded={false}
+              bg="#98971a"
+              color="#32302f"
+              onClick={() => setAppState(0)}
+            >
+              路径与同步
+            </Button>
+            <Button
+              rounded={false}
+              bg="#458588"
+              color="#32302f"
+              onClick={() => {
+                if (config.thermocouples.length === 0) {
+                  setErrMsg("未设置热电偶");
+                  return;
+                }
+                setAppState(1);
+              }}
+            >
+              求解设置
+            </Button>
           </SimpleGrid>
         }
         <Center>

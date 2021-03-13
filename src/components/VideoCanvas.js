@@ -64,7 +64,7 @@ function VideoCanvas({
   const H = from(config.video_shape[0] > 0 ? config.video_shape[0] : 1024);
 
   useEffect(() => {
-    setTimeout(() => getFrame(0), 500);
+    setTimeout(() => getFrame(0), 200);
   }, []);
 
   useEffect(() => {
@@ -95,25 +95,24 @@ function VideoCanvas({
       .catch(err => setErrMsg(err));
   }
 
-  async function submit() {
+  function submit() {
     const { x, y, w, h } = region.current;
-    try {
-      await tauri.promisified({
-        cmd: "setRegion",
-        body: { UintVec: [into(y), into(x), into(h), into(w)] },
-      });
-      const ok = await tauri.promisified({
-        cmd: "setThermocouples",
-        body: {
-          Thermocouples: tcs.current.map(({ tag, x, y }) => {
-            return { column_num: tag - 1, pos: [into(y), into(x)] };
-          })
-        }
-      });
-      setConfig(ok);
-    } catch (err) {
-      setErrMsg(err);
-    }
+    tauri.promisified({
+      cmd: "setRegion",
+      body: { UintVec: [into(y), into(x), into(h), into(w)] },
+    })
+      .catch(err => { setErrMsg(err); return; });
+
+    tauri.promisified({
+      cmd: "setThermocouples",
+      body: {
+        Thermocouples: tcs.current.map(({ tag, x, y }) => {
+          return { column_num: tag - 1, pos: [into(y), into(x)] };
+        })
+      }
+    })
+      .then(ok => setConfig(ok))
+      .catch(err => setErrMsg(err));
   }
 
   function deleteThermocouple(targetId) {
@@ -230,8 +229,8 @@ function VideoCanvas({
   }
 
   function handleMouseDown(e) {
-    startY.current = e.nativeEvent.offsetY - canvas.current.clientTop;
     startX.current = e.nativeEvent.offsetX - canvas.current.clientLeft;
+    startY.current = e.nativeEvent.offsetY - canvas.current.clientTop;
     determineTarget();
     if (e.button === 2 && !!dragTarget.current && !!dragTarget.current.tag) {
       deleteThermocouple(dragTarget.current.id);

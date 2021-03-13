@@ -61,8 +61,9 @@ pub fn init(rx: Receiver<(WebviewMut, Request)>) {
             get_daq,
             synchronize,
             get_interp_single_frame,
-            drop_video,
+            try_drop_video,
             get_green_history,
+            get_point_nu,
             set_color_range,
         );
 
@@ -70,15 +71,16 @@ pub fn init(rx: Receiver<(WebviewMut, Request)>) {
 
         loop {
             let (mut wm, req) = rx.recv().unwrap();
-            let f = hm.get(req.cmd.as_str()).unwrap();
-
+            let f = match hm.get(req.cmd.as_str()) {
+                Some(f) => f,
+                None => continue, // won't happen
+            };
             let callback_string = match tlc_data.as_mut() {
                 Ok(tlc_data) => f(tlc_data, req),
-                Err(err) => Request::format_callback(
-                    Result::<(), String>::Err(err.to_string()),
-                    req.callback,
-                    req.error,
-                ),
+                Err(err) => {
+                    let res: Result<(), String> = Err(err.to_string());
+                    Request::format_callback(res, req.callback, req.error)
+                }
             };
             if let Ok(callback_string) = callback_string {
                 let _ = wm.dispatch(move |w| w.eval(callback_string.as_str()));
@@ -329,7 +331,7 @@ fn get_interp_single_frame(data: &mut TLCData, req: Request) -> TLCResult<String
 }
 
 /// 如果当前Green矩阵已存在，则说明不需要重新解码视频，可以将视频缓存数据包和解码相关内存析构
-fn drop_video(data: &mut TLCData, req: Request) -> TLCResult<String> {
+fn try_drop_video(data: &mut TLCData, req: Request) -> TLCResult<String> {
     if let Ok(_) = data.get_raw_g2d() {
         data.drop_video();
     }
@@ -340,6 +342,15 @@ fn drop_video(data: &mut TLCData, req: Request) -> TLCResult<String> {
 fn get_green_history(data: &mut TLCData, req: Request) -> TLCResult<String> {
     let res = match req.body {
         Value::Uint(pos) => data.filtering_single_point(pos),
+        _ => Err(awsl!(req.body)),
+    };
+
+    Request::format_callback(res, req.callback, req.error)
+}
+
+fn get_point_nu(data: &mut TLCData, req: Request) -> TLCResult<String> {
+    let res = match req.body {
+        Value::UintVec(pos) => data.get_nu2d().map(|nu2d| nu2d.row(pos[0])[pos[1]]),
         _ => Err(awsl!(req.body)),
     };
 

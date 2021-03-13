@@ -36,7 +36,6 @@ function SolveSettings({ config, setConfig, setErrMsg }) {
   useEffect(() => setInterpMethod(config.interp_method), []);
 
   useEffect(() => {
-    if (config === "") return;
     setInterp(null);
     tauri.promisified({
       cmd: "getInterpSingleFrame",
@@ -281,7 +280,7 @@ function SolveSettings({ config, setConfig, setErrMsg }) {
               />}
           </GridItem>
         </Grid>}
-      <HStack marginTop={H < 360 ? 360 - H : 0}>
+      <HStack marginTop={H < 360 ? 180 - H / 2 : 0}>
         {!!interp &&
           <InterpDistribution
             interp={interp}
@@ -293,6 +292,8 @@ function SolveSettings({ config, setConfig, setErrMsg }) {
         <NuDistribution
           nu2d={nu2d}
           setNu2d={setNu2d}
+          regionShape={config.region_shape}
+          setPos={setPos}
           nuNanMean={nuNanMean}
           w={W}
           h={H}

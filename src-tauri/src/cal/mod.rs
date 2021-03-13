@@ -21,7 +21,7 @@ use io::{DecoderTool, VideoCtx};
 use crate::awsl;
 
 /// 默认配置文件路径
-const DEFAULT_CONFIG_PATH: &'static str = "./cache/default_config.json";
+const DEFAULT_CONFIG_PATH: &'static str = "./config/default_config.json";
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct Thermocouple {
@@ -35,16 +35,16 @@ pub struct Thermocouple {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct TLCConfig {
     /// 实验组名称（与视频文件名一致）
-    #[serde(default)]
+    #[serde(default = "default_case_name")]
     case_name: String,
     /// 保存配置信息和所有结果的根目录
     #[serde(default)]
     save_dir: String,
     /// 视频文件路径
-    #[serde(default)]
+    #[serde(default = "default_video_path")]
     video_path: String,
     /// 数采文件路径
-    #[serde(default)]
+    #[serde(default = "default_daq_path")]
     daq_path: String,
     /// 配置文件保存路径（仅运行时使用）
     #[serde(skip)]
@@ -55,7 +55,6 @@ pub struct TLCConfig {
     /// 数据保存路径（仅运行时使用）
     #[serde(skip)]
     data_path: String,
-
     /// 视频起始帧数
     #[serde(default)]
     start_frame: usize,
@@ -74,7 +73,6 @@ pub struct TLCConfig {
     /// 实际处理总帧数
     #[serde(default)]
     frame_num: usize,
-
     /// 视频尺寸（高，宽）
     #[serde(default)]
     video_shape: (usize, usize),
@@ -82,14 +80,11 @@ pub struct TLCConfig {
     #[serde(default)]
     top_left_pos: (usize, usize),
     /// 计算区域尺寸（高，宽）
-    #[serde(default)]
+    #[serde(default = "default_region_shape")]
     region_shape: (usize, usize),
     /// 各热电偶
     #[serde(default)]
     thermocouples: Vec<Thermocouple>,
-    /// 参考温度调节系数
-    #[serde(default)]
-    regulator: Vec<f32>,
     /// 插值方法
     #[serde(default)]
     interp_method: InterpMethod,
@@ -99,22 +94,60 @@ pub struct TLCConfig {
     /// 导热方程迭代求解方法（初值，最大迭代步数）
     #[serde(default)]
     iteration_method: IterationMethod,
-
     /// 峰值温度
-    #[serde(default)]
+    #[serde(default = "default_peak_temp")]
     peak_temp: f32,
     /// 固体导热系数
-    #[serde(default)]
+    #[serde(default = "default_solid_thermal_conductivity")]
     solid_thermal_conductivity: f32,
     /// 固体热扩散系数
-    #[serde(default)]
+    #[serde(default = "default_solid_thermal_diffusivity")]
     solid_thermal_diffusivity: f32,
     /// 特征长度
-    #[serde(default)]
+    #[serde(default = "default_characteristic_length")]
     characteristic_length: f32,
     /// 空气导热系数
-    #[serde(default)]
+    #[serde(default = "default_air_thermal_conductivity")]
     air_thermal_conductivity: f32,
+    /// emmmmmm
+    #[serde(default)]
+    regulator: Vec<f32>,
+}
+
+fn default_case_name() -> String {
+    "case_name".to_owned()
+}
+
+fn default_video_path() -> String {
+    "video_path".to_owned()
+}
+
+fn default_daq_path() -> String {
+    "daq_path".to_owned()
+}
+
+fn default_region_shape() -> (usize, usize) {
+    (500, 500)
+}
+
+fn default_peak_temp() -> f32 {
+    35.48
+}
+
+fn default_solid_thermal_conductivity() -> f32 {
+    0.19
+}
+
+fn default_solid_thermal_diffusivity() -> f32 {
+    1.091e-7
+}
+
+fn default_characteristic_length() -> f32 {
+    0.015
+}
+
+fn default_air_thermal_conductivity() -> f32 {
+    0.0276
 }
 
 /// 配置信息 + 运行时数据
@@ -225,7 +258,8 @@ impl TLCData {
     }
 
     pub fn get_nu2d(&self) -> TLCResult<ArrayView2<f32>> {
-        self.nu2d.as_ref().map(|v| v.view()).ok_or(awsl!())
+        self.nu2d.as_ref().map(|v| v.view())
+            .ok_or(awsl!(HandleError, "求解设置发生变化，需要重新求解"))
     }
 
     pub fn get_nu_nan_mean(&self) -> TLCResult<f32> {
@@ -381,10 +415,6 @@ impl TLCData {
     }
 
     pub fn save_nu(&mut self) -> TLCResult<&mut Self> {
-        if self.nu2d.is_none() {
-            self.solve()?;
-        }
-
         io::save_data(self.get_nu2d()?, &self.config.data_path)?;
 
         Ok(self)

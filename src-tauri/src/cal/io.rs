@@ -7,6 +7,8 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::{cell::RefCell, io::BufWriter};
 
+use serde_json::{from_reader, to_writer_pretty};
+
 use ndarray::parallel::prelude::*;
 use ndarray::prelude::*;
 
@@ -26,8 +28,6 @@ use csv::{ReaderBuilder, StringRecord, WriterBuilder};
 use super::{error::TLCResult, postprocess, DEFAULT_CONFIG_PATH};
 use super::{TLCConfig, TLCData, Thermocouple};
 use crate::awsl;
-
-use super::error::TLCError::VideoError;
 
 /// 视频帧压缩后发送给前端
 const COMPRESSION_RATIO: u32 = 2;
@@ -249,13 +249,7 @@ impl TLCData {
                 (nu_nan_mean * 0.6, nu_nan_mean * 2.)
             }
         };
-        postprocess::plot_area(
-            &self.config.plots_path,
-            self.get_nu2d()
-                .map_err(|_| awsl!(HandleError, "求解设置发生变化，需要重新求解"))?,
-            vmin,
-            vmax,
-        )?;
+        postprocess::plot_area(&self.config.plots_path, self.get_nu2d()?, vmin, vmax)?;
         let mut buf = Vec::new();
         File::open(&self.config.plots_path)
             .map_err(|err| awsl!(err))?
@@ -272,14 +266,8 @@ impl TLCConfig {
         let file = File::open(config_path.as_ref())
             .map_err(|err| awsl!(ConfigIOError, err, config_path.as_ref()))?;
         let reader = BufReader::new(file);
-        let mut cfg: TLCConfig =
-            serde_json::from_reader(reader).map_err(|err| awsl!(ConfigError, err))?;
-        if cfg.region_shape == (0, 0) {
-            cfg.region_shape = (500, 500);
-        }
-        if let Err(err @ VideoError { .. }) = cfg.init_video_metadata() {
-            return Err(err);
-        }
+        let mut cfg: TLCConfig = from_reader(reader).map_err(|err| awsl!(ConfigError, err))?;
+        let _ = cfg.init_video_metadata();
         let _ = cfg.init_daq_metadata();
         let _ = cfg.init_path();
         if cfg.frame_num == 0 {
@@ -302,8 +290,9 @@ impl TLCConfig {
         ))?;
         let rational = video_stream.avg_frame_rate();
         self.frame_rate =
-            (rational.numerator() as f32 / rational.denominator() as f32).round() as usize;
-        self.total_frames = input.duration() as usize * self.frame_rate / 1_000_000;
+            (rational.numerator() as f64 / rational.denominator() as f64).round() as usize;
+        self.total_frames =
+            (input.duration() as f64 * self.frame_rate as f64 / 1_000_000 as f64).round() as usize;
         let decoder = video_stream
             .codec()
             .decoder()
@@ -354,7 +343,7 @@ impl TLCConfig {
 
     fn init_path(&mut self) -> TLCResult<&mut Self> {
         if self.save_dir == "" {
-            return Ok(self);
+            return Err(awsl!(HandleError, "未设置保存根目录"));
         }
         let save_dir = Path::new(&self.save_dir);
         let config_dir = save_dir.join("config");
@@ -364,6 +353,10 @@ impl TLCConfig {
         create_dir_all(&config_dir).map_err(|err| awsl!(CreateDirError, err, config_dir))?;
         create_dir_all(&data_dir).map_err(|err| awsl!(CreateDirError, err, data_dir))?;
         create_dir_all(&plots_dir).map_err(|err| awsl!(CreateDirError, err, plots_dir))?;
+
+        if self.video_path == "video_path" {
+            return Err(awsl!(HandleError, "未设置视频路径"));
+        }
 
         self.case_name = Path::new(&self.video_path)
             .file_stem()
@@ -581,15 +574,17 @@ impl TLCConfig {
 
     /// 保存配置
     pub fn save(&self) -> TLCResult<()> {
+        // 存到指定位置
         let file = File::create(&self.config_path)
             .map_err(|err| awsl!(ConfigIOError, err, self.config_path))?;
         let writer = BufWriter::new(file);
-        serde_json::to_writer_pretty(writer, self).map_err(|err| awsl!(ConfigError, err))?;
+        to_writer_pretty(writer, self).map_err(|err| awsl!(ConfigError, err))?;
 
+        // 覆盖默认配置
         let file = File::create(DEFAULT_CONFIG_PATH)
-            .map_err(|err| awsl!(ConfigIOError, err, self.config_path))?;
+            .map_err(|err| awsl!(ConfigIOError, err, DEFAULT_CONFIG_PATH))?;
         let writer = BufWriter::new(file);
-        serde_json::to_writer_pretty(writer, self).map_err(|err| awsl!(ConfigError, err))?;
+        to_writer_pretty(writer, self).map_err(|err| awsl!(ConfigError, err))?;
 
         Ok(())
     }
