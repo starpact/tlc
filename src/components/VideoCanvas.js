@@ -371,10 +371,7 @@ function VideoCanvas({
             getFrame(vv);
             setInnerFrameIndex(vv);
           }}
-          onChangeEnd={v => {
-            const vv = parseInt(v);
-            setFrameIndex(vv);
-          }}
+          onChangeEnd={v => setFrameIndex(parseInt(v))}
         >
           <SliderTrack bgColor="#665c54">
             <SliderFilledTrack bgColor="#98971a" />

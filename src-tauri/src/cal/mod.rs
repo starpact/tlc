@@ -152,7 +152,7 @@ fn default_air_thermal_conductivity() -> f32 {
 
 /// 配置信息 + 运行时数据
 ///
-/// 运行时产生的数据会在内存可能不足时或所依赖配置变化时析构
+/// 运行时产生的数据会在所依赖配置变化时析构
 pub struct TLCData {
     /// 配置信息
     config: TLCConfig,

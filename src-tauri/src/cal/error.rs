@@ -9,7 +9,7 @@ use thiserror::Error;
 ///heap-allocated PathBuf could be an unacceptable overhead!
 #[derive(Error, Debug)]
 pub enum TLCError {
-    #[error("配置文件读取失败：{raw_err}\n请检查配置文件路径：{context}")]
+    #[error("配置文件读写失败：{raw_err}\n请检查配置文件路径：{context}")]
     ConfigIOError { raw_err: String, context: String },
 
     #[error("配置文件错误: {0}")]

@@ -57,6 +57,7 @@ function Nu2dDistribution({
   }
 
   async function handleClick(e) {
+    if (!nu2d) return;
     const x = e.nativeEvent.offsetX - canvas.current.clientLeft;
     const y = e.nativeEvent.offsetY - canvas.current.clientTop;
     const nu = await getPointNu(x, y);
@@ -64,18 +65,23 @@ function Nu2dDistribution({
   }
 
   function handleMouseOut() {
+    if (!nu2d) return;
     drawHeader(null);
   }
 
   async function getPointNu(x, y) {
     const [rh, rw] = regionShape;
     const [yy, xx] = [parseInt((y - 20) / h * rh), parseInt(x / w * rw)];
-    const nu = await tauri.promisified({
-      cmd: "getPointNu",
-      body: { UintVec: [rh - yy, xx] },
-    });
-    setPos([xx, yy]);
-    return parseFloat(nu);
+    try {
+      const nu = await tauri.promisified({
+        cmd: "getPointNu",
+        body: { UintVec: [rh - yy, xx] },
+      });
+      setPos([xx, yy]);
+      return parseFloat(nu);
+    } catch (err) {
+      setErrMsg(err);
+    }
   }
 
   function setColorRange() {

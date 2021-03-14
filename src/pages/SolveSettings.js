@@ -36,6 +36,17 @@ function SolveSettings({ config, setConfig, setErrMsg }) {
   useEffect(() => setInterpMethod(config.interp_method), []);
 
   useEffect(() => {
+    setTimeout(() => {
+      tauri.promisified({
+        cmd: "getGreenHistory",
+        body: { Uint: pos[1] * config.region_shape[1] + pos[0] },
+      })
+        .then(ok => setHistory(ok))
+        .catch(err => setErrMsg(err));
+    }, 200);
+  }, [config.filter_method, config.region_shape, pos]);
+
+  function updateInterp() {
     setInterp(null);
     tauri.promisified({
       cmd: "getInterpSingleFrame",
@@ -43,16 +54,7 @@ function SolveSettings({ config, setConfig, setErrMsg }) {
     })
       .then(ok => setInterp(ok))
       .catch(err => setErrMsg(err));
-  }, [config.interp_method, currentFrame]);
-
-  useEffect(() => {
-    tauri.promisified({
-      cmd: "getGreenHistory",
-      body: { Uint: pos[1] * config.region_shape[1] + pos[0] },
-    })
-      .then(ok => setHistory(ok))
-      .catch(err => setErrMsg(err));
-  }, [config.filter_method, config.region_shape, pos]);
+  }
 
   function setPeakTemp(peakTemp) {
     if (isNaN(peakTemp)) {
@@ -128,7 +130,10 @@ function SolveSettings({ config, setConfig, setErrMsg }) {
       cmd: "setRegulator",
       body: { FloatVec: regulator },
     })
-      .then(ok => setConfig(ok))
+      .then(ok => {
+        setConfig(ok);
+        updateInterp();
+      })
       .catch(err => setErrMsg(err));
   }
 
@@ -146,7 +151,10 @@ function SolveSettings({ config, setConfig, setErrMsg }) {
       cmd: "setInterpMethod",
       body: { Interp: interpMethod },
     })
-      .then(ok => setConfig(ok))
+      .then(ok => {
+        setConfig(ok);
+        updateInterp();
+      })
       .catch(err => setErrMsg(err));
   }
 
@@ -211,6 +219,7 @@ function SolveSettings({ config, setConfig, setErrMsg }) {
                   return;
                 }
                 setCurrentFrame(vv);
+                updateInterp();
               }}
               mutable
               rightTag={`(1, ${config.frame_num})`}
@@ -281,13 +290,15 @@ function SolveSettings({ config, setConfig, setErrMsg }) {
           </GridItem>
         </Grid>}
       <HStack marginTop={H < 360 ? 180 - H / 2 : 0}>
-        {!!interp &&
+        {!!interp ?
           <InterpDistribution
             interp={interp}
             setPos={setPos}
             w={W}
             h={H}
-          />}
+          /> :
+          <Box w={W + 130}></Box>
+        }
         <Box w="20px" />
         <NuDistribution
           nu2d={nu2d}

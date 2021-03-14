@@ -56,7 +56,7 @@ function InterpDistribution({ interp, setPos, w, h }) {
         bottom: 10,
       },
       xAxis: {
-        type: 'category',
+        type: "category",
         position: "top",
         data: xData
       },

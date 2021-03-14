@@ -38,7 +38,7 @@ function App() {
               color="#32302f"
               onClick={() => setAppState(0)}
             >
-              路径与同步
+              基础配置
             </Button>
             <Button
               rounded={false}

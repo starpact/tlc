@@ -355,7 +355,7 @@ impl TLCConfig {
         create_dir_all(&plots_dir).map_err(|err| awsl!(CreateDirError, err, plots_dir))?;
 
         if self.video_path == "video_path" {
-            return Err(awsl!(HandleError, "未设置视频路径"));
+            return Ok(self);
         }
 
         self.case_name = Path::new(&self.video_path)
