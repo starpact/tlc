@@ -1,4 +1,5 @@
 #![allow(dead_code)]
+
 #[cfg(test)]
 mod cal {
     use std::time::{Duration, Instant};
@@ -7,7 +8,7 @@ mod cal {
 
     use tlc::cal::*;
 
-    const CONFIG_PATH: &str = "./cache/default_config.json";
+    const CONFIG_PATH: &str = "./config/default_config.json";
 
     type Res = Result<(), Box<dyn std::error::Error>>;
 
