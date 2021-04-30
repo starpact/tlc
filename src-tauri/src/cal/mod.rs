@@ -308,7 +308,7 @@ impl TLCData {
                 tcs.sort_unstable_by_key(|tc| tc.pos.0);
                 // 行内按x排序
                 for i in (0..).step_by(w).take(h) {
-                    &mut tcs[i..i + w].sort_unstable_by_key(|tc| tc.pos.1);
+                    tcs[i..i + w].sort_unstable_by_key(|tc| tc.pos.1);
                 }
             }
         }

@@ -72,7 +72,10 @@ function BasicSettings({ config, setConfig, setErrMsg }) {
           cmd: "setVideoPath",
           body: { String: video_path },
         })
-          .then(ok => setConfig(ok))
+          .then(ok => {
+            setConfig(ok);
+            setSynchronized(false);
+          })
           .catch(err => setErrMsg(err));
       });
   }
@@ -91,6 +94,7 @@ function BasicSettings({ config, setConfig, setErrMsg }) {
           .then(ok => {
             setConfig(ok);
             setErrMsg("");
+            setSynchronized(false);
           })
           .catch(err => setErrMsg(err));
       });

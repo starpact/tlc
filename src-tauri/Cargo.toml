@@ -11,7 +11,7 @@ build = "src/build.rs"
 
 [dependencies]
 ffmpeg-next = "4.3.8"
-ndarray = { version = "0.14.0", features = [ "rayon", "serde" ] }
+ndarray = { version = "0.15.0", features = [ "rayon", "serde" ] }
 rayon = "1.5.0"
 calamine = "0.18.0"
 csv = "1.1.6"

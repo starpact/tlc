@@ -4,7 +4,7 @@ use std::io::{BufReader, Read};
 use std::lazy::SyncLazy;
 use std::ops::{Deref, DerefMut};
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 use std::{cell::RefCell, io::BufWriter};
 
 use serde_json::{from_reader, to_writer_pretty};
@@ -179,7 +179,8 @@ impl TLCData {
 
         let ctx_mutex = self.get_video_ctx()?;
         let mut g2d = Array2::zeros((frame_num, pix_num));
-        let tls = Arc::new(ThreadLocal::new());
+        let tls = ThreadLocal::new();
+        let tls_ref = &tls;
         let packets = loop {
             let packets = PACKETS.lock().map_err(|err| awsl!(err))?;
             if packets.len() == self.config.total_frames {
@@ -192,8 +193,7 @@ impl TLCData {
             .skip(start_frame)
             .zip(g2d.axis_iter_mut(Axis(0)).into_par_iter())
             .try_for_each(|(packet, mut row)| -> TLCResult<()> {
-                let tls_arc = tls.clone();
-                let dst_frame = tls_arc
+                let dst_frame = tls_ref
                     .get_or_try(|| DecoderTool::new(ctx_mutex, false))?
                     .decode(packet)?;
 
@@ -216,9 +216,7 @@ impl TLCData {
         self.raw_g2d.insert(g2d);
 
         // 确保thread local析构
-        if let Ok(tls) = Arc::try_unwrap(tls) {
-            tls.into_iter().for_each(|v| drop(v));
-        }
+        tls.into_iter().for_each(|v| drop(v));
         drop(packets);
         self.drop_video();
 
@@ -292,7 +290,8 @@ impl TLCConfig {
         self.frame_rate =
             (rational.numerator() as f64 / rational.denominator() as f64).round() as usize;
         self.total_frames =
-            (input.duration() as f64 * self.frame_rate as f64 / 1_000_000 as f64).round() as usize;
+            (input.duration() as f64 * self.frame_rate as f64 / 1_000_000 as f64).floor() as usize;
+
         let decoder = video_stream
             .codec()
             .decoder()
@@ -483,9 +482,14 @@ impl TLCConfig {
             ps.clear();
             *ps = Vec::with_capacity(total_frames);
             drop(ps);
+            let mut cnt = 0;
             for (stream, packet) in input.packets() {
                 if stream.index() == video_stream_index {
                     PACKETS.lock().map_err(|err| awsl!(err))?.push(packet);
+                    cnt += 1;
+                }
+                if cnt == total_frames {
+                    break;
                 }
             }
 
@@ -532,7 +536,7 @@ impl TLCConfig {
             .map_err(|err| awsl!(DAQIOError, err, daq_path))?;
 
         let mut daq = Array2::zeros((self.total_rows, total_columns));
-        for (csv_row_result, mut daq_column) in rdr.records().zip(daq.genrows_mut()) {
+        for (csv_row_result, mut daq_column) in rdr.records().zip(daq.rows_mut()) {
             let csv_row = csv_row_result.map_err(|err| awsl!(DAQIOError, err, daq_path))?;
             for (csv_val, daq_val) in csv_row.into_iter().zip(daq_column.iter_mut()) {
                 *daq_val = csv_val.parse::<f32>().map_err(|err| {
@@ -559,7 +563,7 @@ impl TLCConfig {
         let total_columns = sheet.width();
 
         let mut daq = Array2::zeros((self.total_rows, total_columns));
-        for (excel_row, mut daq_col) in sheet.rows().zip(daq.genrows_mut()) {
+        for (excel_row, mut daq_col) in sheet.rows().zip(daq.rows_mut()) {
             for (excel_val, daq_val) in excel_row.into_iter().zip(daq_col.iter_mut()) {
                 *daq_val = excel_val.get_float().ok_or(awsl!(
                     DAQError,

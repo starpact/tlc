@@ -39,7 +39,7 @@ const ZOOM = {
 const RADIUS = 10;
 
 // 区域选框触发缩放操作的宽度
-const D = 20;
+const D = 10;
 
 const from = pos => pos / 2;
 const into = pos => pos * 2;
