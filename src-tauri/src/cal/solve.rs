@@ -1,18 +1,13 @@
 use std::f32::{consts::PI, NAN};
 
+use libm::erfcf;
+use ndarray::prelude::*;
+use packed_simd::{f32x8, Simd};
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use libm::erfcf;
-
-use ndarray::prelude::*;
-
-use rayon::prelude::*;
-
-use packed_simd::{f32x8, Simd};
-
-use crate::awsl;
-
 use super::{error::TLCResult, postprocess, TLCConfig, TLCData};
+use crate::awsl;
 
 /// 默认初始对流换热系数
 const DEFAULT_H0: f32 = 50.;

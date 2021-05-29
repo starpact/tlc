@@ -29,7 +29,7 @@ fn snake_to_camel(snake: &str) -> String {
         _ => arr.push(b),
     });
 
-    String::from_utf8(arr).unwrap_or_default()
+    String::from_utf8(arr).unwrap()
 }
 
 pub fn init(rx: Receiver<(WebviewMut, Request)>) {
@@ -71,10 +71,7 @@ pub fn init(rx: Receiver<(WebviewMut, Request)>) {
 
         loop {
             let (mut wm, req) = rx.recv().unwrap();
-            let f = match hm.get(req.cmd.as_str()) {
-                Some(f) => f,
-                None => continue, // won't happen
-            };
+            let f = hm[&req.cmd];
             let callback_string = match tlc_data.as_mut() {
                 Ok(tlc_data) => f(tlc_data, req),
                 Err(err) => {

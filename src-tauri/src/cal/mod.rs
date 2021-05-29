@@ -5,19 +5,16 @@ pub mod postprocess;
 pub mod preprocess;
 pub mod solve;
 
-use std::path::Path;
+use std::{path::Path, sync::{Arc, Mutex}};
 
-use error::TLCResult;
-
+use ffmpeg_next::Packet;
 use serde::{Deserialize, Serialize};
+use ndarray::prelude::*;
 
 use preprocess::{FilterMethod, Interp, InterpMethod};
-
-use ndarray::prelude::*;
 use solve::IterationMethod;
-
-use io::{DecoderTool, VideoCtx};
-
+use io::{Decoder, VideoCtx};
+use error::TLCResult;
 use crate::awsl;
 
 /// 默认配置文件路径
@@ -134,8 +131,8 @@ fn default_peak_temp() -> f32 {
     35.48
 }
 
-fn default_solid_thermal_conductivity() -> f32 {
-    0.19
+fn default_solid_thermal_conductivity() -> f32 { 
+    0.19 
 }
 
 fn default_solid_thermal_diffusivity() -> f32 {
@@ -159,7 +156,9 @@ pub struct TLCData {
     /// 每个视频一份
     video_ctx: Option<VideoCtx>,
     /// 每个线程一份
-    decoder_tool: Option<DecoderTool>,
+    decoder_tool: Option<Decoder>,
+    /// 已加载的视频数据包
+    packets: Arc<Mutex<Vec<Packet>>>,
     /// 未滤波的Green值二维矩阵，排列方式如下：
     ///
     /// 第一帧: | X1Y1 X2Y1 ... XnY1 X1Y2 X2Y2 ... XnY2 ... |
@@ -210,6 +209,7 @@ impl TLCData {
             config: TLCConfig::from_path(config_path)?,
             video_ctx: None,
             decoder_tool: None,
+            packets: Arc::new(Mutex::new(Vec::new())),
             raw_g2d: None,
             filtered_g2d: None,
             peak_frames: None,
@@ -229,7 +229,7 @@ impl TLCData {
         self.video_ctx.as_ref().ok_or(awsl!())
     }
 
-    pub fn get_decoder_tool(&self) -> TLCResult<&DecoderTool> {
+    pub fn get_decoder(&self) -> TLCResult<&Decoder> {
         self.decoder_tool.as_ref().ok_or(awsl!())
     }
 

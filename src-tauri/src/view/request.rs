@@ -1,12 +1,9 @@
 use serde::{Deserialize, Serialize};
 use tauri::api::rpc::format_callback_result;
 
-use crate::cal::{
-    error::TLCResult,
-    preprocess::{FilterMethod, InterpMethod},
-    solve::IterationMethod,
-};
-use crate::{awsl, cal::Thermocouple};
+use crate::awsl;
+use crate::cal::preprocess::{FilterMethod, InterpMethod};
+use crate::cal::{error::TLCResult, solve::IterationMethod, Thermocouple};
 
 /// body数据类型
 #[derive(Debug, Deserialize)]
