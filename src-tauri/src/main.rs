@@ -1,48 +1,33 @@
-use tokio::sync::{mpsc, oneshot};
+mod command;
+mod server;
 
+use tokio::sync::{mpsc, oneshot};
+use tracing::{error, Level};
+
+use command::*;
+
+const CHANNEL_BUFFER_SIZE: usize = 3;
+
+/// Core calculation data are placed in different coroutine from main's and
+/// [mpsc & oneshot](https://docs.rs/tokio/1.13.0/tokio/sync/index.html) is used to handle asynchronously.
+/// In this way we can avoid visiting calculation data from another coroutine so `Send`, `Sync` and `'static`
+/// constraints are not needed.
+///
+/// Actually spsc is enough here but tokio does not provide spsc and I didn't find any async spsc that is
+/// actively maintained. The slight extra overhead can be ignored.
 #[tokio::main]
 async fn main() {
-    let (tx, mut rx) = mpsc::channel::<(String, oneshot::Sender<usize>)>(3);
+    tracing_subscriber::fmt()
+        .pretty()
+        .with_max_level(Level::DEBUG)
+        .init();
 
-    tokio::spawn(async move {
-        let mut i = 0;
-        while let Some((msg, tx)) = rx.recv().await {
-            println!("{}", msg);
-            tx.send(i).unwrap();
-            i += 1;
-        }
-    });
+    let (tx, rx) = mpsc::channel::<(Command, oneshot::Sender<Response>)>(CHANNEL_BUFFER_SIZE);
+    tokio::spawn(server::serve(rx));
 
     tauri::Builder::default()
         .manage(tx)
-        .invoke_handler(tauri::generate_handler![my_custom_command])
+        .invoke_handler(tauri::generate_handler![get_save_info])
         .run(tauri::generate_context!())
-        .expect("error while running tauri application");
-}
-
-#[derive(serde::Serialize)]
-struct Response {
-    val: usize,
-}
-
-async fn some_other_function() -> Option<String> {
-    Some("response".to_owned())
-}
-
-#[tauri::command]
-async fn my_custom_command(
-    window: tauri::Window,
-    state: tauri::State<'_, mpsc::Sender<(String, oneshot::Sender<usize>)>>,
-) -> Result<Response, String> {
-    println!("Called from {}", window.label());
-    let (tx, rx) = oneshot::channel();
-    match some_other_function().await {
-        Some(message) => {
-            state.send((message, tx)).await.unwrap();
-            Ok(Response {
-                val: rx.await.unwrap(),
-            })
-        }
-        None => Err("No result".to_owned()),
-    }
+        .unwrap_or_else(|e| error!("uncaught error: {}", e));
 }

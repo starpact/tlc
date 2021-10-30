@@ -1,13 +1,14 @@
 import { invoke } from "@tauri-apps/api/tauri";
 
 function App() {
-  invoke("my_custom_command")
-    .then(msg => console.log(msg))
-    .catch(err => console.error(err));
+  const f = () => invoke<String>("get_save_info")
+    .then((msg?: String) => console.log(msg))
+    .catch((err?: String) => console.error(err));
 
   return (
     <div>
       Hello TLC
+      <button onClick={f}></button>
     </div>
   )
 }
