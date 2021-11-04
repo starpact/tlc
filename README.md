@@ -12,3 +12,4 @@ Built with [tauri](https://tauri.studio/en/):
 ## Tmp Notes
 
 [Taking Advantage of Auto-Vectorization in Rust](https://www.nickwilcox.com/blog/autovec)
+[Async: What is blocking?](https://ryhl.io/blog/async-what-is-blocking/)

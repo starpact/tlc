@@ -1,20 +1,15 @@
 mod command;
-mod server;
+mod config;
+mod data;
 
-use tokio::sync::{mpsc, oneshot};
+use anyhow::Result;
+use tokio::sync::RwLock;
 use tracing::{error, Level};
 
 use command::*;
+use config::TLCConfig;
+use data::TLCData;
 
-const CHANNEL_BUFFER_SIZE: usize = 3;
-
-/// Core calculation data are placed in different coroutine from main's and
-/// [mpsc & oneshot](https://docs.rs/tokio/1.13.0/tokio/sync/index.html) is used to handle asynchronously.
-/// In this way we can avoid visiting calculation data from another coroutine so `Send`, `Sync` and `'static`
-/// constraints are not needed.
-///
-/// Actually spsc is enough here but tokio does not provide spsc and I didn't find any async spsc that is
-/// actively maintained. The slight extra overhead can be ignored.
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt()
@@ -22,12 +17,32 @@ async fn main() {
         .with_max_level(Level::DEBUG)
         .init();
 
-    let (tx, rx) = mpsc::channel::<(Command, oneshot::Sender<Response>)>(CHANNEL_BUFFER_SIZE);
-    tokio::spawn(server::serve(rx));
+    let config = RwLock::new(TLCConfig::from_default_path().await);
+    let data = RwLock::new(TLCData::default());
+
+    on_setup(&config, &data).await;
 
     tauri::Builder::default()
-        .manage(tx)
-        .invoke_handler(tauri::generate_handler![get_save_info])
+        .manage(config)
+        .manage(data)
+        .invoke_handler(tauri::generate_handler![
+            load_config,
+            get_save_info,
+            set_video_path,
+            get_frame,
+        ])
         .run(tauri::generate_context!())
         .unwrap_or_else(|e| error!("uncaught error: {}", e));
+}
+
+async fn on_setup(config: &RwLock<Result<TLCConfig>>, data: &RwLock<TLCData>) {
+    let cfg = config.read().await;
+    let cfg = match cfg.as_ref() {
+        Ok(cfg) => cfg,
+        Err(_) => return,
+    };
+
+    if let Some(video_path) = cfg.get_video_path() {
+        data.read().await.read_video(video_path);
+    }
 }
