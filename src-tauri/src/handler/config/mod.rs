@@ -7,7 +7,7 @@ use tokio::fs;
 use tokio::io::AsyncReadExt;
 use tracing::debug;
 
-use crate::data::video::VideoInfo;
+use super::data::video::VideoInfo;
 
 const DEFAULT_CONFIG_PATH: &'static str = "./config/default.toml";
 
@@ -102,6 +102,10 @@ impl TLCConfig {
         Ok(cfg)
     }
 
+    pub fn get_video_path(&self) -> Option<&PathBuf> {
+        self.path_manager.video_path.as_ref()
+    }
+
     pub fn get_save_info(&self) -> Result<SaveInfo> {
         self.path_manager.get_save_info()
     }
@@ -117,9 +121,6 @@ impl TLCConfig {
 
         self.path_manager.video_path = Some(new.to_owned());
 
-        // Here we choose not to invalidate the geometric parameter because they
-        // vary little from case to case, we can make use of former settings.
-
         Ok(())
     }
 
@@ -131,6 +132,12 @@ impl TLCConfig {
 
 impl TimingParameter {
     fn update_with_video_info(&mut self, video_info: VideoInfo) {
+        if self.frame_rate == Some(video_info.frame_rate)
+            && self.total_frames == Some(video_info.total_frames)
+        {
+            return;
+        }
+
         self.frame_rate = Some(video_info.frame_rate);
         self.total_frames = Some(video_info.total_frames);
 
@@ -161,8 +168,6 @@ impl PathManager {
         }
     }
 
-    /// case_name is always extracted from the current video_path so we do not need
-    /// to take care of invalidation.
     fn get_case_name(&self) -> Result<&OsStr> {
         let video_path = self
             .video_path
@@ -195,11 +200,14 @@ impl PathManager {
 
 impl GeometricParameter {
     fn update_with_video_info(&mut self, video_info: VideoInfo) {
+        if self.video_shape == Some(video_info.shape) {
+            return;
+        }
+
+        // Put the select box in the center by default.
         let (h, w) = video_info.shape;
         self.video_shape = Some((h, w));
-
-        if let (Some((tl_y, tl_x)), Some((rh, rw))) = (self.top_left_pos, self.region_shape) {
-            self.region_shape = Some((rh.min(h - tl_y), rw.min(w - tl_x)));
-        }
+        self.top_left_pos = Some((h / 4, w / 4));
+        self.region_shape = Some((h / 2, w / 2));
     }
 }

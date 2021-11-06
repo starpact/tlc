@@ -4,7 +4,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use parking_lot::RwLock;
 use tokio::sync::oneshot;
 use tracing::debug;
@@ -37,18 +37,21 @@ impl TLCData {
                 if frame_index < frames.len() {
                     break frames[frame_index];
                 }
-
                 if frame_index >= total_frames {
                     // This is an invalid `frame_index` from frontend and will never get the frame.
                     // So directly abort current thread. Then `rx` will be dropped and `tx` outside
-                    // will stop pending and return an error.
+                    // will stop pending(returning an `RecvError`).
                     return;
                 }
             };
             let _ = tx.send(frame);
         });
 
-        Ok(rx.await?)
+        let frame = rx
+            .await
+            .with_context(|| format!("frame_index({}) out of range", frame_index))?;
+
+        Ok(frame)
     }
 
     pub async fn read_video<P: AsRef<Path>>(&self, path: P) -> Result<VideoInfo> {

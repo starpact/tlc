@@ -4,7 +4,7 @@ use std::path::Path;
 use serde::Serialize;
 use tauri::State;
 
-use crate::config::SaveInfo;
+use crate::handler::SaveInfo;
 use crate::handler::TLCHandler;
 
 pub type TLCResult<T> = Result<T, String>;

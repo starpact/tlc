@@ -1,13 +1,10 @@
 mod command;
-mod config;
-mod data;
 mod handler;
 
 use tracing::{error, Level};
 
-use command::*;
-
 use crate::handler::TLCHandler;
+use command::*;
 
 #[tokio::main]
 async fn main() {
@@ -16,10 +13,10 @@ async fn main() {
         .with_max_level(Level::DEBUG)
         .init();
 
-    let handler = TLCHandler::new().await;
+    let tlc_handler = TLCHandler::new().await;
 
     tauri::Builder::default()
-        .manage(handler)
+        .manage(tlc_handler)
         .invoke_handler(tauri::generate_handler![
             load_config,
             get_save_info,

@@ -16,9 +16,7 @@ function App() {
   }
 
   function get_frame() {
-    invoke<Number>("get_frame", {
-      frameIndex: 5
-    })
+    invoke<Number>("get_frame", { frameIndex: 5 })
       .then((msg?: Number) => console.log(msg))
       .catch((err?: String) => console.error(err));
   }

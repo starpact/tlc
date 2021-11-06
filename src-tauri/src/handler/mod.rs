@@ -1,20 +1,36 @@
+mod config;
+mod data;
+
 use std::path::Path;
 
 use anyhow::Result;
 use tokio::sync::RwLock;
+use tracing::debug;
 
-use crate::config::{SaveInfo, TLCConfig};
-use crate::data::TLCData;
+pub use config::SaveInfo;
+use config::TLCConfig;
+use data::TLCData;
 
 pub struct TLCHandler {
+    /// `cfg` can be mapped to a calculation result set and will be saved to disk.
     cfg: RwLock<TLCConfig>,
+    /// `data` stores all runtime data and the calculation result set.
     data: RwLock<TLCData>,
 }
 
 impl TLCHandler {
     pub async fn new() -> Self {
-        let cfg = TLCConfig::from_default_path().await;
+        let mut cfg = TLCConfig::from_default_path().await;
         let data = TLCData::default();
+
+        if let Some(video_path) = cfg.get_video_path() {
+            data::video::print_video_frame_info(video_path).unwrap();
+            if let Ok(video_info) = data.read_video(video_path).await {
+                cfg.update_with_video_info(video_info);
+            }
+        }
+
+        debug!("{:#?}", cfg);
 
         Self {
             cfg: RwLock::new(cfg),
@@ -37,11 +53,11 @@ impl TLCHandler {
 
     pub async fn set_video_path<P: AsRef<Path>>(&self, path: P) -> Result<()> {
         let mut cfg = self.cfg.write().await;
-        cfg.set_video_path(path.as_ref())?;
+        cfg.set_video_path(&path)?;
 
         // `set_video_path` has two side effects:
         // 1. Another thread is spawned to read from new video path.
-        let video_info = self.data.read().await.read_video(path.as_ref()).await?;
+        let video_info = self.data.read().await.read_video(&path).await?;
         // 2. Some configurations are no longer valid so we need to update/invalidate them.
         cfg.update_with_video_info(video_info);
 
