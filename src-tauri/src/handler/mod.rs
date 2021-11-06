@@ -1,4 +1,4 @@
-mod config;
+mod cfg;
 mod data;
 
 use std::path::Path;
@@ -7,8 +7,8 @@ use anyhow::Result;
 use tokio::sync::RwLock;
 use tracing::debug;
 
-pub use config::SaveInfo;
-use config::TLCConfig;
+pub use cfg::SaveInfo;
+use cfg::TLCConfig;
 use data::TLCData;
 
 pub struct TLCHandler {
