@@ -35,6 +35,6 @@ pub async fn set_video_path<'a>(path: &'a Path, state: State<'_, TLCHandler>) ->
 }
 
 #[tauri::command]
-pub async fn get_frame(frame_index: usize, state: State<'_, TLCHandler>) -> TLCResult<usize> {
+pub async fn get_frame(frame_index: usize, state: State<'_, TLCHandler>) -> TLCResult<String> {
     state.get_frame(frame_index).await.to()
 }

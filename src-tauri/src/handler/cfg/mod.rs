@@ -5,9 +5,8 @@ use anyhow::{anyhow, bail, Result};
 use serde::{Deserialize, Serialize};
 use tokio::fs;
 use tokio::io::AsyncReadExt;
-use tracing::debug;
 
-use super::data::video::VideoInfo;
+use super::data::VideoInfo;
 
 const DEFAULT_CONFIG_PATH: &'static str = "./config/default.toml";
 
@@ -60,9 +59,9 @@ struct TimingParameter {
 /// All tuples representing shapes or positions are `(height, width)`.
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct GeometricParameter {
-    video_shape: Option<(usize, usize)>,
-    top_left_pos: Option<(usize, usize)>,
-    region_shape: Option<(usize, usize)>,
+    video_shape: Option<(u32, u32)>,
+    top_left_pos: Option<(u32, u32)>,
+    region_shape: Option<(u32, u32)>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -82,9 +81,8 @@ enum SaveCategory {
 
 impl TLCConfig {
     pub async fn from_default_path() -> Self {
-        Self::from_path(DEFAULT_CONFIG_PATH)
-            .await
-            .unwrap_or_default()
+        Self::from_path(DEFAULT_CONFIG_PATH).await.unwrap()
+        // .unwrap_or_default()
     }
 
     pub async fn from_path<P: AsRef<Path>>(path: P) -> Result<Self> {
@@ -97,7 +95,6 @@ impl TLCConfig {
         let mut buf = Vec::new();
         file.read_to_end(&mut buf).await?;
         let cfg = toml::from_slice(&buf)?;
-        debug!("{:#?}", cfg);
 
         Ok(cfg)
     }
@@ -124,22 +121,28 @@ impl TLCConfig {
         Ok(())
     }
 
-    pub fn update_with_video_info(&mut self, video_info: VideoInfo) {
-        self.timing_parameter.update_with_video_info(video_info);
-        self.geometric_parameter.update_with_video_info(video_info);
+    pub fn on_video_change(
+        &mut self,
+        VideoInfo {
+            frame_rate,
+            total_frames,
+            shape,
+        }: VideoInfo,
+    ) {
+        self.timing_parameter
+            .on_video_change(frame_rate, total_frames);
+        self.geometric_parameter.on_video_change(shape);
     }
 }
 
 impl TimingParameter {
-    fn update_with_video_info(&mut self, video_info: VideoInfo) {
-        if self.frame_rate == Some(video_info.frame_rate)
-            && self.total_frames == Some(video_info.total_frames)
-        {
+    fn on_video_change(&mut self, frame_rate: usize, total_frames: usize) {
+        if self.frame_rate == Some(frame_rate) && self.total_frames == Some(total_frames) {
             return;
         }
 
-        self.frame_rate = Some(video_info.frame_rate);
-        self.total_frames = Some(video_info.total_frames);
+        self.frame_rate = Some(frame_rate);
+        self.total_frames = Some(total_frames);
 
         self.start_frame.take();
         self.start_row.take();
@@ -199,13 +202,13 @@ impl PathManager {
 }
 
 impl GeometricParameter {
-    fn update_with_video_info(&mut self, video_info: VideoInfo) {
-        if self.video_shape == Some(video_info.shape) {
+    fn on_video_change(&mut self, video_shape: (u32, u32)) {
+        if self.video_shape == Some(video_shape) {
             return;
         }
 
         // Put the select box in the center by default.
-        let (h, w) = video_info.shape;
+        let (h, w) = video_shape;
         self.video_shape = Some((h, w));
         self.top_left_pos = Some((h / 4, w / 4));
         self.region_shape = Some((h / 2, w / 2));

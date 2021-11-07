@@ -1,7 +1,7 @@
 [path_manager]
-video_path = "/Users/yanhongjie/Documents/2021tlc/EXP/imp/video/imp_20000_1_down.avi"
-daq_path = "/Users/yanhongjie/Documents/2021tlc/EXP/imp/daq/imp_20000_1.xlsx"
-save_root_dir = "/Users/yanhongjie/Documents/2021tlc/EXP/result/imp"
+video_path = "D:/Archive/2021yhj/EXP/imp/video/imp_20000_1_up.avi"
+daq_path = "D:/Archive/2021yhj/EXP/imp/daq/imp_20000_1.xlsx"
+save_root_dir = "D:/Archive/2021yhj/EXP/result/imp"
 
 # [timing_parameter]
 # frame_rate = 0   # frame rate of video as well as sampling rate of DAQ

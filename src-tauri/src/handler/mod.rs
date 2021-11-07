@@ -24,9 +24,8 @@ impl TLCHandler {
         let data = TLCData::default();
 
         if let Some(video_path) = cfg.get_video_path() {
-            data::video::print_video_frame_info(video_path).unwrap();
-            if let Ok(video_info) = data.read_video(video_path).await {
-                cfg.update_with_video_info(video_info);
+            if let Ok(video_timing_info) = data.read_video(video_path).await {
+                cfg.on_video_change(video_timing_info);
             }
         }
 
@@ -59,12 +58,12 @@ impl TLCHandler {
         // 1. Another thread is spawned to read from new video path.
         let video_info = self.data.read().await.read_video(&path).await?;
         // 2. Some configurations are no longer valid so we need to update/invalidate them.
-        cfg.update_with_video_info(video_info);
+        cfg.on_video_change(video_info);
 
         Ok(())
     }
 
-    pub async fn get_frame(&self, frame_index: usize) -> Result<usize> {
+    pub async fn get_frame(&self, frame_index: usize) -> Result<String> {
         self.data.read().await.get_frame(frame_index).await
     }
 }

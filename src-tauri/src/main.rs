@@ -1,6 +1,8 @@
 mod command;
 mod handler;
 
+use ffmpeg_next as ffmpeg;
+
 use tracing::{error, Level};
 
 use crate::handler::TLCHandler;
@@ -12,6 +14,8 @@ async fn main() {
         .pretty()
         .with_max_level(Level::DEBUG)
         .init();
+
+    ffmpeg::init().expect("failed to init ffmpeg");
 
     let tlc_handler = TLCHandler::new().await;
 

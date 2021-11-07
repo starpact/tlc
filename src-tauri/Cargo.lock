@@ -43,12 +43,15 @@ name = "app"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "derivative",
  "ffmpeg-next",
  "parking_lot",
+ "rayon",
  "serde",
  "serde_json",
  "tauri",
  "tauri-build",
+ "thread_local",
  "tokio",
  "toml",
  "tracing",
