@@ -26,6 +26,7 @@ async fn main() {
             get_save_info,
             set_video_path,
             get_frame,
+            set_region,
         ])
         .run(tauri::generate_context!())
         .unwrap_or_else(|e| error!("uncaught error: {}", e));

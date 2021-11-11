@@ -60,8 +60,8 @@ struct TimingParameter {
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct GeometricParameter {
     video_shape: Option<(u32, u32)>,
-    top_left_pos: Option<(u32, u32)>,
-    region_shape: Option<(u32, u32)>,
+    /// [top_left_y, top_left_x, region_height, region_width]
+    region: Option<[u32; 4]>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -73,6 +73,14 @@ struct PhysicalParameter {
     air_thermal_conductivity: Option<f64>,
 }
 
+#[derive(Debug)]
+pub struct G2DBuilder {
+    pub video_shape: (u32, u32),
+    pub region: [u32; 4],
+    pub start_frame: usize,
+    pub frame_num: usize,
+}
+
 enum SaveCategory {
     Config,
     NuMatrix,
@@ -81,8 +89,9 @@ enum SaveCategory {
 
 impl TLCConfig {
     pub async fn from_default_path() -> Self {
-        Self::from_path(DEFAULT_CONFIG_PATH).await.unwrap()
-        // .unwrap_or_default()
+        Self::from_path(DEFAULT_CONFIG_PATH)
+            .await
+            .unwrap_or_default()
     }
 
     pub async fn from_path<P: AsRef<Path>>(path: P) -> Result<Self> {
@@ -132,6 +141,30 @@ impl TLCConfig {
         self.timing_parameter
             .on_video_change(frame_rate, total_frames);
         self.geometric_parameter.on_video_change(shape);
+    }
+
+    pub fn set_region(&mut self, region: [u32; 4]) -> Result<G2DBuilder> {
+        let region = self.geometric_parameter.set_region(region)?;
+
+        let start_frame = self
+            .timing_parameter
+            .start_frame
+            .ok_or(anyhow!("start frame unset"))?;
+        let frame_num = self
+            .timing_parameter
+            .frame_num
+            .ok_or(anyhow!("frame num unset"))?;
+        let video_shape = self
+            .geometric_parameter
+            .video_shape
+            .ok_or(anyhow!("video shape unset"))?;
+
+        Ok(G2DBuilder {
+            video_shape,
+            region,
+            start_frame,
+            frame_num,
+        })
     }
 }
 
@@ -210,7 +243,16 @@ impl GeometricParameter {
         // Put the select box in the center by default.
         let (h, w) = video_shape;
         self.video_shape = Some((h, w));
-        self.top_left_pos = Some((h / 4, w / 4));
-        self.region_shape = Some((h / 2, w / 2));
+        self.region = Some([h / 4, w / 4, h / 2, w / 2]);
+    }
+
+    fn set_region(&mut self, region: [u32; 4]) -> Result<[u32; 4]> {
+        if self.region == Some(region) {
+            bail!("calculation region did not change, no need to rebuild g2d");
+        }
+
+        self.region = Some(region);
+
+        Ok(region)
     }
 }

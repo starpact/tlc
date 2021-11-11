@@ -11,10 +11,13 @@ use ffmpeg::format::context::input::{Input, PacketIter};
 use ffmpeg::format::Pixel::RGB24;
 use ffmpeg::software::scaling::{self, flag::Flags};
 use ffmpeg::util::frame::video::Video;
+use ndarray::prelude::*;
 use parking_lot::Mutex;
-use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
+use rayon::prelude::*;
 use thread_local::ThreadLocal;
 use tracing::debug;
+
+use crate::handler::cfg::G2DBuilder;
 
 #[derive(Derivative, Default)]
 #[derivative(Debug)]
@@ -24,7 +27,7 @@ pub struct VideoCache {
     /// Total packet/frame number of the current video.
     /// This is used to validate the `frame_index` parameter of `get_frame`.
     pub total: usize,
-    /// Get thread-local decoder.
+    /// Cache thread-local decoder.
     #[derivative(Debug = "ignore")]
     pub decoder_cache: DecoderCache,
     /// > [For video, one packet should typically contain one compressed frame
@@ -55,11 +58,13 @@ impl VideoCache {
         path: P,
         video_ctx: codec::Context,
         total_frames: usize,
-    ) {
+    ) -> &mut Self {
         self.path = Some(path.as_ref().to_owned());
         self.decoder_cache.reset(video_ctx);
         self.total = total_frames;
         self.packets.clear();
+
+        self
     }
 
     pub fn path_changed<P: AsRef<Path>>(&self, path: P) -> bool {
@@ -72,23 +77,50 @@ impl VideoCache {
         old != new
     }
 
-    pub fn decode_all(&self) -> Result<()> {
+    pub fn build_g2d(&self, g2d_builder: G2DBuilder) -> Result<Array2<u8>> {
+        debug!("start building g2d: {:#?}", g2d_builder);
+        let t0 = std::time::Instant::now();
+
+        let G2DBuilder {
+            video_shape: (_, vw),
+            region: [tl_y, tl_x, h, w],
+            start_frame,
+            frame_num,
+        } = g2d_builder;
+        let byte_w = (vw * 3) as usize;
+        let [tl_y, tl_x, h, w] = [tl_y as usize, tl_x as usize, h as usize, w as usize];
+
+        let mut g2d = Array2::zeros((frame_num, h * w));
+
         self.packets
             .par_iter()
-            .try_for_each(|packet| -> Result<()> {
-                let decoder = self.decoder_cache.get_decoder()?;
-                let buf = decoder.decode(packet)?.data(0).to_vec();
+            .skip(start_frame)
+            .zip(g2d.axis_iter_mut(Axis(0)).into_iter())
+            .try_for_each(|(packet, mut row)| -> Result<()> {
+                let dst_frame = self.decoder_cache.get_decoder()?.decode(packet)?;
 
-                debug!("{}", buf.len());
+                // the data of each frame store in a u8 array:
+                // |r g b r g b...r g b|r g b r g b...r g b|......|r g b r g b...r g b|
+                // |.......row_0.......|.......row_1.......|......|.......row_n.......|
+                let rgb = dst_frame.data(0);
+                let mut it = row.iter_mut();
 
-                // the data of each frame store in one u8 array:
-                // ||r g b r g b...r g b|......|r g b r g b...r g b||
-                // ||.......row_0.......|......|.......row_n.......||
+                for i in (0..).step_by(byte_w).skip(tl_y).take(h) {
+                    for j in (i..).skip(1).step_by(3).skip(tl_x).take(w) {
+                        // Bounds check can be removed by optimization so no need to use unsafe.
+                        // Same performance as `unwrap_unchecked` + `get_unchecked`.
+                        if let Some(b) = it.next() {
+                            *b = rgb[j];
+                        }
+                    }
+                }
 
                 Ok(())
             })?;
 
-        Ok(())
+        debug!("[TIMING] decode all frames in {:?}", t0.elapsed());
+
+        Ok(g2d)
     }
 }
 
@@ -162,8 +194,10 @@ impl DerefMut for SendableSWSCtx {
 }
 
 pub struct Decoder {
-    decoder: RefCell<ffmpeg::decoder::Video>,
+    inner: RefCell<ffmpeg::decoder::Video>,
     sws_ctx: RefCell<SendableSWSCtx>,
+    /// `src_frame` and `dst_frame` are used to avoid frequent allocation.
+    /// This can speed up decoding by about 10%.
     src_frame: RefCell<Video>,
     dst_frame: RefCell<Video>,
 }
@@ -175,7 +209,7 @@ impl Decoder {
         let sws_ctx = scaling::Context::get(decoder.format(), w, h, RGB24, w, h, Flags::BILINEAR)?;
 
         Ok(Self {
-            decoder: RefCell::new(decoder),
+            inner: RefCell::new(decoder),
             sws_ctx: RefCell::new(SendableSWSCtx(sws_ctx)),
             src_frame: RefCell::new(Video::empty()),
             dst_frame: RefCell::new(Video::empty()),
@@ -183,7 +217,7 @@ impl Decoder {
     }
 
     pub fn decode(&self, packet: &Packet) -> Result<Ref<Video>> {
-        let mut decoder = self.decoder.borrow_mut();
+        let mut decoder = self.inner.borrow_mut();
         let mut sws_ctx = self.sws_ctx.borrow_mut();
         let mut src_frame = self.src_frame.borrow_mut();
         let mut dst_frame = self.dst_frame.borrow_mut();
@@ -194,5 +228,9 @@ impl Decoder {
         drop(dst_frame);
 
         Ok(self.dst_frame.borrow())
+    }
+
+    pub fn shape(&self) -> (u32, u32) {
+        (self.inner.borrow().height(), self.inner.borrow().width())
     }
 }

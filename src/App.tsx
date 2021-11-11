@@ -1,24 +1,29 @@
 import { invoke } from "@tauri-apps/api/tauri";
+import { useState } from "react";
 
 function App() {
-  let path = "fake video path";
+  const [image, setImage] = useState<string>();
 
   function get_save_info() {
-    invoke<String>("get_save_info")
-      .then((msg?: String) => console.log(msg))
-      .catch((err?: String) => console.error(err));
+    invoke<string>("get_save_info")
+      .then((msg?: string) => console.log(msg))
+      .catch((err?: string) => console.error(err));
   }
 
   function set_video_path() {
-    invoke<String>("set_video_path", { path })
-      .catch((err?: String) => console.error(err));
-    path += "_xxx";
+    invoke<string>("set_video_path", { path: "fake" })
+      .catch((err?: string) => console.error(err));
   }
 
   function get_frame() {
-    invoke<Number>("get_frame", { frameIndex: 5 })
-      .then((msg?: Number) => console.log(msg))
-      .catch((err?: String) => console.error(err));
+    invoke<string>("get_frame", { frameIndex: 2000 })
+      .then((msg?: string) => setImage(msg))
+      .catch((err?: string) => console.error(err));
+  }
+
+  function set_region() {
+    invoke<void>("set_region", { region: [100, 100, 800, 1000] })
+      .catch((err?: string) => console.error(err));
   }
 
   return (
@@ -31,7 +36,10 @@ function App() {
       <br />
       <button onClick={get_frame}>get_frame</button>
       <br />
-    </div >
+      <button onClick={set_region}>set_region</button>
+      <br />
+      <img alt="frame" src={`data:image/jpeg;base64,${image}`} />
+    </div>
   )
 }
 

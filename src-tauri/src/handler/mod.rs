@@ -66,4 +66,11 @@ impl TLCHandler {
     pub async fn get_frame(&self, frame_index: usize) -> Result<String> {
         self.data.read().await.get_frame(frame_index).await
     }
+
+    pub async fn set_region(&self, region: [u32; 4]) -> Result<()> {
+        let g2d_builder = self.cfg.write().await.set_region(region)?;
+        self.data.write().await.build_g2d(g2d_builder).await?;
+
+        Ok(())
+    }
 }

@@ -3,13 +3,13 @@ video_path = "D:/Archive/2021yhj/EXP/imp/video/imp_20000_1_up.avi"
 daq_path = "D:/Archive/2021yhj/EXP/imp/daq/imp_20000_1.xlsx"
 save_root_dir = "D:/Archive/2021yhj/EXP/result/imp"
 
-# [timing_parameter]
-# frame_rate = 0   # frame rate of video as well as sampling rate of DAQ
-# total_frames = 0 # total frames of video
+[timing_parameter]
+frame_rate = 25     # frame rate of video as well as sampling rate of DAQ
+total_frames = 2444 # total frames of video
 # total_rows = 0   # total raws of DAQ data
-# start_frame = 0  # start frame of video involved in the calculation
+start_frame = 0 # start frame of video involved in the calculation
 # start_row = 0    # start row of DAQ data involved in the calculation
-# frame_num = 0    # the actual frame number involved in the calculation
+frame_num = 2333 # the actual frame number involved in the calculation
 
 # [geometric_parameter]
 # video_shape = [500, 500]
