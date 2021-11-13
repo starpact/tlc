@@ -35,11 +35,21 @@ pub async fn set_video_path(path: &Path, state: State<'_, TLCHandler>) -> TLCRes
 }
 
 #[tauri::command]
+pub async fn set_daq_path(path: &Path, state: State<'_, TLCHandler>) -> TLCResult<()> {
+    state.set_daq_path(path).await.to()
+}
+
+#[tauri::command]
 pub async fn get_frame(frame_index: usize, state: State<'_, TLCHandler>) -> TLCResult<String> {
     state.get_frame(frame_index).await.to()
 }
 
 #[tauri::command]
-pub async fn set_region(region: [u32; 4], state: State<'_, TLCHandler>) -> Result<(), String> {
+pub async fn set_region(region: [u32; 4], state: State<'_, TLCHandler>) -> TLCResult<()> {
     state.set_region(region).await.to()
+}
+
+#[tauri::command]
+pub async fn set_start_frame(start_frame: usize, state: State<'_, TLCHandler>) -> TLCResult<()> {
+    state.set_start_frame(start_frame).await.to()
 }

@@ -17,7 +17,7 @@ use rayon::prelude::*;
 use thread_local::ThreadLocal;
 use tracing::debug;
 
-use crate::handler::cfg::G2DBuilder;
+use crate::handler::cfg::G2DParameter;
 
 #[derive(Derivative, Default)]
 #[derivative(Debug)]
@@ -58,13 +58,11 @@ impl VideoCache {
         path: P,
         video_ctx: codec::Context,
         total_frames: usize,
-    ) -> &mut Self {
+    ) {
         self.path = Some(path.as_ref().to_owned());
         self.decoder_cache.reset(video_ctx);
         self.total = total_frames;
         self.packets.clear();
-
-        self
     }
 
     pub fn path_changed<P: AsRef<Path>>(&self, path: P) -> bool {
@@ -77,16 +75,16 @@ impl VideoCache {
         old != new
     }
 
-    pub fn build_g2d(&self, g2d_builder: G2DBuilder) -> Result<Array2<u8>> {
-        debug!("start building g2d: {:#?}", g2d_builder);
+    pub fn build_g2d(&self, g2d_parameter: G2DParameter) -> Result<Array2<u8>> {
+        debug!("start building g2d: {:#?}", g2d_parameter);
         let t0 = std::time::Instant::now();
 
-        let G2DBuilder {
+        let G2DParameter {
             video_shape: (_, vw),
             region: [tl_y, tl_x, h, w],
             start_frame,
             frame_num,
-        } = g2d_builder;
+        } = g2d_parameter;
         let byte_w = (vw * 3) as usize;
         let [tl_y, tl_x, h, w] = [tl_y as usize, tl_x as usize, h as usize, w as usize];
 

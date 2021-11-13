@@ -15,6 +15,11 @@ function App() {
       .catch((err?: string) => console.error(err));
   }
 
+  function set_daq_path() {
+    invoke<string>("set_daq_path", { path: "fake.lvm" })
+      .catch((err?: string) => console.error(err));
+  }
+
   function get_frame() {
     invoke<string>("get_frame", { frameIndex: 2000 })
       .then((msg?: string) => setImage(msg))
@@ -26,6 +31,11 @@ function App() {
       .catch((err?: string) => console.error(err));
   }
 
+  function set_start_frame() {
+    invoke<void>("set_start_frame", { startFrame: 20 })
+      .catch((err?: string) => console.error(err));
+  }
+
   return (
     <div>
       <div>Hello TLC</div>
@@ -34,9 +44,13 @@ function App() {
       <br />
       <button onClick={set_video_path}>set_video_path</button>
       <br />
+      <button onClick={set_daq_path}>set_daq_path</button>
+      <br />
       <button onClick={get_frame}>get_frame</button>
       <br />
       <button onClick={set_region}>set_region</button>
+      <br />
+      <button onClick={set_start_frame}>set_start_frame</button>
       <br />
       <img alt="frame" src={`data:image/jpeg;base64,${image}`} />
     </div>

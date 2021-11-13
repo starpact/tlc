@@ -44,6 +44,8 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "base64",
+ "calamine",
+ "csv",
  "derivative",
  "ffmpeg-next",
  "image",
@@ -225,7 +227,10 @@ version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ba3569f383e8f1598449f1a423e72e99569137b47740b1da11ef19af3d5c3223"
 dependencies = [
+ "lazy_static",
  "memchr",
+ "regex-automata",
+ "serde",
 ]
 
 [[package]]
@@ -301,6 +306,21 @@ dependencies = [
  "glib-sys 0.14.0",
  "libc",
  "system-deps 3.2.0",
+]
+
+[[package]]
+name = "calamine"
+version = "0.18.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b86ca78da4bdce5ac0f0bdbc0218ad14232f1e668376e044233f64c527cf5abb"
+dependencies = [
+ "byteorder",
+ "codepage",
+ "encoding_rs",
+ "log",
+ "quick-xml",
+ "serde",
+ "zip",
 ]
 
 [[package]]
@@ -411,6 +431,15 @@ dependencies = [
  "foreign-types",
  "libc",
  "objc",
+]
+
+[[package]]
+name = "codepage"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8b0e9222c0cdf2c6ac27d73f664f9520266fa911c3106329d359f8861cb8bde9"
+dependencies = [
+ "encoding_rs",
 ]
 
 [[package]]
@@ -640,6 +669,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "csv"
+version = "1.1.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "22813a6dc45b335f9bade10bf7271dc477e81113e89eb251a0bc2a8a81c536e1"
+dependencies = [
+ "bstr",
+ "csv-core",
+ "itoa",
+ "ryu",
+ "serde",
+]
+
+[[package]]
+name = "csv-core"
+version = "0.1.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2b2466559f260f48ad25fe6317b3c8dac77b5bdb5763ac7d9d6103530663bc90"
+dependencies = [
+ "memchr",
+]
+
+[[package]]
 name = "darling"
 version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -791,6 +842,15 @@ name = "embed_plist"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "53dd2e43a7d32952a6054141ee0d75183958620e84e5eab045de362dff13dc99"
+
+[[package]]
+name = "encoding_rs"
+version = "0.8.29"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a74ea89a0a1b98f6332de42c95baff457ada66d1cb4030f9ff151b2041a1c746"
+dependencies = [
+ "cfg-if 1.0.0",
+]
 
 [[package]]
 name = "enumflags2"
@@ -2392,6 +2452,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "edc3358ebc67bc8b7fa0c007f945b0b18226f78437d61bec735a9eb96b61ee70"
 dependencies = [
  "unicode-xid",
+]
+
+[[package]]
+name = "quick-xml"
+version = "0.19.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b3d72d5477478f85bd00b6521780dfba1ec6cdaadcf90b8b181c36d7de561f9b"
+dependencies = [
+ "encoding_rs",
+ "memchr",
 ]
 
 [[package]]

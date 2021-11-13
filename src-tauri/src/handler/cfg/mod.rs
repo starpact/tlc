@@ -74,7 +74,7 @@ struct PhysicalParameter {
 }
 
 #[derive(Debug)]
-pub struct G2DBuilder {
+pub struct G2DParameter {
     pub video_shape: (u32, u32),
     pub region: [u32; 4],
     pub start_frame: usize,
@@ -112,11 +112,15 @@ impl TLCConfig {
         self.path_manager.video_path.as_ref()
     }
 
+    pub fn get_daq_path(&self) -> Option<&PathBuf> {
+        self.path_manager.daq_path.as_ref()
+    }
+
     pub fn get_save_info(&self) -> Result<SaveInfo> {
         self.path_manager.get_save_info()
     }
 
-    pub fn set_video_path<P: AsRef<Path>>(&mut self, video_path: P) -> Result<()> {
+    pub fn set_video_path<P: AsRef<Path>>(&mut self, video_path: P) -> Result<&mut Self> {
         let new = video_path.as_ref();
         if let Some(ref old) = self.path_manager.video_path {
             if old == new {
@@ -127,23 +131,34 @@ impl TLCConfig {
 
         self.path_manager.video_path = Some(new.to_owned());
 
-        Ok(())
+        Ok(self)
     }
 
-    pub fn on_video_change(
-        &mut self,
-        VideoInfo {
-            frame_rate,
-            total_frames,
-            shape,
-        }: VideoInfo,
-    ) {
+    pub fn set_daq_path<P: AsRef<Path>>(&mut self, daq_path: P) -> Result<&mut Self> {
+        let new = daq_path.as_ref();
+        if let Some(ref old) = self.path_manager.daq_path {
+            if old == new {
+                // If the user re-select the same daq, we do not need to do anything.
+                bail!("daq path same as before");
+            }
+        }
+
+        self.path_manager.daq_path = Some(new.to_owned());
+
+        Ok(self)
+    }
+
+    pub fn on_video_change(&mut self, video_info: VideoInfo) {
         self.timing_parameter
-            .on_video_change(frame_rate, total_frames);
-        self.geometric_parameter.on_video_change(shape);
+            .on_video_change(video_info.frame_rate, video_info.total_frames);
+        self.geometric_parameter.on_video_change(video_info.shape);
     }
 
-    pub fn set_region(&mut self, region: [u32; 4]) -> Result<G2DBuilder> {
+    pub fn on_daq_change(&mut self, total_rows: usize) {
+        self.timing_parameter.on_daq_change(total_rows);
+    }
+
+    pub fn set_region(&mut self, region: [u32; 4]) -> Result<G2DParameter> {
         let region = self.geometric_parameter.set_region(region)?;
 
         let start_frame = self
@@ -159,7 +174,27 @@ impl TLCConfig {
             .video_shape
             .ok_or(anyhow!("video shape unset"))?;
 
-        Ok(G2DBuilder {
+        Ok(G2DParameter {
+            video_shape,
+            region,
+            start_frame,
+            frame_num,
+        })
+    }
+
+    pub fn set_start_frame(&mut self, start_frame: usize) -> Result<G2DParameter> {
+        let (start_frame, frame_num) = self.timing_parameter.set_start_frame(start_frame)?;
+
+        let region = self
+            .geometric_parameter
+            .region
+            .ok_or(anyhow!("region unset"))?;
+        let video_shape = self
+            .geometric_parameter
+            .video_shape
+            .ok_or(anyhow!("video shape unset"))?;
+
+        Ok(G2DParameter {
             video_shape,
             region,
             start_frame,
@@ -170,16 +205,36 @@ impl TLCConfig {
 
 impl TimingParameter {
     fn on_video_change(&mut self, frame_rate: usize, total_frames: usize) {
-        if self.frame_rate == Some(frame_rate) && self.total_frames == Some(total_frames) {
-            return;
-        }
-
         self.frame_rate = Some(frame_rate);
         self.total_frames = Some(total_frames);
 
         self.start_frame.take();
-        self.start_row.take();
         self.frame_num.take();
+    }
+
+    fn on_daq_change(&mut self, total_rows: usize) {
+        self.total_rows = Some(total_rows);
+
+        self.start_frame.take();
+        self.frame_num.take();
+    }
+
+    fn set_start_frame(&mut self, start_frame: usize) -> Result<(usize, usize)> {
+        if self.start_frame == Some(start_frame) {
+            bail!("start frame same as before, no need to rebuild g2d");
+        }
+
+        self.start_frame = Some(start_frame);
+        let total_frames = self
+            .total_frames
+            .ok_or(anyhow!("total frames of video unset"))?;
+        let total_rows = self.total_rows.ok_or(anyhow!("total rows of daq unset"))?;
+        let start_row = self.start_row.ok_or(anyhow!("start row of daq unset"))?;
+
+        let frame_num = (total_frames - start_frame).min(total_rows - start_row);
+        self.frame_num = Some(frame_num);
+
+        Ok((start_frame, frame_num))
     }
 }
 
@@ -209,10 +264,11 @@ impl PathManager {
             .video_path
             .as_ref()
             .ok_or(anyhow!("video path unset"))?;
-
-        Ok(video_path
+        let case_name = video_path
             .file_stem()
-            .ok_or(anyhow!("invalid video path: {:?}", video_path))?)
+            .ok_or(anyhow!("invalid video path: {:?}", video_path))?;
+
+        Ok(case_name)
     }
 
     fn get_save_path(&self, save: SaveCategory) -> Result<PathBuf> {
@@ -240,7 +296,12 @@ impl GeometricParameter {
             return;
         }
 
-        // Put the select box in the center by default.
+        // Most of the time we can make use of the former geometric
+        // setting rather than directly invalidate it because within
+        // a series of experiments the geometric settings should be similar.
+        // We can only get this point when working with a brand new config
+        // or different camera parameters were used. Then we just put
+        // the select box in the center by default.
         let (h, w) = video_shape;
         self.video_shape = Some((h, w));
         self.region = Some([h / 4, w / 4, h / 2, w / 2]);
@@ -248,7 +309,7 @@ impl GeometricParameter {
 
     fn set_region(&mut self, region: [u32; 4]) -> Result<[u32; 4]> {
         if self.region == Some(region) {
-            bail!("calculation region did not change, no need to rebuild g2d");
+            bail!("calculation region same as before, no need to rebuild g2d");
         }
 
         self.region = Some(region);

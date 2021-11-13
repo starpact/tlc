@@ -1,5 +1,6 @@
 mod command;
 mod handler;
+mod util;
 
 use ffmpeg_next as ffmpeg;
 
@@ -25,8 +26,10 @@ async fn main() {
             load_config,
             get_save_info,
             set_video_path,
+            set_daq_path,
             get_frame,
             set_region,
+            set_start_frame,
         ])
         .run(tauri::generate_context!())
         .unwrap_or_else(|e| error!("uncaught error: {}", e));
