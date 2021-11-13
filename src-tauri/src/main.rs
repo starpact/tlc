@@ -1,23 +1,36 @@
-#![cfg_attr(
-    all(not(debug_assertions), target_os = "windows"),
-    windows_subsystem = "windows"
-)]
+mod command;
+mod handler;
+mod util;
 
-use std::sync::mpsc;
+use ffmpeg_next as ffmpeg;
 
-use tlc::view::{handle::init, request::Request};
+use tracing::{error, Level};
 
-fn main() {
-    let (tx, rx) = mpsc::sync_channel(3);
-    init(rx);
+use crate::handler::TLCHandler;
+use command::*;
 
-    tauri::AppBuilder::new()
-        .invoke_handler(move |webview, arg| {
-            let req: Request = serde_json::from_str(arg).map_err(|err| err.to_string())?;
-            let _ = tx.try_send((webview.as_mut(), req));
+#[tokio::main]
+async fn main() {
+    tracing_subscriber::fmt()
+        .pretty()
+        .with_max_level(Level::DEBUG)
+        .init();
 
-            Ok(())
-        })
-        .build()
-        .run();
+    ffmpeg::init().expect("failed to init ffmpeg");
+
+    let tlc_handler = TLCHandler::new().await;
+
+    tauri::Builder::default()
+        .manage(tlc_handler)
+        .invoke_handler(tauri::generate_handler![
+            load_config,
+            get_save_info,
+            set_video_path,
+            set_daq_path,
+            get_frame,
+            set_start_frame,
+            set_region,
+        ])
+        .run(tauri::generate_context!())
+        .unwrap_or_else(|e| error!("uncaught error: {}", e));
 }
