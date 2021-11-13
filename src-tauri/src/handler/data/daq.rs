@@ -5,6 +5,11 @@ use calamine::{open_workbook, Reader, Xlsx};
 use ndarray::Array2;
 use tracing::debug;
 
+#[derive(Debug, Clone, Copy)]
+pub struct DAQMeta {
+    pub total_rows: usize,
+}
+
 pub fn read_daq<P: AsRef<Path>>(daq_path: P) -> Result<Array2<f64>> {
     let t0 = std::time::Instant::now();
     debug!("start reading daq from {:?} ......", daq_path.as_ref());

@@ -28,8 +28,8 @@ async fn main() {
             set_video_path,
             set_daq_path,
             get_frame,
-            set_region,
             set_start_frame,
+            set_region,
         ])
         .run(tauri::generate_context!())
         .unwrap_or_else(|e| error!("uncaught error: {}", e));

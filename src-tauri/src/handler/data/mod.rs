@@ -10,12 +10,14 @@ use anyhow::{bail, Result};
 use image::{codecs::jpeg::JpegEncoder, ColorType::Rgb8};
 use ndarray::Array2;
 use parking_lot::RwLock;
-use serde::Serialize;
 use tokio::sync::oneshot;
 use tracing::debug;
 
+pub use daq::DAQMeta;
+
 use super::cfg::G2DParameter;
 use crate::util::blocking_compute;
+pub use video::VideoMeta;
 use video::{open_video, VideoCache};
 
 #[derive(Debug, Default)]
@@ -36,13 +38,6 @@ pub struct TLCData {
     ///
     /// ......
     g2d: Array2<u8>,
-}
-
-#[derive(Debug, Clone, Copy, Serialize)]
-pub struct VideoInfo {
-    pub frame_rate: usize,
-    pub total_frames: usize,
-    pub shape: (u32, u32),
 }
 
 impl TLCData {
@@ -81,12 +76,12 @@ impl TLCData {
         .await?
     }
 
-    pub async fn read_video<P: AsRef<Path>>(&self, video_path: P) -> Result<VideoInfo> {
+    pub async fn read_video<P: AsRef<Path>>(&self, video_path: P) -> Result<VideoMeta> {
         let video_path = video_path.as_ref().to_owned();
         let video_cache = self.video_cache.clone();
         let (tx, rx) = oneshot::channel();
 
-        let worker = tokio::task::spawn_blocking(move || -> Result<()> {
+        let worker = tokio::task::spawn_blocking(move || {
             let t0 = std::time::Instant::now();
 
             let mut input = ffmpeg::format::input(&video_path)?;
@@ -94,7 +89,7 @@ impl TLCData {
             let decoder = video_ctx.clone().decoder().video()?;
 
             // Outer function can return at this point.
-            let _ = tx.send(VideoInfo {
+            let _ = tx.send(VideoMeta {
                 frame_rate,
                 total_frames,
                 shape: (decoder.height(), decoder.width()),
@@ -138,13 +133,13 @@ impl TLCData {
         }
     }
 
-    pub async fn read_daq<P: AsRef<Path>>(&mut self, daq_path: P) -> Result<usize> {
+    pub async fn read_daq<P: AsRef<Path>>(&mut self, daq_path: P) -> Result<DAQMeta> {
         let daq_path = daq_path.as_ref().to_owned();
         let daq = tokio::task::spawn_blocking(move || daq::read_daq(daq_path)).await??;
         let total_rows = daq.dim().0;
         self.daq = daq;
 
-        Ok(total_rows)
+        Ok(DAQMeta { total_rows })
     }
 
     pub async fn build_g2d(&mut self, g2d_parameter: G2DParameter) -> Result<()> {

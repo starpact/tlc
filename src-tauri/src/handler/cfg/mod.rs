@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use tokio::fs;
 use tokio::io::AsyncReadExt;
 
-use super::data::VideoInfo;
+use super::data::{DAQMeta, VideoMeta};
 
 const DEFAULT_CONFIG_PATH: &'static str = "./config/default.toml";
 
@@ -108,54 +108,28 @@ impl TLCConfig {
         Ok(cfg)
     }
 
-    pub fn get_video_path(&self) -> Option<&PathBuf> {
-        self.path_manager.video_path.as_ref()
-    }
-
-    pub fn get_daq_path(&self) -> Option<&PathBuf> {
-        self.path_manager.daq_path.as_ref()
-    }
-
     pub fn get_save_info(&self) -> Result<SaveInfo> {
         self.path_manager.get_save_info()
     }
 
-    pub fn set_video_path<P: AsRef<Path>>(&mut self, video_path: P) -> Result<&mut Self> {
-        let new = video_path.as_ref();
-        if let Some(ref old) = self.path_manager.video_path {
-            if old == new {
-                // If the user re-select the same video, we do not need to do anything.
-                bail!("video path same as before");
-            }
-        }
-
-        self.path_manager.video_path = Some(new.to_owned());
-
-        Ok(self)
+    pub fn get_video_path(&self) -> Option<&Path> {
+        Some(self.path_manager.video_path.as_ref()?.as_path())
     }
 
-    pub fn set_daq_path<P: AsRef<Path>>(&mut self, daq_path: P) -> Result<&mut Self> {
-        let new = daq_path.as_ref();
-        if let Some(ref old) = self.path_manager.daq_path {
-            if old == new {
-                // If the user re-select the same daq, we do not need to do anything.
-                bail!("daq path same as before");
-            }
-        }
-
-        self.path_manager.daq_path = Some(new.to_owned());
-
-        Ok(self)
+    pub fn get_daq_path(&self) -> Option<&Path> {
+        Some(self.path_manager.daq_path.as_ref()?.as_path())
     }
 
-    pub fn on_video_change(&mut self, video_info: VideoInfo) {
+    pub fn set_video_path<P: AsRef<Path>>(&mut self, video_path: P, video_meta: VideoMeta) {
+        self.path_manager.video_path = Some(video_path.as_ref().to_owned());
         self.timing_parameter
-            .on_video_change(video_info.frame_rate, video_info.total_frames);
-        self.geometric_parameter.on_video_change(video_info.shape);
+            .on_video_change(video_meta.frame_rate, video_meta.total_frames);
+        self.geometric_parameter.on_video_change(video_meta.shape);
     }
 
-    pub fn on_daq_change(&mut self, total_rows: usize) {
-        self.timing_parameter.on_daq_change(total_rows);
+    pub fn set_daq_path<P: AsRef<Path>>(&mut self, daq_path: P, daq_meta: DAQMeta) {
+        self.path_manager.daq_path = Some(daq_path.as_ref().to_owned());
+        self.timing_parameter.on_daq_change(daq_meta.total_rows);
     }
 
     pub fn set_region(&mut self, region: [u32; 4]) -> Result<G2DParameter> {

@@ -52,6 +52,13 @@ pub struct DecoderCache {
     decoders: ThreadLocal<Decoder>,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct VideoMeta {
+    pub frame_rate: usize,
+    pub total_frames: usize,
+    pub shape: (u32, u32),
+}
+
 impl VideoCache {
     pub fn reset<P: AsRef<Path>>(
         &mut self,

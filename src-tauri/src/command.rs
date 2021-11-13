@@ -20,13 +20,13 @@ impl<T: Serialize, E: fmt::Debug> IntoTLCResult<T> for Result<T, E> {
 }
 
 #[tauri::command]
-pub async fn get_save_info(state: State<'_, TLCHandler>) -> TLCResult<SaveInfo> {
-    state.get_save_info().await.to()
+pub async fn load_config(path: &Path, state: State<'_, TLCHandler>) -> TLCResult<()> {
+    state.load_config(path).await.to()
 }
 
 #[tauri::command]
-pub async fn load_config(path: &Path, state: State<'_, TLCHandler>) -> TLCResult<()> {
-    state.load_config(path).await.to()
+pub async fn get_save_info(state: State<'_, TLCHandler>) -> TLCResult<SaveInfo> {
+    state.get_save_info().await.to()
 }
 
 #[tauri::command]
