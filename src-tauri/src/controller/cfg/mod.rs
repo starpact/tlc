@@ -120,16 +120,24 @@ impl TLCConfig {
         Some(self.path_manager.daq_path.as_ref()?.as_path())
     }
 
+    pub fn on_video_load(&mut self, video_meta: VideoMeta) {
+        self.timing_parameter
+            .on_video_load(video_meta.frame_rate, video_meta.total_frames);
+        self.geometric_parameter.on_video_load(video_meta.shape);
+    }
+
+    pub fn on_daq_load(&mut self, daq_meta: DAQMeta) {
+        self.timing_parameter.on_daq_load(daq_meta.total_rows);
+    }
+
     pub fn set_video_path<P: AsRef<Path>>(&mut self, video_path: P, video_meta: VideoMeta) {
         self.path_manager.video_path = Some(video_path.as_ref().to_owned());
-        self.timing_parameter
-            .on_video_change(video_meta.frame_rate, video_meta.total_frames);
-        self.geometric_parameter.on_video_change(video_meta.shape);
+        self.on_video_load(video_meta);
     }
 
     pub fn set_daq_path<P: AsRef<Path>>(&mut self, daq_path: P, daq_meta: DAQMeta) {
         self.path_manager.daq_path = Some(daq_path.as_ref().to_owned());
-        self.timing_parameter.on_daq_change(daq_meta.total_rows);
+        self.on_daq_load(daq_meta);
     }
 
     pub fn set_region(&mut self, region: [u32; 4]) -> Result<G2DParameter> {
@@ -178,7 +186,11 @@ impl TLCConfig {
 }
 
 impl TimingParameter {
-    fn on_video_change(&mut self, frame_rate: usize, total_frames: usize) {
+    fn on_video_load(&mut self, frame_rate: usize, total_frames: usize) {
+        if self.frame_rate == Some(frame_rate) && self.total_frames == Some(total_frames) {
+            return;
+        }
+
         self.frame_rate = Some(frame_rate);
         self.total_frames = Some(total_frames);
 
@@ -186,7 +198,11 @@ impl TimingParameter {
         self.frame_num.take();
     }
 
-    fn on_daq_change(&mut self, total_rows: usize) {
+    fn on_daq_load(&mut self, total_rows: usize) {
+        if self.total_rows == Some(total_rows) {
+            return;
+        }
+
         self.total_rows = Some(total_rows);
 
         self.start_frame.take();
@@ -265,7 +281,7 @@ impl PathManager {
 }
 
 impl GeometricParameter {
-    fn on_video_change(&mut self, video_shape: (u32, u32)) {
+    fn on_video_load(&mut self, video_shape: (u32, u32)) {
         if self.video_shape == Some(video_shape) {
             return;
         }

@@ -17,7 +17,8 @@ use rayon::prelude::*;
 use thread_local::ThreadLocal;
 use tracing::debug;
 
-use crate::handler::cfg::G2DParameter;
+use crate::controller::cfg::G2DParameter;
+use crate::util;
 
 #[derive(Derivative, Default)]
 #[derivative(Debug)]
@@ -52,7 +53,7 @@ pub struct DecoderCache {
     decoders: ThreadLocal<Decoder>,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
 pub struct VideoMeta {
     pub frame_rate: usize,
     pub total_frames: usize,
@@ -83,8 +84,8 @@ impl VideoCache {
     }
 
     pub fn build_g2d(&self, g2d_parameter: G2DParameter) -> Result<Array2<u8>> {
-        debug!("start building g2d: {:#?}", g2d_parameter);
-        let t0 = std::time::Instant::now();
+        let _timing = util::duration::measure("building g2d");
+        debug!("{:#?}", g2d_parameter);
 
         let G2DParameter {
             video_shape: (_, vw),
@@ -122,8 +123,6 @@ impl VideoCache {
 
                 Ok(())
             })?;
-
-        debug!("[TIMING] decode all frames in {:?}", t0.elapsed());
 
         Ok(g2d)
     }

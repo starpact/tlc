@@ -5,14 +5,16 @@ use calamine::{open_workbook, Reader, Xlsx};
 use ndarray::Array2;
 use tracing::debug;
 
-#[derive(Debug, Clone, Copy)]
+use crate::util;
+
+#[derive(Debug)]
 pub struct DAQMeta {
     pub total_rows: usize,
 }
 
 pub fn read_daq<P: AsRef<Path>>(daq_path: P) -> Result<Array2<f64>> {
-    let t0 = std::time::Instant::now();
-    debug!("start reading daq from {:?} ......", daq_path.as_ref());
+    let _timing = util::duration::measure("reading daq");
+    debug!("{:?}", daq_path.as_ref());
 
     let daq = match daq_path
         .as_ref()
@@ -25,7 +27,6 @@ pub fn read_daq<P: AsRef<Path>>(daq_path: P) -> Result<Array2<f64>> {
         _ => bail!("only .lvm and .xlsx are supported"),
     }?;
 
-    debug!("[TIMING] read daq in {:?}", t0.elapsed());
     debug!("\n{:?}", daq);
 
     Ok(daq)

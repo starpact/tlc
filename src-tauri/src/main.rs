@@ -1,12 +1,12 @@
 mod command;
-mod handler;
+mod controller;
 mod util;
 
 use ffmpeg_next as ffmpeg;
 
 use tracing::{error, Level};
 
-use crate::handler::TLCHandler;
+use crate::controller::TLCController;
 use command::*;
 
 #[tokio::main]
@@ -18,10 +18,10 @@ async fn main() {
 
     ffmpeg::init().expect("failed to init ffmpeg");
 
-    let tlc_handler = TLCHandler::new().await;
+    let tlc_controller = TLCController::new().await;
 
     tauri::Builder::default()
-        .manage(tlc_handler)
+        .manage(tlc_controller)
         .invoke_handler(tauri::generate_handler![
             load_config,
             get_save_info,

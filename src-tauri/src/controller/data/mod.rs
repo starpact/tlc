@@ -1,4 +1,7 @@
 mod daq;
+mod filter;
+mod interpolation;
+mod plot;
 pub mod video;
 
 use std::path::Path;
@@ -16,7 +19,7 @@ use tracing::debug;
 pub use daq::DAQMeta;
 
 use super::cfg::G2DParameter;
-use crate::util::blocking_compute;
+use crate::util::{self, blocking};
 pub use video::VideoMeta;
 use video::{open_video, VideoCache};
 
@@ -37,7 +40,9 @@ pub struct TLCData {
     /// frame 2: |X1Y1 X2Y1 ... XnY1 X1Y2 X2Y2 ... XnY2 ...... XnYn|
     ///
     /// ......
-    g2d: Array2<u8>,
+    g2: Arc<Array2<u8>>,
+
+    filtered_g2: Arc<Array2<u8>>,
 }
 
 impl TLCData {
@@ -50,7 +55,7 @@ impl TLCData {
         // So this task should be executed in `tokio::task::spawn_blocking` or `rayon::spawn`,
         // here we must use `rayon::spawn` because the `thread-local` decoder is designed
         // to be kept in thread from rayon thread pool.
-        blocking_compute(move || -> Result<String> {
+        blocking::compute(move || -> Result<String> {
             let frame = loop {
                 let vc = video_cache.read();
                 if frame_index >= vc.total {
@@ -82,7 +87,8 @@ impl TLCData {
         let (tx, rx) = oneshot::channel();
 
         let worker = tokio::task::spawn_blocking(move || {
-            let t0 = std::time::Instant::now();
+            let _timing = util::duration::measure("reading video");
+            debug!("{:?}", &video_path);
 
             let mut input = ffmpeg::format::input(&video_path)?;
             let (frame_rate, total_frames, video_ctx, mut packet_iter) = open_video(&mut input)?;
@@ -100,7 +106,6 @@ impl TLCData {
                 .write()
                 .reset(&video_path, video_ctx, total_frames);
 
-            debug!("start reading video from {:?} ......", &video_path);
             let mut cnt = 0;
             loop {
                 // `RwLockWriteGuard` is intentionally holden all the way during
@@ -120,8 +125,8 @@ impl TLCData {
                     break;
                 }
             }
+
             debug_assert!(cnt == total_frames);
-            debug!("[TIMING] read all packets in {:?}", t0.elapsed());
             debug!("total_frames: {}", total_frames);
 
             Ok(())
@@ -144,7 +149,9 @@ impl TLCData {
 
     pub async fn build_g2d(&mut self, g2d_parameter: G2DParameter) -> Result<()> {
         let video_cache = self.video_cache.clone();
-        self.g2d = blocking_compute(move || video_cache.read().build_g2d(g2d_parameter)).await??;
+        let g2 = blocking::compute(move || video_cache.read().build_g2d(g2d_parameter)).await??;
+        self.g2 = Arc::new(g2);
+        self.filtered_g2 = self.g2.clone();
 
         Ok(())
     }
