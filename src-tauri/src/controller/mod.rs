@@ -11,23 +11,27 @@ pub use cfg::SaveInfo;
 use cfg::TLCConfig;
 use data::TLCData;
 
-pub struct TLCHandler {
+pub struct TLCController {
     /// `cfg` can be mapped to a calculation result set and will be saved to disk.
     cfg: RwLock<TLCConfig>,
     /// `data` stores all runtime data and the calculation result set.
     data: RwLock<TLCData>,
 }
 
-impl TLCHandler {
+impl TLCController {
     pub async fn new() -> Self {
-        let cfg = TLCConfig::from_default_path().await;
+        let mut cfg = TLCConfig::from_default_path().await;
         let mut data = TLCData::default();
 
         if let Some(video_path) = cfg.get_video_path() {
-            let _ = data.read_video(video_path).await;
+            if let Ok(video_meta) = data.read_video(video_path).await {
+                cfg.on_video_load(video_meta);
+            }
         }
         if let Some(daq_path) = cfg.get_daq_path() {
-            let _ = data.read_daq(daq_path).await;
+            if let Ok(daq_meta) = data.read_daq(daq_path).await {
+                cfg.on_daq_load(daq_meta);
+            }
         }
 
         debug!("{:#?}", cfg);

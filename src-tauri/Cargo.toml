@@ -29,6 +29,9 @@ base64 = "0.13.0"
 ndarray = { version = "0.15.3", features = ["rayon", "serde"] }
 csv = "1.1.6"
 calamine = "0.18.0"
+plotters = "0.3.1"
+median = "0.3.2"
+dwt = "0.5.2"
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]
