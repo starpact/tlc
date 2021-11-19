@@ -29,7 +29,8 @@ async fn main() {
             set_daq_path,
             get_frame,
             set_start_frame,
-            set_region,
+            set_area,
+            set_filter_method,
         ])
         .run(tauri::generate_context!())
         .unwrap_or_else(|e| error!("uncaught error: {}", e));

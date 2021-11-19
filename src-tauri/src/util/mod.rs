@@ -1,2 +1,2 @@
 pub mod blocking;
-pub mod duration;
+pub mod timing;

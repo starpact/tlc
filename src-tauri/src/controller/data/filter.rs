@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use std::sync::Arc;
 
 use dwt::wavelet::Wavelet;
@@ -7,8 +5,9 @@ use dwt::{transform, Operation};
 use median::Filter;
 use ndarray::parallel::prelude::*;
 use ndarray::prelude::*;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug)]
+#[derive(Debug, Deserialize, Serialize, Clone, Copy)]
 pub enum FilterMethod {
     No,
     Median(usize),
@@ -69,6 +68,7 @@ fn wavelet_filter(mut g1: ArrayViewMut1<u8>, threshold_ratio: f64) {
         &wavelet,
         max_level,
     );
+
     let mut start = filter_len / (1 << max_level);
     for _ in 0..max_level {
         let end = start << 1;
@@ -79,6 +79,7 @@ fn wavelet_filter(mut g1: ArrayViewMut1<u8>, threshold_ratio: f64) {
         }
         start = end;
     }
+
     // Reconstruction
     transform(
         &mut g1f[..filter_len],

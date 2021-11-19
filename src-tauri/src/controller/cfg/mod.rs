@@ -6,79 +6,91 @@ use serde::{Deserialize, Serialize};
 use tokio::fs;
 use tokio::io::AsyncReadExt;
 
-use super::data::{DAQMeta, VideoMeta};
+use super::data::{FilterMethod, InterpMethod, IterationMethod};
 
 const DEFAULT_CONFIG_PATH: &'static str = "./config/default.toml";
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
+#[serde(default)]
 pub struct TLCConfig {
-    #[serde(default)]
-    path_manager: PathManager,
-    #[serde(default)]
-    timing_parameter: TimingParameter,
-    #[serde(default)]
-    geometric_parameter: GeometricParameter,
-    #[serde(default)]
-    physical_parameter: PhysicalParameter,
-}
-
-/// PathManager manages path information that is needed when work with the file system.
-/// 1. Where to read data(video + daq)
-/// 2. Where to save data(config + nu_matrix + nu_plot)
-#[derive(Debug, Default, Serialize, Deserialize)]
-struct PathManager {
-    /// Path of TLC video file.
-    video_path: Option<PathBuf>,
-    /// Path of TLC data acquisition file.
-    daq_path: Option<PathBuf>,
-
     /// Directory in which you save your data.
     /// As the `video_path` varies from case to case, we can use file stem of it as `case_name`.
     /// * config_path: {root_dir}/config/{case_name}.toml
     /// * nu_matrix_path: {root_dir}/nu_matrix/{case_name}.csv
     /// * plot_matrix_path: {root_dir}/nu_plot/{case_name}.png
     save_root_dir: Option<PathBuf>,
-}
 
-#[derive(Debug, Default, Serialize, Deserialize)]
-struct TimingParameter {
-    /// Frame rate of video as well as sampling rate of DAQ.
-    frame_rate: Option<usize>,
-    /// Total frames of video.
-    total_frames: Option<usize>,
-    /// Total raws of DAQ data.
-    total_rows: Option<usize>,
+    /// Video metadata: attributes of the video. Once video path is determined, so are
+    /// other attributes. So these can be regarded as a cache.
+    video_meta: Option<VideoMeta>,
+    ///
+    daq_meta: Option<DAQMeta>,
+
     /// Start frame of video involved in the calculation.
     start_frame: Option<usize>,
     /// Start row of DAQ data involved in the calculation.
     start_row: Option<usize>,
-    /// The actual frame number involved in the calculation.
-    frame_num: Option<usize>,
+    /// The actual frame/row numbers involved in the calculation.
+    cal_num: Option<usize>,
+
+    /// Calculation area(top_left_y, top_left_x, area_height, area_width).
+    area: Option<(u32, u32, u32, u32)>,
+    /// Storage and positions of thermocouples.
+    thermocouples: Option<Vec<Thermocouple>>,
+
+    /// Filter method of green matrix along the time axis.
+    pub filter_method: FilterMethod,
+    /// Interpolation method of thermocouple temperature distribution.
+    interp_method: InterpMethod,
+    /// Iteration method used when solving heat transfer equation.
+    iteration_method: IterationMethod,
+
+    physical_param: PhysicalParam,
 }
 
-/// All tuples representing shapes or positions are `(height, width)`.
-#[derive(Debug, Default, Serialize, Deserialize)]
-struct GeometricParameter {
-    video_shape: Option<(u32, u32)>,
-    /// [top_left_y, top_left_x, region_height, region_width]
-    region: Option<[u32; 4]>,
-}
-
-#[derive(Debug, Default, Serialize, Deserialize)]
-struct PhysicalParameter {
-    peak_temp: Option<f64>,
+#[derive(Debug, Default, Deserialize, Serialize)]
+pub struct PhysicalParam {
+    peak_temperature: Option<f64>,
     solid_thermal_conductivity: Option<f64>,
     solid_thermal_diffusivity: Option<f64>,
     characteristic_length: Option<f64>,
     air_thermal_conductivity: Option<f64>,
 }
 
+#[derive(Debug, Deserialize, Serialize)]
+pub struct VideoMeta {
+    /// Path of TLC video file.
+    pub path: PathBuf,
+    /// Frame rate of video.
+    pub frame_rate: usize,
+    /// Total frames of video.
+    pub total_frames: usize,
+    /// (video_height, video_width)
+    pub shape: (u32, u32),
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct DAQMeta {
+    /// Path of TLC data acquisition file.
+    pub path: PathBuf,
+    /// Total raws of DAQ data.
+    pub total_rows: usize,
+}
+
+#[derive(Debug, Default, Deserialize, Serialize)]
+pub struct Thermocouple {
+    /// Column numbers of this thermocouple in the DAQ file.
+    pub column_num: usize,
+    /// Position of this thermocouple(y, x). Thermocouples
+    /// may not be in the video area, so coordinate can be negative.
+    pub pos: (i32, i32),
+}
+
 #[derive(Debug)]
 pub struct G2DParameter {
-    pub video_shape: (u32, u32),
-    pub region: [u32; 4],
     pub start_frame: usize,
-    pub frame_num: usize,
+    pub cal_num: usize,
+    pub area: (u32, u32, u32, u32),
 }
 
 enum SaveCategory {
@@ -89,9 +101,7 @@ enum SaveCategory {
 
 impl TLCConfig {
     pub async fn from_default_path() -> Self {
-        Self::from_path(DEFAULT_CONFIG_PATH)
-            .await
-            .unwrap_or_default()
+        Self::from_path(DEFAULT_CONFIG_PATH).await.unwrap()
     }
 
     pub async fn from_path<P: AsRef<Path>>(path: P) -> Result<Self> {
@@ -108,136 +118,15 @@ impl TLCConfig {
         Ok(cfg)
     }
 
-    pub fn get_save_info(&self) -> Result<SaveInfo> {
-        self.path_manager.get_save_info()
-    }
-
     pub fn get_video_path(&self) -> Option<&Path> {
-        Some(self.path_manager.video_path.as_ref()?.as_path())
+        Some(self.video_meta.as_ref()?.path.as_path())
     }
 
     pub fn get_daq_path(&self) -> Option<&Path> {
-        Some(self.path_manager.daq_path.as_ref()?.as_path())
+        Some(self.daq_meta.as_ref()?.path.as_path())
     }
 
-    pub fn on_video_load(&mut self, video_meta: VideoMeta) {
-        self.timing_parameter
-            .on_video_load(video_meta.frame_rate, video_meta.total_frames);
-        self.geometric_parameter.on_video_load(video_meta.shape);
-    }
-
-    pub fn on_daq_load(&mut self, daq_meta: DAQMeta) {
-        self.timing_parameter.on_daq_load(daq_meta.total_rows);
-    }
-
-    pub fn set_video_path<P: AsRef<Path>>(&mut self, video_path: P, video_meta: VideoMeta) {
-        self.path_manager.video_path = Some(video_path.as_ref().to_owned());
-        self.on_video_load(video_meta);
-    }
-
-    pub fn set_daq_path<P: AsRef<Path>>(&mut self, daq_path: P, daq_meta: DAQMeta) {
-        self.path_manager.daq_path = Some(daq_path.as_ref().to_owned());
-        self.on_daq_load(daq_meta);
-    }
-
-    pub fn set_region(&mut self, region: [u32; 4]) -> Result<G2DParameter> {
-        let region = self.geometric_parameter.set_region(region)?;
-
-        let start_frame = self
-            .timing_parameter
-            .start_frame
-            .ok_or(anyhow!("start frame unset"))?;
-        let frame_num = self
-            .timing_parameter
-            .frame_num
-            .ok_or(anyhow!("frame num unset"))?;
-        let video_shape = self
-            .geometric_parameter
-            .video_shape
-            .ok_or(anyhow!("video shape unset"))?;
-
-        Ok(G2DParameter {
-            video_shape,
-            region,
-            start_frame,
-            frame_num,
-        })
-    }
-
-    pub fn set_start_frame(&mut self, start_frame: usize) -> Result<G2DParameter> {
-        let (start_frame, frame_num) = self.timing_parameter.set_start_frame(start_frame)?;
-
-        let region = self
-            .geometric_parameter
-            .region
-            .ok_or(anyhow!("region unset"))?;
-        let video_shape = self
-            .geometric_parameter
-            .video_shape
-            .ok_or(anyhow!("video shape unset"))?;
-
-        Ok(G2DParameter {
-            video_shape,
-            region,
-            start_frame,
-            frame_num,
-        })
-    }
-}
-
-impl TimingParameter {
-    fn on_video_load(&mut self, frame_rate: usize, total_frames: usize) {
-        if self.frame_rate == Some(frame_rate) && self.total_frames == Some(total_frames) {
-            return;
-        }
-
-        self.frame_rate = Some(frame_rate);
-        self.total_frames = Some(total_frames);
-
-        self.start_frame.take();
-        self.frame_num.take();
-    }
-
-    fn on_daq_load(&mut self, total_rows: usize) {
-        if self.total_rows == Some(total_rows) {
-            return;
-        }
-
-        self.total_rows = Some(total_rows);
-
-        self.start_frame.take();
-        self.frame_num.take();
-    }
-
-    fn set_start_frame(&mut self, start_frame: usize) -> Result<(usize, usize)> {
-        if self.start_frame == Some(start_frame) {
-            bail!("start frame same as before, no need to rebuild g2d");
-        }
-
-        self.start_frame = Some(start_frame);
-        let total_frames = self
-            .total_frames
-            .ok_or(anyhow!("total frames of video unset"))?;
-        let total_rows = self.total_rows.ok_or(anyhow!("total rows of daq unset"))?;
-        let start_row = self.start_row.ok_or(anyhow!("start row of daq unset"))?;
-
-        let frame_num = (total_frames - start_frame).min(total_rows - start_row);
-        self.frame_num = Some(frame_num);
-
-        Ok((start_frame, frame_num))
-    }
-}
-
-#[derive(Serialize)]
-pub struct SaveInfo {
-    save_root_dir: PathBuf,
-    config_path: PathBuf,
-    nu_path: PathBuf,
-    plot_path: PathBuf,
-}
-
-impl PathManager {
-    fn get_save_info(&self) -> Result<SaveInfo> {
+    pub fn get_save_info(&self) -> Result<SaveInfo> {
         match self.save_root_dir {
             Some(ref save_root_dir) => Ok(SaveInfo {
                 save_root_dir: save_root_dir.to_owned(),
@@ -249,18 +138,93 @@ impl PathManager {
         }
     }
 
-    fn get_case_name(&self) -> Result<&OsStr> {
-        let video_path = self
-            .video_path
-            .as_ref()
-            .ok_or(anyhow!("video path unset"))?;
-        let case_name = video_path
-            .file_stem()
-            .ok_or(anyhow!("invalid video path: {:?}", video_path))?;
+    pub fn on_video_load(&mut self, video_meta: VideoMeta) -> Result<()> {
+        let new_path = video_meta.path.clone();
+        let new_shape = video_meta.shape;
+        let old_video_meta = self.video_meta.replace(video_meta);
 
-        Ok(case_name)
+        if let Some(ref old_video_meta) = old_video_meta {
+            if old_video_meta.path == new_path {
+                bail!("video path same as before")
+            }
+            if old_video_meta.shape != new_shape {
+                // Most of the time we can make use of the former position
+                // setting rather than directly invalidate it because within
+                // a series of experiments the position settings should be similar.
+                // We can only get this point when working with a brand new config
+                // or different camera parameters were used. Then we just put
+                // the select box in the center by default.
+                let (h, w) = new_shape;
+                self.area = Some((h / 4, w / 4, h / 2, w / 2));
+            }
+        }
+
+        self.start_frame.take();
+        self.cal_num.take();
+
+        Ok(())
     }
 
+    pub fn on_daq_load(&mut self, daq_meta: DAQMeta) -> Result<()> {
+        let new_path = daq_meta.path.clone();
+        let old_daq_meta = self.daq_meta.replace(daq_meta);
+
+        if let Some(old_daq_meta) = old_daq_meta {
+            if old_daq_meta.path == new_path {
+                bail!("daq path same as before")
+            }
+        }
+
+        self.start_row.take();
+        self.cal_num.take();
+
+        Ok(())
+    }
+
+    pub fn set_area(&mut self, area: (u32, u32, u32, u32)) -> Result<G2DParameter> {
+        if self.area == Some(area) {
+            bail!("calculation area same as before, no need to rebuild g2d");
+        }
+
+        self.area = Some(area);
+
+        self.get_g2d_parameter()
+    }
+
+    pub fn set_start_frame(&mut self, start_frame: usize) -> Result<G2DParameter> {
+        if self.start_frame == Some(start_frame) {
+            bail!("start frame same as before, no need to rebuild g2d");
+        }
+
+        self.start_frame = Some(start_frame);
+
+        self.try_update_cal_num();
+
+        self.get_g2d_parameter()
+    }
+
+    pub fn get_g2d_parameter(&self) -> Result<G2DParameter> {
+        let area = self.area.ok_or(anyhow!("calculation area unset"))?;
+        let start_frame = self.start_frame.ok_or(anyhow!("start frame unset"))?;
+        let cal_num = self.cal_num.ok_or(anyhow!("calculation number unset"))?;
+
+        Ok(G2DParameter {
+            start_frame,
+            cal_num,
+            area,
+        })
+    }
+}
+
+#[derive(Serialize)]
+pub struct SaveInfo {
+    save_root_dir: PathBuf,
+    config_path: PathBuf,
+    nu_path: PathBuf,
+    plot_path: PathBuf,
+}
+
+impl TLCConfig {
     fn get_save_path(&self, save: SaveCategory) -> Result<PathBuf> {
         let (dir, ext) = match save {
             SaveCategory::Config => ("config", "toml"),
@@ -278,32 +242,30 @@ impl PathManager {
 
         Ok(save_path)
     }
-}
 
-impl GeometricParameter {
-    fn on_video_load(&mut self, video_shape: (u32, u32)) {
-        if self.video_shape == Some(video_shape) {
-            return;
-        }
+    fn get_case_name(&self) -> Result<&OsStr> {
+        let video_path = &self
+            .video_meta
+            .as_ref()
+            .ok_or(anyhow!("video path unset"))?
+            .path;
+        let case_name = video_path
+            .file_stem()
+            .ok_or(anyhow!("invalid video path: {:?}", video_path))?;
 
-        // Most of the time we can make use of the former geometric
-        // setting rather than directly invalidate it because within
-        // a series of experiments the geometric settings should be similar.
-        // We can only get this point when working with a brand new config
-        // or different camera parameters were used. Then we just put
-        // the select box in the center by default.
-        let (h, w) = video_shape;
-        self.video_shape = Some((h, w));
-        self.region = Some([h / 4, w / 4, h / 2, w / 2]);
+        Ok(case_name)
     }
 
-    fn set_region(&mut self, region: [u32; 4]) -> Result<[u32; 4]> {
-        if self.region == Some(region) {
-            bail!("calculation region same as before, no need to rebuild g2d");
-        }
+    fn try_update_cal_num(&mut self) -> Option<usize> {
+        self.cal_num.take();
 
-        self.region = Some(region);
+        let total_frames = self.video_meta.as_ref()?.total_frames;
+        let total_rows = self.daq_meta.as_ref()?.total_rows;
+        let start_frame = self.start_frame?;
+        let start_row = self.start_row?;
 
-        Ok(region)
+        self.cal_num = Some((total_frames - start_frame).min(total_rows - start_row));
+
+        self.cal_num
     }
 }

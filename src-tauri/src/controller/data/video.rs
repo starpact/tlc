@@ -1,11 +1,10 @@
-use std::cell::{Ref, RefCell};
+use std::cell::{RefCell, RefMut};
 use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
 
 use ffmpeg_next as ffmpeg;
 
 use anyhow::{anyhow, Result};
-use derivative::Derivative;
 use ffmpeg::codec::{self, packet::Packet};
 use ffmpeg::format::context::input::{Input, PacketIter};
 use ffmpeg::format::Pixel::RGB24;
@@ -18,18 +17,18 @@ use thread_local::ThreadLocal;
 use tracing::debug;
 
 use crate::controller::cfg::G2DParameter;
-use crate::util;
+use crate::util::timing;
 
-#[derive(Derivative, Default)]
-#[derivative(Debug)]
+#[derive(Default)]
 pub struct VideoCache {
     /// Identifies the current video.
     pub path: Option<PathBuf>,
     /// Total packet/frame number of the current video.
-    /// This is used to validate the `frame_index` parameter of `get_frame`.
-    pub total: usize,
+    /// This is used for:
+    /// 1. Validate the `frame_index` parameter of `get_frame`.
+    /// 2. Check whether reading has finished.
+    pub total_frames: usize,
     /// Cache thread-local decoder.
-    #[derivative(Debug = "ignore")]
     pub decoder_cache: DecoderCache,
     /// > [For video, one packet should typically contain one compressed frame
     /// ](https://libav.org/documentation/doxygen/master/structAVPacket.html).
@@ -43,18 +42,18 @@ pub struct VideoCache {
     /// This is because packet is *compressed*. Specifically, a typical video
     /// in our experiments of 1.9GB will expend to 9.1GB if decoded to rgb byte
     /// array, which may cause some trouble on PC.
-    #[derivative(Debug = "ignore")]
     pub packets: Vec<Packet>,
 }
 
 #[derive(Default)]
 pub struct DecoderCache {
     video_ctx: Mutex<codec::Context>,
-    decoders: ThreadLocal<Decoder>,
+    decoders: ThreadLocal<RefCell<Decoder>>,
 }
 
 #[derive(Debug)]
 pub struct VideoMeta {
+    pub path: PathBuf,
     pub frame_rate: usize,
     pub total_frames: usize,
     pub shape: (u32, u32),
@@ -69,7 +68,7 @@ impl VideoCache {
     ) {
         self.path = Some(path.as_ref().to_owned());
         self.decoder_cache.reset(video_ctx);
-        self.total = total_frames;
+        self.total_frames = total_frames;
         self.packets.clear();
     }
 
@@ -84,16 +83,15 @@ impl VideoCache {
     }
 
     pub fn build_g2d(&self, g2d_parameter: G2DParameter) -> Result<Array2<u8>> {
-        let _timing = util::duration::measure("building g2d");
+        let _timing = timing::start("building g2d");
         debug!("{:#?}", g2d_parameter);
 
         let G2DParameter {
-            video_shape: (_, vw),
-            region: [tl_y, tl_x, h, w],
             start_frame,
-            frame_num,
+            cal_num: frame_num,
+            area: (tl_y, tl_x, h, w),
         } = g2d_parameter;
-        let byte_w = (vw * 3) as usize;
+        let byte_w = self.decoder_cache.get_decoder()?.shape().1 as usize * 3;
         let [tl_y, tl_x, h, w] = [tl_y as usize, tl_x as usize, h as usize, w as usize];
 
         let mut g2d = Array2::zeros((frame_num, h * w));
@@ -103,7 +101,8 @@ impl VideoCache {
             .skip(start_frame)
             .zip(g2d.axis_iter_mut(Axis(0)).into_iter())
             .try_for_each(|(packet, mut row)| -> Result<()> {
-                let dst_frame = self.decoder_cache.get_decoder()?.decode(packet)?;
+                let mut decoder = self.decoder_cache.get_decoder()?;
+                let dst_frame = decoder.decode(packet)?;
 
                 // the data of each frame store in a u8 array:
                 // |r g b r g b...r g b|r g b r g b...r g b|......|r g b r g b...r g b|
@@ -129,9 +128,13 @@ impl VideoCache {
 }
 
 impl DecoderCache {
-    pub fn get_decoder(&self) -> Result<&Decoder> {
-        self.decoders
-            .get_or_try(|| Decoder::new(&*self.video_ctx.lock()))
+    pub fn get_decoder(&self) -> Result<RefMut<Decoder>> {
+        let decoder = self.decoders.get_or_try(|| -> Result<RefCell<Decoder>> {
+            let decoder = Decoder::new(&*self.video_ctx.lock())?;
+            Ok(RefCell::new(decoder))
+        })?;
+
+        Ok(decoder.borrow_mut())
     }
 
     fn reset(&mut self, video_ctx: codec::Context) {
@@ -198,12 +201,12 @@ impl DerefMut for SendableSWSCtx {
 }
 
 pub struct Decoder {
-    inner: RefCell<ffmpeg::decoder::Video>,
-    sws_ctx: RefCell<SendableSWSCtx>,
+    inner: ffmpeg::decoder::Video,
+    sws_ctx: SendableSWSCtx,
     /// `src_frame` and `dst_frame` are used to avoid frequent allocation.
     /// This can speed up decoding by about 10%.
-    src_frame: RefCell<Video>,
-    dst_frame: RefCell<Video>,
+    src_frame: Video,
+    dst_frame: Video,
 }
 
 impl Decoder {
@@ -213,28 +216,22 @@ impl Decoder {
         let sws_ctx = scaling::Context::get(decoder.format(), w, h, RGB24, w, h, Flags::BILINEAR)?;
 
         Ok(Self {
-            inner: RefCell::new(decoder),
-            sws_ctx: RefCell::new(SendableSWSCtx(sws_ctx)),
-            src_frame: RefCell::new(Video::empty()),
-            dst_frame: RefCell::new(Video::empty()),
+            inner: decoder,
+            sws_ctx: SendableSWSCtx(sws_ctx),
+            src_frame: Video::empty(),
+            dst_frame: Video::empty(),
         })
     }
 
-    pub fn decode(&self, packet: &Packet) -> Result<Ref<Video>> {
-        let mut decoder = self.inner.borrow_mut();
-        let mut sws_ctx = self.sws_ctx.borrow_mut();
-        let mut src_frame = self.src_frame.borrow_mut();
-        let mut dst_frame = self.dst_frame.borrow_mut();
+    pub fn decode(&mut self, packet: &Packet) -> Result<&Video> {
+        self.inner.send_packet(packet)?;
+        self.inner.receive_frame(&mut self.src_frame)?;
+        self.sws_ctx.run(&self.src_frame, &mut self.dst_frame)?;
 
-        decoder.send_packet(packet)?;
-        decoder.receive_frame(&mut src_frame)?;
-        sws_ctx.run(&src_frame, &mut dst_frame)?;
-        drop(dst_frame);
-
-        Ok(self.dst_frame.borrow())
+        Ok(&self.dst_frame)
     }
 
     pub fn shape(&self) -> (u32, u32) {
-        (self.inner.borrow().height(), self.inner.borrow().width())
+        (self.inner.height(), self.inner.width())
     }
 }

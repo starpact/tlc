@@ -5,15 +5,10 @@ use calamine::{open_workbook, Reader, Xlsx};
 use ndarray::Array2;
 use tracing::debug;
 
-use crate::util;
-
-#[derive(Debug)]
-pub struct DAQMeta {
-    pub total_rows: usize,
-}
+use crate::util::timing;
 
 pub fn read_daq<P: AsRef<Path>>(daq_path: P) -> Result<Array2<f64>> {
-    let _timing = util::duration::measure("reading daq");
+    let _timing = timing::start("reading daq");
     debug!("{:?}", daq_path.as_ref());
 
     let daq = match daq_path

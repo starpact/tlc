@@ -1,29 +1,30 @@
 mod daq;
 mod filter;
-mod interpolation;
+mod interp;
 mod plot;
-pub mod video;
+mod solve;
+mod video;
 
 use std::path::Path;
 use std::sync::Arc;
 
 use ffmpeg_next as ffmpeg;
 
-use anyhow::{bail, Result};
+use anyhow::{anyhow, bail, Result};
 use image::{codecs::jpeg::JpegEncoder, ColorType::Rgb8};
 use ndarray::Array2;
 use parking_lot::RwLock;
 use tokio::sync::oneshot;
 use tracing::debug;
 
-pub use daq::DAQMeta;
-
-use super::cfg::G2DParameter;
-use crate::util::{self, blocking};
-pub use video::VideoMeta;
+use super::cfg::{DAQMeta, G2DParameter, VideoMeta};
+use crate::util::{blocking, timing};
+pub use filter::FilterMethod;
+pub use interp::InterpMethod;
+pub use solve::IterationMethod;
 use video::{open_video, VideoCache};
 
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct TLCData {
     /// Blocking version of `RWLock` is used here because:
     /// 1. `frame_cache` directly works with blocking operation such as: reading videos from file(IO)
@@ -58,14 +59,14 @@ impl TLCData {
         blocking::compute(move || -> Result<String> {
             let frame = loop {
                 let vc = video_cache.read();
-                if frame_index >= vc.total {
+                if frame_index >= vc.total_frames {
                     // This is an invalid `frame_index` from frontend and will never get the frame.
                     // So directly abort current thread. Then `rx` will be dropped and `tx` outside
                     // will stop pending(returning an `RecvError`).
                     bail!("frame_index({}) out of range", frame_index);
                 }
                 if let Some(packet) = vc.packets.get(frame_index) {
-                    let decoder = vc.decoder_cache.get_decoder()?;
+                    let mut decoder = vc.decoder_cache.get_decoder()?;
                     let (h, w) = decoder.shape();
                     // This pre-alloc size is just an empirical estimate.
                     let mut buf = Vec::with_capacity((h * w) as usize);
@@ -82,29 +83,28 @@ impl TLCData {
     }
 
     pub async fn read_video<P: AsRef<Path>>(&self, video_path: P) -> Result<VideoMeta> {
-        let video_path = video_path.as_ref().to_owned();
+        let path = video_path.as_ref().to_owned();
         let video_cache = self.video_cache.clone();
         let (tx, rx) = oneshot::channel();
 
-        let worker = tokio::task::spawn_blocking(move || {
-            let _timing = util::duration::measure("reading video");
-            debug!("{:?}", &video_path);
+        let worker = tokio::task::spawn_blocking(move || -> Result<()> {
+            let _timing = timing::start("reading video");
+            debug!("{:?}", &path);
 
-            let mut input = ffmpeg::format::input(&video_path)?;
+            let mut input = ffmpeg::format::input(&path)?;
             let (frame_rate, total_frames, video_ctx, mut packet_iter) = open_video(&mut input)?;
             let decoder = video_ctx.clone().decoder().video()?;
 
             // Outer function can return at this point.
             let _ = tx.send(VideoMeta {
+                path: path.clone(),
                 frame_rate,
                 total_frames,
                 shape: (decoder.height(), decoder.width()),
             });
 
             // `packet_cache` is reset before start reading from file.
-            video_cache
-                .write()
-                .reset(&video_path, video_ctx, total_frames);
+            video_cache.write().reset(&path, video_ctx, total_frames);
 
             let mut cnt = 0;
             loop {
@@ -112,7 +112,7 @@ impl TLCData {
                 // reading **each** frame to avoid busy loop within `get_frame`.
                 let mut vc = video_cache.write();
                 if let Some(packet) = packet_iter.next() {
-                    if vc.path_changed(&video_path) {
+                    if vc.path_changed(&path) {
                         // Video path has been changed, which means user changed the path before
                         // previous reading finishes. So we should abort this reading at once.
                         // Other threads should be waiting for the lock to read from the latest path
@@ -134,24 +134,43 @@ impl TLCData {
 
         match rx.await {
             Ok(t) => Ok(t),
-            Err(_) => Err(worker.await?.unwrap_err()),
+            Err(_) => Err(worker
+                .await?
+                .map_err(|e| anyhow!("failed to read video from {:?}: {}", video_path.as_ref(), e))
+                .unwrap_err()),
         }
     }
 
     pub async fn read_daq<P: AsRef<Path>>(&mut self, daq_path: P) -> Result<DAQMeta> {
-        let daq_path = daq_path.as_ref().to_owned();
-        let daq = tokio::task::spawn_blocking(move || daq::read_daq(daq_path)).await??;
+        let path = daq_path.as_ref().to_owned();
+        let daq = tokio::task::spawn_blocking(move || daq::read_daq(&path)).await??;
         let total_rows = daq.dim().0;
         self.daq = daq;
 
-        Ok(DAQMeta { total_rows })
+        Ok(DAQMeta {
+            path: daq_path.as_ref().to_owned(),
+            total_rows,
+        })
     }
 
-    pub async fn build_g2d(&mut self, g2d_parameter: G2DParameter) -> Result<()> {
+    pub async fn build_g2d(&mut self, g2d_parameter: G2DParameter) -> Result<&mut Self> {
         let video_cache = self.video_cache.clone();
-        let g2 = blocking::compute(move || video_cache.read().build_g2d(g2d_parameter)).await??;
+        let g2 = blocking::compute(move || loop {
+            let vc = video_cache.read();
+            if vc.packets.len() == vc.total_frames {
+                break vc.build_g2d(g2d_parameter);
+            }
+        })
+        .await??;
         self.g2 = Arc::new(g2);
         self.filtered_g2 = self.g2.clone();
+
+        Ok(self)
+    }
+
+    pub async fn filter(&mut self, filter_method: FilterMethod) -> Result<()> {
+        let g2 = self.g2.clone();
+        self.filtered_g2 = blocking::compute(move || filter::filter(g2, filter_method)).await?;
 
         Ok(())
     }

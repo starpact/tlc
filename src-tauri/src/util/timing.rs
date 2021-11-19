@@ -2,26 +2,26 @@ use std::time::Instant;
 
 use tracing::debug;
 
-pub struct DurationGuard {
+pub struct TimingGuard {
     t0: Instant,
     description: String,
 }
 
-pub fn measure<S: ToString>(description: S) -> DurationGuard {
+pub fn start<S: ToString>(description: S) -> TimingGuard {
     let description = description.to_string();
     debug!("[TIMING] start {} ......", description);
-    DurationGuard {
+    TimingGuard {
         t0: Instant::now(),
         description,
     }
 }
 
-impl Drop for DurationGuard {
+impl Drop for TimingGuard {
     fn drop(&mut self) {
         debug!(
             "[TIMING] finish {} in {:?}",
             self.description,
-            self.t0.elapsed()
+            self.t0.elapsed(),
         );
     }
 }

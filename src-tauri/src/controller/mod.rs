@@ -3,12 +3,13 @@ mod data;
 
 use std::path::Path;
 
-use anyhow::{bail, Context, Result};
+use anyhow::Result;
 use tokio::sync::RwLock;
 use tracing::debug;
 
 pub use cfg::SaveInfo;
 use cfg::TLCConfig;
+pub use data::FilterMethod;
 use data::TLCData;
 
 pub struct TLCController {
@@ -25,12 +26,12 @@ impl TLCController {
 
         if let Some(video_path) = cfg.get_video_path() {
             if let Ok(video_meta) = data.read_video(video_path).await {
-                cfg.on_video_load(video_meta);
+                let _ = cfg.on_video_load(video_meta);
             }
         }
         if let Some(daq_path) = cfg.get_daq_path() {
             if let Ok(daq_meta) = data.read_daq(daq_path).await {
-                cfg.on_daq_load(daq_meta);
+                let _ = cfg.on_daq_load(daq_meta);
             }
         }
 
@@ -47,14 +48,16 @@ impl TLCController {
     }
 
     pub async fn load_config<P: AsRef<Path>>(&self, path: P) -> Result<()> {
-        let new_cfg = TLCConfig::from_path(path).await?;
+        let mut new_cfg = TLCConfig::from_path(path).await?;
         let mut new_data = TLCData::default();
 
         if let Some(video_path) = new_cfg.get_video_path() {
-            new_data.read_video(video_path).await?;
+            let video_meta = new_data.read_video(video_path).await?;
+            let _ = new_cfg.on_video_load(video_meta);
         }
         if let Some(daq_path) = new_cfg.get_daq_path() {
-            new_data.read_daq(daq_path).await?;
+            let daq_meta = new_data.read_daq(daq_path).await?;
+            let _ = new_cfg.on_daq_load(daq_meta);
         }
 
         debug!("{:#?}", new_cfg);
@@ -66,36 +69,30 @@ impl TLCController {
     }
 
     pub async fn set_video_path<P: AsRef<Path>>(&self, video_path: P) -> Result<()> {
-        let mut cfg = self.cfg.write().await;
-        if cfg.get_video_path() == Some(video_path.as_ref()) {
-            bail!("video path same as before");
-        }
-
         // `set_video_path` has two side effects:
         // 1. Another thread is spawned to read from new video path.
         // 2. Some configurations are no longer valid so we need to update/invalidate them.
-        let video_meta = self
-            .data
-            .read()
-            .await
-            .read_video(&video_path)
-            .await
-            .with_context(|| format!("failed to read video: {:?}", video_path.as_ref()))?;
+        let video_meta = self.data.read().await.read_video(&video_path).await?;
 
-        cfg.set_video_path(&video_path, video_meta);
+        let mut cfg = self.cfg.write().await;
+        cfg.on_video_load(video_meta)?;
+        let g2d_parameter = cfg.get_g2d_parameter()?;
+        self.data
+            .write()
+            .await
+            .build_g2d(g2d_parameter)
+            .await?
+            .filter(cfg.filter_method)
+            .await?;
 
         Ok(())
     }
 
     pub async fn set_daq_path<P: AsRef<Path>>(&self, daq_path: P) -> Result<()> {
-        let mut cfg = self.cfg.write().await;
-        if cfg.get_daq_path() == Some(daq_path.as_ref()) {
-            bail!("daq path same as before");
-        }
-
         let daq_meta = self.data.write().await.read_daq(&daq_path).await?;
 
-        cfg.set_daq_path(&daq_path, daq_meta);
+        let mut cfg = self.cfg.write().await;
+        cfg.on_daq_load(daq_meta)?;
 
         Ok(())
     }
@@ -105,15 +102,37 @@ impl TLCController {
     }
 
     pub async fn set_start_frame(&self, start_frame: usize) -> Result<()> {
-        let g2d_builder = self.cfg.write().await.set_start_frame(start_frame)?;
-        self.data.write().await.build_g2d(g2d_builder).await?;
+        let mut cfg = self.cfg.write().await;
+        let g2d_builder = cfg.set_start_frame(start_frame)?;
+        self.data
+            .write()
+            .await
+            .build_g2d(g2d_builder)
+            .await?
+            .filter(cfg.filter_method)
+            .await?;
 
         Ok(())
     }
 
-    pub async fn set_region(&self, region: [u32; 4]) -> Result<()> {
-        let g2d_builder = self.cfg.write().await.set_region(region)?;
-        self.data.write().await.build_g2d(g2d_builder).await?;
+    pub async fn set_area(&self, area: (u32, u32, u32, u32)) -> Result<()> {
+        let mut cfg = self.cfg.write().await;
+        let g2d_builder = cfg.set_area(area)?;
+        self.data
+            .write()
+            .await
+            .build_g2d(g2d_builder)
+            .await?
+            .filter(cfg.filter_method)
+            .await?;
+
+        Ok(())
+    }
+
+    pub async fn set_filter_method(&self, filter_method: FilterMethod) -> Result<()> {
+        let mut cfg = self.cfg.write().await;
+        cfg.filter_method = filter_method;
+        self.data.write().await.filter(filter_method).await?;
 
         Ok(())
     }

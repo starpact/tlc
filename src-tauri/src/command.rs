@@ -4,8 +4,7 @@ use std::path::Path;
 use serde::Serialize;
 use tauri::State;
 
-use crate::controller::SaveInfo;
-use crate::controller::TLCController;
+use crate::controller::{FilterMethod, SaveInfo, TLCController};
 
 pub type TLCResult<T> = Result<T, String>;
 
@@ -45,11 +44,22 @@ pub async fn get_frame(frame_index: usize, state: State<'_, TLCController>) -> T
 }
 
 #[tauri::command]
-pub async fn set_region(region: [u32; 4], state: State<'_, TLCController>) -> TLCResult<()> {
-    state.set_region(region).await.to()
+pub async fn set_area(
+    area: (u32, u32, u32, u32),
+    state: State<'_, TLCController>,
+) -> TLCResult<()> {
+    state.set_area(area).await.to()
 }
 
 #[tauri::command]
 pub async fn set_start_frame(start_frame: usize, state: State<'_, TLCController>) -> TLCResult<()> {
     state.set_start_frame(start_frame).await.to()
+}
+
+#[tauri::command]
+pub async fn set_filter_method(
+    filter_method: FilterMethod,
+    state: State<'_, TLCController>,
+) -> TLCResult<()> {
+    state.set_filter_method(filter_method).await.to()
 }

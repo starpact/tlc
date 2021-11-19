@@ -46,7 +46,6 @@ dependencies = [
  "base64",
  "calamine",
  "csv",
- "derivative",
  "dwt",
  "ffmpeg-next",
  "image",

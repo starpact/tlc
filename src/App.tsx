@@ -26,8 +26,8 @@ function App() {
       .catch((err?: string) => console.error(err));
   }
 
-  function set_region() {
-    invoke<void>("set_region", { region: [100, 100, 800, 1000] })
+  function set_area() {
+    invoke<void>("set_area", { area: [100, 100, 800, 1000] })
       .catch((err?: string) => console.error(err));
   }
 
@@ -48,7 +48,7 @@ function App() {
       <br />
       <button onClick={get_frame}>get_frame</button>
       <br />
-      <button onClick={set_region}>set_region</button>
+      <button onClick={set_area}>set_area</button>
       <br />
       <button onClick={set_start_frame}>set_start_frame</button>
       <br />
