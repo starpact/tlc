@@ -1,11 +1,15 @@
 use std::sync::Arc;
 
+use anyhow::Result;
 use dwt::wavelet::Wavelet;
 use dwt::{transform, Operation};
 use median::Filter;
 use ndarray::parallel::prelude::*;
 use ndarray::prelude::*;
 use serde::{Deserialize, Serialize};
+use tracing::debug;
+
+use crate::util::{blocking, timing};
 
 #[derive(Debug, Deserialize, Serialize, Clone, Copy)]
 pub enum FilterMethod {
@@ -16,41 +20,52 @@ pub enum FilterMethod {
 
 impl Default for FilterMethod {
     fn default() -> Self {
-        FilterMethod::No
+        FilterMethod::Median(3)
     }
 }
 
-pub fn filter(g2: Arc<Array2<u8>>, filter_method: FilterMethod) -> Arc<Array2<u8>> {
-    match filter_method {
-        FilterMethod::No => g2,
-        FilterMethod::Median(window_size) => {
-            let mut filtered_g2 = g2.as_ref().clone();
-            filtered_g2
-                .axis_iter_mut(Axis(1))
-                .into_par_iter()
-                .for_each(|col| median_filter(col, window_size));
+pub async fn filter(g2: Arc<Array2<u8>>, filter_method: FilterMethod) -> Result<Arc<Array2<u8>>> {
+    let _timing = timing::start("filtering g2");
+    debug!("filter method: {:?}", filter_method);
 
-            Arc::new(filtered_g2)
-        }
-        FilterMethod::Wavelet(threshold_ratio) => {
-            let mut filtered_g2 = g2.as_ref().clone();
-            filtered_g2
-                .axis_iter_mut(Axis(1))
-                .into_par_iter()
-                .for_each(|col| wavelet_filter(col, threshold_ratio));
+    let filtered_g2 = match filter_method {
+        FilterMethod::No => return Ok(g2),
+        FilterMethod::Median(window_size) => cal(g2, median_fn(window_size)).await?,
+        FilterMethod::Wavelet(threshold_ratio) => cal(g2, wavelet_fn(threshold_ratio)).await?,
+    };
 
-            Arc::new(filtered_g2)
-        }
-    }
+    Ok(Arc::new(filtered_g2))
 }
 
-fn median_filter(mut g1: ArrayViewMut1<u8>, window_size: usize) {
+async fn cal<F>(g2: Arc<Array2<u8>>, f: F) -> Result<Array2<u8>>
+where
+    F: Fn(ArrayViewMut1<u8>) + Send + Sync + 'static,
+{
+    blocking::compute(move || {
+        let mut filtered_g2 = g2.as_ref().clone();
+        filtered_g2
+            .axis_iter_mut(Axis(1))
+            .into_par_iter()
+            .for_each(f);
+
+        filtered_g2
+    })
+    .await
+}
+
+#[inline]
+fn median(mut g1: ArrayViewMut1<u8>, window_size: usize) {
     let mut filter = Filter::new(window_size);
     g1.iter_mut().for_each(|g| *g = filter.consume(*g));
 }
 
+fn median_fn(window_size: usize) -> impl Fn(ArrayViewMut1<u8>) {
+    move |g1| median(g1, window_size)
+}
+
 /// Refer to [pywavelets](https://pywavelets.readthedocs.io/en/latest/ref)
-fn wavelet_filter(mut g1: ArrayViewMut1<u8>, threshold_ratio: f64) {
+#[inline]
+fn wavelet(mut g1: ArrayViewMut1<u8>, threshold_ratio: f64) {
     let data_len = g1.len();
     let wavelet = db8();
 
@@ -90,6 +105,10 @@ fn wavelet_filter(mut g1: ArrayViewMut1<u8>, threshold_ratio: f64) {
 
     // [f64] => [u8]
     g1.iter_mut().zip(g1f).for_each(|(g, b)| *g = b as u8);
+}
+
+fn wavelet_fn(threshold_ratio: f64) -> impl Fn(ArrayViewMut1<u8>) {
+    move |g1| wavelet(g1, threshold_ratio)
 }
 
 /// Refer to [Daubechies 8](http://wavelets.pybytes.com/wavelet/db8)。

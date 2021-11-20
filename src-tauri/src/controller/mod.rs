@@ -9,6 +9,7 @@ use tracing::debug;
 
 pub use cfg::SaveInfo;
 use cfg::TLCConfig;
+use data::filter;
 pub use data::FilterMethod;
 use data::TLCData;
 
@@ -76,14 +77,13 @@ impl TLCController {
 
         let mut cfg = self.cfg.write().await;
         cfg.on_video_load(video_meta)?;
-        let g2d_parameter = cfg.get_g2d_parameter()?;
-        self.data
-            .write()
-            .await
-            .build_g2d(g2d_parameter)
-            .await?
-            .filter(cfg.filter_method)
-            .await?;
+        let g2_parameter = cfg.get_g2_parameter()?;
+        let filter_method = cfg.filter_method;
+        drop(cfg);
+
+        let g2 = self.data.write().await.build_g2(g2_parameter).await?;
+        let filtered_g2 = filter(g2, filter_method).await?;
+        self.data.write().await.filtered_g2 = filtered_g2;
 
         Ok(())
     }
@@ -103,36 +103,37 @@ impl TLCController {
 
     pub async fn set_start_frame(&self, start_frame: usize) -> Result<()> {
         let mut cfg = self.cfg.write().await;
-        let g2d_builder = cfg.set_start_frame(start_frame)?;
-        self.data
-            .write()
-            .await
-            .build_g2d(g2d_builder)
-            .await?
-            .filter(cfg.filter_method)
-            .await?;
+        let g2_parameter = cfg.set_start_frame(start_frame)?;
+        let filter_method = cfg.filter_method;
+        drop(cfg);
+
+        let g2 = self.data.write().await.build_g2(g2_parameter).await?;
+        let filtered_g2 = filter(g2, filter_method).await?;
+        self.data.write().await.filtered_g2 = filtered_g2;
 
         Ok(())
     }
 
     pub async fn set_area(&self, area: (u32, u32, u32, u32)) -> Result<()> {
         let mut cfg = self.cfg.write().await;
-        let g2d_builder = cfg.set_area(area)?;
-        self.data
-            .write()
-            .await
-            .build_g2d(g2d_builder)
-            .await?
-            .filter(cfg.filter_method)
-            .await?;
+        let g2_parameter = cfg.set_area(area)?;
+        let filter_method = cfg.filter_method;
+        drop(cfg);
+
+        let g2 = self.data.write().await.build_g2(g2_parameter).await?;
+        let filtered_g2 = filter(g2, filter_method).await?;
+        self.data.write().await.filtered_g2 = filtered_g2;
 
         Ok(())
     }
 
     pub async fn set_filter_method(&self, filter_method: FilterMethod) -> Result<()> {
-        let mut cfg = self.cfg.write().await;
-        cfg.filter_method = filter_method;
-        self.data.write().await.filter(filter_method).await?;
+        self.cfg.write().await.filter_method = filter_method;
+        let g2 = self.data.read().await.g2.clone();
+        // We should not hold the write lock of `data` when filtering because this
+        // may take a relative long time.
+        let filtered_g2 = filter(g2, filter_method).await?;
+        self.data.write().await.filtered_g2 = filtered_g2;
 
         Ok(())
     }

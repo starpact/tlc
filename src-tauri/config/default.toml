@@ -7,7 +7,6 @@ cal_num = 2333
 path = "D:\\Archive\\2021yhj\\EXP\\imp\\video\\imp_20000_1_up.avi"
 frame_rate = 25
 total_frames = 2444
-shape = [500, 500]
 
 [daq_meta]
 path = "D:\\Archive\\2021yhj\\EXP\\imp\\daq\\imp_20000_1.lvm"

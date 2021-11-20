@@ -17,9 +17,9 @@ use parking_lot::RwLock;
 use tokio::sync::oneshot;
 use tracing::debug;
 
-use super::cfg::{DAQMeta, G2DParameter, VideoMeta};
+use super::cfg::{DAQMeta, G2Parameter, VideoMeta};
 use crate::util::{blocking, timing};
-pub use filter::FilterMethod;
+pub use filter::{filter, FilterMethod};
 pub use interp::InterpMethod;
 pub use solve::IterationMethod;
 use video::{open_video, VideoCache};
@@ -41,9 +41,9 @@ pub struct TLCData {
     /// frame 2: |X1Y1 X2Y1 ... XnY1 X1Y2 X2Y2 ... XnY2 ...... XnYn|
     ///
     /// ......
-    g2: Arc<Array2<u8>>,
+    pub g2: Arc<Array2<u8>>,
 
-    filtered_g2: Arc<Array2<u8>>,
+    pub filtered_g2: Arc<Array2<u8>>,
 }
 
 impl TLCData {
@@ -153,25 +153,18 @@ impl TLCData {
         })
     }
 
-    pub async fn build_g2d(&mut self, g2d_parameter: G2DParameter) -> Result<&mut Self> {
+    pub async fn build_g2(&mut self, g2_parameter: G2Parameter) -> Result<Arc<Array2<u8>>> {
         let video_cache = self.video_cache.clone();
         let g2 = blocking::compute(move || loop {
             let vc = video_cache.read();
             if vc.packets.len() == vc.total_frames {
-                break vc.build_g2d(g2d_parameter);
+                break vc.build_g2(g2_parameter);
             }
         })
         .await??;
         self.g2 = Arc::new(g2);
         self.filtered_g2 = self.g2.clone();
 
-        Ok(self)
-    }
-
-    pub async fn filter(&mut self, filter_method: FilterMethod) -> Result<()> {
-        let g2 = self.g2.clone();
-        self.filtered_g2 = blocking::compute(move || filter::filter(g2, filter_method)).await?;
-
-        Ok(())
+        Ok(self.g2.clone())
     }
 }

@@ -21,8 +21,7 @@ pub fn nan_mean<D: Dimension>(data: ArrayView<f64, D>) -> f64 {
 pub fn draw_area<P: AsRef<Path>>(
     plot_path: P,
     area: ArrayView2<f64>,
-    vmin: f64,
-    vmax: f64,
+    (vmin, vmax): (f64, f64),
 ) -> Result<()> {
     let (h, w) = area.dim();
     let root = BitMapBackend::new(&plot_path, (w as u32, h as u32)).into_drawing_area();
@@ -41,7 +40,7 @@ pub fn draw_area<P: AsRef<Path>>(
                 }
                 let color_index = ((nu.max(vmin).min(vmax) - vmin) / delta * 255.) as usize;
                 let mut rgb = JET[color_index];
-                rgb.iter_mut().for_each(|c| *c = *c * 255.);
+                rgb.iter_mut().for_each(|c| *c *= 255.);
                 pix_plotter
                     .draw_pixel((x, y), &RGBColor(rgb[0] as u8, rgb[1] as u8, rgb[2] as u8))?;
             }

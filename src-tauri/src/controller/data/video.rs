@@ -16,7 +16,7 @@ use rayon::prelude::*;
 use thread_local::ThreadLocal;
 use tracing::debug;
 
-use crate::controller::cfg::G2DParameter;
+use crate::controller::cfg::G2Parameter;
 use crate::util::timing;
 
 #[derive(Default)]
@@ -82,24 +82,24 @@ impl VideoCache {
         old != new
     }
 
-    pub fn build_g2d(&self, g2d_parameter: G2DParameter) -> Result<Array2<u8>> {
-        let _timing = timing::start("building g2d");
-        debug!("{:#?}", g2d_parameter);
+    pub fn build_g2(&self, g2_parameter: G2Parameter) -> Result<Array2<u8>> {
+        let _timing = timing::start("building g2");
+        debug!("{:#?}", g2_parameter);
 
-        let G2DParameter {
+        let G2Parameter {
             start_frame,
-            cal_num: frame_num,
+            frame_num,
             area: (tl_y, tl_x, h, w),
-        } = g2d_parameter;
+        } = g2_parameter;
         let byte_w = self.decoder_cache.get_decoder()?.shape().1 as usize * 3;
         let [tl_y, tl_x, h, w] = [tl_y as usize, tl_x as usize, h as usize, w as usize];
 
-        let mut g2d = Array2::zeros((frame_num, h * w));
+        let mut g2 = Array2::zeros((frame_num, h * w));
 
         self.packets
             .par_iter()
             .skip(start_frame)
-            .zip(g2d.axis_iter_mut(Axis(0)).into_iter())
+            .zip(g2.axis_iter_mut(Axis(0)).into_iter())
             .try_for_each(|(packet, mut row)| -> Result<()> {
                 let mut decoder = self.decoder_cache.get_decoder()?;
                 let dst_frame = decoder.decode(packet)?;
@@ -123,14 +123,14 @@ impl VideoCache {
                 Ok(())
             })?;
 
-        Ok(g2d)
+        Ok(g2)
     }
 }
 
 impl DecoderCache {
     pub fn get_decoder(&self) -> Result<RefMut<Decoder>> {
         let decoder = self.decoders.get_or_try(|| -> Result<RefCell<Decoder>> {
-            let decoder = Decoder::new(&*self.video_ctx.lock())?;
+            let decoder = Decoder::new(self.video_ctx.lock())?;
             Ok(RefCell::new(decoder))
         })?;
 
@@ -162,7 +162,7 @@ pub fn open_video(input: &mut Input) -> Result<(usize, usize, codec::Context, Vi
     let video_stream = input
         .streams()
         .best(ffmpeg::media::Type::Video)
-        .ok_or(anyhow!("video stream not found"))?;
+        .ok_or_else(|| anyhow!("video stream not found"))?;
 
     let video_ctx = video_stream.codec();
 
@@ -184,6 +184,7 @@ pub fn open_video(input: &mut Input) -> Result<(usize, usize, codec::Context, Vi
 /// wrap `Context` to pass between threads(because of the raw pointer)
 struct SendableSWSCtx(scaling::Context);
 
+#[allow(clippy::non_send_fields_in_send_ty)]
 unsafe impl Send for SendableSWSCtx {}
 
 impl Deref for SendableSWSCtx {
@@ -210,7 +211,7 @@ pub struct Decoder {
 }
 
 impl Decoder {
-    fn new(video_ctx: &codec::Context) -> Result<Self> {
+    fn new<C: Deref<Target = codec::Context>>(video_ctx: C) -> Result<Self> {
         let decoder = video_ctx.clone().decoder().video()?;
         let (h, w) = (decoder.height(), decoder.width());
         let sws_ctx = scaling::Context::get(decoder.format(), w, h, RGB24, w, h, Flags::BILINEAR)?;

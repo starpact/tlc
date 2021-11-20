@@ -32,7 +32,7 @@ function App() {
   }
 
   function set_start_frame() {
-    invoke<void>("set_start_frame", { startFrame: 20 })
+    invoke<void>("set_start_frame", { startFrame: 1 })
       .catch((err?: string) => console.error(err));
   }
 

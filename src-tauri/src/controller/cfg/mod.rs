@@ -8,7 +8,7 @@ use tokio::io::AsyncReadExt;
 
 use super::data::{FilterMethod, InterpMethod, IterationMethod};
 
-const DEFAULT_CONFIG_PATH: &'static str = "./config/default.toml";
+const DEFAULT_CONFIG_PATH: &str = "./config/default.toml";
 
 #[derive(Debug, Default, Deserialize, Serialize)]
 #[serde(default)]
@@ -62,10 +62,13 @@ pub struct VideoMeta {
     /// Path of TLC video file.
     pub path: PathBuf,
     /// Frame rate of video.
+    #[serde(default)]
     pub frame_rate: usize,
     /// Total frames of video.
+    #[serde(default)]
     pub total_frames: usize,
     /// (video_height, video_width)
+    #[serde(default)]
     pub shape: (u32, u32),
 }
 
@@ -74,6 +77,7 @@ pub struct DAQMeta {
     /// Path of TLC data acquisition file.
     pub path: PathBuf,
     /// Total raws of DAQ data.
+    #[serde(default)]
     pub total_rows: usize,
 }
 
@@ -87,9 +91,9 @@ pub struct Thermocouple {
 }
 
 #[derive(Debug)]
-pub struct G2DParameter {
+pub struct G2Parameter {
     pub start_frame: usize,
-    pub cal_num: usize,
+    pub frame_num: usize,
     pub area: (u32, u32, u32, u32),
 }
 
@@ -101,7 +105,9 @@ enum SaveCategory {
 
 impl TLCConfig {
     pub async fn from_default_path() -> Self {
-        Self::from_path(DEFAULT_CONFIG_PATH).await.unwrap()
+        Self::from_path(DEFAULT_CONFIG_PATH)
+            .await
+            .unwrap_or_default()
     }
 
     pub async fn from_path<P: AsRef<Path>>(path: P) -> Result<Self> {
@@ -181,36 +187,40 @@ impl TLCConfig {
         Ok(())
     }
 
-    pub fn set_area(&mut self, area: (u32, u32, u32, u32)) -> Result<G2DParameter> {
+    pub fn set_area(&mut self, area: (u32, u32, u32, u32)) -> Result<G2Parameter> {
         if self.area == Some(area) {
-            bail!("calculation area same as before, no need to rebuild g2d");
+            bail!("calculation area same as before, no need to rebuild g2");
         }
 
         self.area = Some(area);
 
-        self.get_g2d_parameter()
+        self.get_g2_parameter()
     }
 
-    pub fn set_start_frame(&mut self, start_frame: usize) -> Result<G2DParameter> {
+    pub fn set_start_frame(&mut self, start_frame: usize) -> Result<G2Parameter> {
         if self.start_frame == Some(start_frame) {
-            bail!("start frame same as before, no need to rebuild g2d");
+            bail!("start frame same as before, no need to rebuild g2");
         }
 
         self.start_frame = Some(start_frame);
 
         self.try_update_cal_num();
 
-        self.get_g2d_parameter()
+        self.get_g2_parameter()
     }
 
-    pub fn get_g2d_parameter(&self) -> Result<G2DParameter> {
-        let area = self.area.ok_or(anyhow!("calculation area unset"))?;
-        let start_frame = self.start_frame.ok_or(anyhow!("start frame unset"))?;
-        let cal_num = self.cal_num.ok_or(anyhow!("calculation number unset"))?;
+    pub fn get_g2_parameter(&self) -> Result<G2Parameter> {
+        let area = self.area.ok_or_else(|| anyhow!("calculation area unset"))?;
+        let start_frame = self
+            .start_frame
+            .ok_or_else(|| anyhow!("start frame unset"))?;
+        let cal_num = self
+            .cal_num
+            .ok_or_else(|| anyhow!("calculation number unset"))?;
 
-        Ok(G2DParameter {
+        Ok(G2Parameter {
             start_frame,
-            cal_num,
+            frame_num: cal_num,
             area,
         })
     }
@@ -235,7 +245,7 @@ impl TLCConfig {
         let save_path = self
             .save_root_dir
             .as_ref()
-            .ok_or(anyhow!("save root dir unset"))?
+            .ok_or_else(|| anyhow!("save root dir unset"))?
             .join(dir)
             .join(self.get_case_name()?)
             .with_extension(ext);
@@ -247,11 +257,11 @@ impl TLCConfig {
         let video_path = &self
             .video_meta
             .as_ref()
-            .ok_or(anyhow!("video path unset"))?
+            .ok_or_else(|| anyhow!("video path unset"))?
             .path;
         let case_name = video_path
             .file_stem()
-            .ok_or(anyhow!("invalid video path: {:?}", video_path))?;
+            .ok_or_else(|| anyhow!("invalid video path: {:?}", video_path))?;
 
         Ok(case_name)
     }
