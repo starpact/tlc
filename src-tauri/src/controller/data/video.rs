@@ -16,7 +16,7 @@ use rayon::prelude::*;
 use thread_local::ThreadLocal;
 use tracing::debug;
 
-use crate::controller::cfg::G2Parameter;
+use crate::controller::cfg::G2Param;
 use crate::util::timing;
 
 #[derive(Default)]
@@ -82,11 +82,11 @@ impl VideoCache {
         old != new
     }
 
-    pub fn build_g2(&self, g2_parameter: G2Parameter) -> Result<Array2<u8>> {
+    pub fn build_g2(&self, g2_parameter: G2Param) -> Result<Array2<u8>> {
         let _timing = timing::start("building g2");
         debug!("{:#?}", g2_parameter);
 
-        let G2Parameter {
+        let G2Param {
             start_frame,
             frame_num,
             area: (tl_y, tl_x, h, w),

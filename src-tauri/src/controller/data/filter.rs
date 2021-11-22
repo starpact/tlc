@@ -20,7 +20,7 @@ pub enum FilterMethod {
 
 impl Default for FilterMethod {
     fn default() -> Self {
-        FilterMethod::Median(3)
+        FilterMethod::No
     }
 }
 

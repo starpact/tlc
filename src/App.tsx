@@ -26,13 +26,19 @@ function App() {
       .catch((err?: string) => console.error(err));
   }
 
-  function set_area() {
-    invoke<void>("set_area", { area: [100, 100, 800, 1000] })
+  function set_start_frame() {
+    invoke<void>("set_start_frame", { startFrame: 1 })
       .catch((err?: string) => console.error(err));
   }
 
-  function set_start_frame() {
-    invoke<void>("set_start_frame", { startFrame: 1 })
+  function set_start_row() {
+    invoke<void>("set_start_row", { startRow: 1 })
+      .catch((err?: string) => console.error(err));
+  }
+
+
+  function set_area() {
+    invoke<void>("set_area", { area: [100, 100, 800, 1000] })
       .catch((err?: string) => console.error(err));
   }
 
@@ -48,9 +54,11 @@ function App() {
       <br />
       <button onClick={get_frame}>get_frame</button>
       <br />
-      <button onClick={set_area}>set_area</button>
-      <br />
       <button onClick={set_start_frame}>set_start_frame</button>
+      <br />
+      <button onClick={set_start_row}>set_start_row</button>
+      <br />
+      <button onClick={set_area}>set_area</button>
       <br />
       <img alt="frame" src={`data:image/jpeg;base64,${image}`} />
     </div>

@@ -17,7 +17,7 @@ use parking_lot::RwLock;
 use tokio::sync::oneshot;
 use tracing::debug;
 
-use super::cfg::{DAQMeta, G2Parameter, VideoMeta};
+use super::cfg::{DAQMeta, G2Param, VideoMeta};
 use crate::util::{blocking, timing};
 pub use filter::{filter, FilterMethod};
 pub use interp::InterpMethod;
@@ -153,7 +153,11 @@ impl TLCData {
         })
     }
 
-    pub async fn build_g2(&mut self, g2_parameter: G2Parameter) -> Result<Arc<Array2<u8>>> {
+    pub fn get_daq(&self) -> Array2<f64> {
+        self.daq.clone()
+    }
+
+    pub async fn build_g2(&mut self, g2_parameter: G2Param) -> Result<Arc<Array2<u8>>> {
         let video_cache = self.video_cache.clone();
         let g2 = blocking::compute(move || loop {
             let vc = video_cache.read();

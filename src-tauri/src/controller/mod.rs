@@ -1,17 +1,17 @@
 mod cfg;
 mod data;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use tokio::sync::RwLock;
 use tracing::debug;
 
-pub use cfg::SaveInfo;
 use cfg::TLCConfig;
 use data::filter;
 pub use data::FilterMethod;
 use data::TLCData;
+use ndarray::Array2;
 
 pub struct TLCController {
     /// `cfg` can be mapped to a calculation result set and will be saved to disk.
@@ -44,10 +44,6 @@ impl TLCController {
         }
     }
 
-    pub async fn get_save_info(&self) -> Result<SaveInfo> {
-        self.cfg.read().await.get_save_info()
-    }
-
     pub async fn load_config<P: AsRef<Path>>(&self, path: P) -> Result<()> {
         let mut new_cfg = TLCConfig::from_path(path).await?;
         let mut new_data = TLCData::default();
@@ -69,45 +65,55 @@ impl TLCController {
         Ok(())
     }
 
-    pub async fn set_video_path<P: AsRef<Path>>(&self, video_path: P) -> Result<()> {
-        // `set_video_path` has two side effects:
-        // 1. Another thread is spawned to read from new video path.
-        // 2. Some configurations are no longer valid so we need to update/invalidate them.
-        let video_meta = self.data.read().await.read_video(&video_path).await?;
-
-        let mut cfg = self.cfg.write().await;
-        cfg.on_video_load(video_meta)?;
-        let g2_parameter = cfg.get_g2_parameter()?;
-        let filter_method = cfg.filter_method;
-        drop(cfg);
-
-        let g2 = self.data.write().await.build_g2(g2_parameter).await?;
-        let filtered_g2 = filter(g2, filter_method).await?;
-        self.data.write().await.filtered_g2 = filtered_g2;
-
-        Ok(())
+    pub async fn get_save_root_dir(&self) -> Result<PathBuf> {
+        Ok(self.cfg.read().await.get_save_root_dir()?.to_owned())
     }
 
-    pub async fn set_daq_path<P: AsRef<Path>>(&self, daq_path: P) -> Result<()> {
-        let daq_meta = self.data.write().await.read_daq(&daq_path).await?;
+    pub async fn set_save_root_dir<P: AsRef<Path>>(&self, save_root_dir: P) {
+        self.cfg.write().await.save_root_dir = Some(save_root_dir.as_ref().to_owned());
+    }
 
-        let mut cfg = self.cfg.write().await;
-        cfg.on_daq_load(daq_meta)?;
+    pub async fn get_daq(&self) -> Array2<f64> {
+        self.data.read().await.get_daq()
+    }
 
-        Ok(())
+    // `set_video_path` has two side effects:
+    // 1. Another thread is spawned to read from new video path.
+    // 2. Some configurations are no longer valid so we need to update/invalidate them.
+    pub async fn set_video_path<P: AsRef<Path>>(&self, video_path: P) -> Result<()> {
+        let video_meta = self.data.read().await.read_video(&video_path).await?;
+        self.cfg.write().await.on_video_load(video_meta)
     }
 
     pub async fn get_frame(&self, frame_index: usize) -> Result<String> {
         self.data.read().await.get_frame(frame_index).await
     }
 
+    pub async fn set_daq_path<P: AsRef<Path>>(&self, daq_path: P) -> Result<()> {
+        let daq_meta = self.data.write().await.read_daq(&daq_path).await?;
+        self.cfg.write().await.on_daq_load(daq_meta)
+    }
+
     pub async fn set_start_frame(&self, start_frame: usize) -> Result<()> {
         let mut cfg = self.cfg.write().await;
-        let g2_parameter = cfg.set_start_frame(start_frame)?;
+        let g2_param = cfg.set_start_frame(start_frame)?;
         let filter_method = cfg.filter_method;
         drop(cfg);
 
-        let g2 = self.data.write().await.build_g2(g2_parameter).await?;
+        let g2 = self.data.write().await.build_g2(g2_param).await?;
+        let filtered_g2 = filter(g2, filter_method).await?;
+        self.data.write().await.filtered_g2 = filtered_g2;
+
+        Ok(())
+    }
+
+    pub async fn set_start_row(&self, start_row: usize) -> Result<()> {
+        let mut cfg = self.cfg.write().await;
+        let g2_param = cfg.set_start_row(start_row)?;
+        let filter_method = cfg.filter_method;
+        drop(cfg);
+
+        let g2 = self.data.write().await.build_g2(g2_param).await?;
         let filtered_g2 = filter(g2, filter_method).await?;
         self.data.write().await.filtered_g2 = filtered_g2;
 

@@ -24,11 +24,14 @@ async fn main() {
         .manage(tlc_controller)
         .invoke_handler(tauri::generate_handler![
             load_config,
-            get_save_info,
+            get_save_root_dir,
+            set_save_root_dir,
             set_video_path,
-            set_daq_path,
             get_frame,
+            set_daq_path,
+            get_daq,
             set_start_frame,
+            set_start_row,
             set_area,
             set_filter_method,
         ])

@@ -18,7 +18,7 @@ pub struct TLCConfig {
     /// * config_path: {root_dir}/config/{case_name}.toml
     /// * nu_matrix_path: {root_dir}/nu_matrix/{case_name}.csv
     /// * plot_matrix_path: {root_dir}/nu_plot/{case_name}.png
-    save_root_dir: Option<PathBuf>,
+    pub save_root_dir: Option<PathBuf>,
 
     /// Video metadata: attributes of the video. Once video path is determined, so are
     /// other attributes. So these can be regarded as a cache.
@@ -30,8 +30,6 @@ pub struct TLCConfig {
     start_frame: Option<usize>,
     /// Start row of DAQ data involved in the calculation.
     start_row: Option<usize>,
-    /// The actual frame/row numbers involved in the calculation.
-    cal_num: Option<usize>,
 
     /// Calculation area(top_left_y, top_left_x, area_height, area_width).
     area: Option<(u32, u32, u32, u32)>,
@@ -91,7 +89,7 @@ pub struct Thermocouple {
 }
 
 #[derive(Debug)]
-pub struct G2Parameter {
+pub struct G2Param {
     pub start_frame: usize,
     pub frame_num: usize,
     pub area: (u32, u32, u32, u32),
@@ -132,16 +130,27 @@ impl TLCConfig {
         Some(self.daq_meta.as_ref()?.path.as_path())
     }
 
-    pub fn get_save_info(&self) -> Result<SaveInfo> {
-        match self.save_root_dir {
-            Some(ref save_root_dir) => Ok(SaveInfo {
-                save_root_dir: save_root_dir.to_owned(),
-                config_path: self.get_save_path(SaveCategory::Config)?,
-                nu_path: self.get_save_path(SaveCategory::NuMatrix)?,
-                plot_path: self.get_save_path(SaveCategory::NuPlot)?,
-            }),
-            None => bail!("save root dir unset"),
-        }
+    pub fn get_save_root_dir(&self) -> Result<&Path> {
+        Ok(self
+            .save_root_dir
+            .as_ref()
+            .ok_or_else(|| anyhow!("save root dir unset"))?
+            .as_path())
+    }
+
+    #[allow(dead_code)]
+    pub fn get_config_save_path(&self) -> Result<PathBuf> {
+        self.get_save_path(SaveCategory::Config)
+    }
+
+    #[allow(dead_code)]
+    pub fn get_nu_matrix_save_path(&self) -> Result<PathBuf> {
+        self.get_save_path(SaveCategory::NuMatrix)
+    }
+
+    #[allow(dead_code)]
+    pub fn get_nu_plot_save_path(&self) -> Result<PathBuf> {
+        self.get_save_path(SaveCategory::NuPlot)
     }
 
     pub fn on_video_load(&mut self, video_meta: VideoMeta) -> Result<()> {
@@ -166,7 +175,6 @@ impl TLCConfig {
         }
 
         self.start_frame.take();
-        self.cal_num.take();
 
         Ok(())
     }
@@ -182,56 +190,62 @@ impl TLCConfig {
         }
 
         self.start_row.take();
-        self.cal_num.take();
 
         Ok(())
     }
 
-    pub fn set_area(&mut self, area: (u32, u32, u32, u32)) -> Result<G2Parameter> {
-        if self.area == Some(area) {
-            bail!("calculation area same as before, no need to rebuild g2");
-        }
-
-        self.area = Some(area);
-
-        self.get_g2_parameter()
-    }
-
-    pub fn set_start_frame(&mut self, start_frame: usize) -> Result<G2Parameter> {
+    pub fn set_start_frame(&mut self, start_frame: usize) -> Result<G2Param> {
         if self.start_frame == Some(start_frame) {
-            bail!("start frame same as before, no need to rebuild g2");
+            bail!("start frame same as before");
         }
 
         self.start_frame = Some(start_frame);
-
-        self.try_update_cal_num();
-
-        self.get_g2_parameter()
-    }
-
-    pub fn get_g2_parameter(&self) -> Result<G2Parameter> {
+        let cal_num = self.get_cal_num()?;
         let area = self.area.ok_or_else(|| anyhow!("calculation area unset"))?;
-        let start_frame = self
-            .start_frame
-            .ok_or_else(|| anyhow!("start frame unset"))?;
-        let cal_num = self
-            .cal_num
-            .ok_or_else(|| anyhow!("calculation number unset"))?;
 
-        Ok(G2Parameter {
+        Ok(G2Param {
             start_frame,
             frame_num: cal_num,
             area,
         })
     }
-}
 
-#[derive(Serialize)]
-pub struct SaveInfo {
-    save_root_dir: PathBuf,
-    config_path: PathBuf,
-    nu_path: PathBuf,
-    plot_path: PathBuf,
+    pub fn set_start_row(&mut self, start_row: usize) -> Result<G2Param> {
+        if self.start_row == Some(start_row) {
+            bail!("start row same as before");
+        }
+
+        self.start_row = Some(start_row);
+        let cal_num = self.get_cal_num()?;
+        let start_frame = self
+            .start_frame
+            .ok_or_else(|| anyhow!("start frame unset"))?;
+        let area = self.area.ok_or_else(|| anyhow!("calculation area unset"))?;
+
+        Ok(G2Param {
+            start_frame,
+            frame_num: cal_num,
+            area,
+        })
+    }
+
+    pub fn set_area(&mut self, area: (u32, u32, u32, u32)) -> Result<G2Param> {
+        if self.area == Some(area) {
+            bail!("calculation area same as before, no need to rebuild g2");
+        }
+
+        self.area = Some(area);
+        let start_frame = self
+            .start_frame
+            .ok_or_else(|| anyhow!("start frame unset"))?;
+        let cal_num = self.get_cal_num()?;
+
+        Ok(G2Param {
+            start_frame,
+            frame_num: cal_num,
+            area,
+        })
+    }
 }
 
 impl TLCConfig {
@@ -266,16 +280,22 @@ impl TLCConfig {
         Ok(case_name)
     }
 
-    fn try_update_cal_num(&mut self) -> Option<usize> {
-        self.cal_num.take();
+    fn get_cal_num(&mut self) -> Result<usize> {
+        let total_frames = self
+            .video_meta
+            .as_ref()
+            .ok_or_else(|| anyhow!("video path unset"))?
+            .total_frames;
+        let total_rows = self
+            .daq_meta
+            .as_ref()
+            .ok_or_else(|| anyhow!("daq path unset"))?
+            .total_rows;
+        let start_frame = self
+            .start_frame
+            .ok_or_else(|| anyhow!("start frame unset"))?;
+        let start_row = self.start_row.ok_or_else(|| anyhow!("start row unset"))?;
 
-        let total_frames = self.video_meta.as_ref()?.total_frames;
-        let total_rows = self.daq_meta.as_ref()?.total_rows;
-        let start_frame = self.start_frame?;
-        let start_row = self.start_row?;
-
-        self.cal_num = Some((total_frames - start_frame).min(total_rows - start_row));
-
-        self.cal_num
+        Ok((total_frames - start_frame).min(total_rows - start_row))
     }
 }
