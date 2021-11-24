@@ -4,55 +4,92 @@ import { useState } from "react";
 function App() {
   const [image, setImage] = useState<string>();
 
-  function get_save_info() {
-    invoke<string>("get_save_info")
-      .then((msg?: string) => console.log(msg))
-      .catch((err?: string) => console.error(err));
-  }
-
-  function set_video_path() {
-    invoke<string>("set_video_path", { path: "fake" })
-      .catch((err?: string) => console.error(err));
-  }
-
-  function set_daq_path() {
-    invoke<string>("set_daq_path", { path: "fake.lvm" })
-      .catch((err?: string) => console.error(err));
+  function get_save_root_dir() {
+    invoke<string>("get_save_root_dir")
+      .then((msg) => console.log(msg))
+      .catch((err: string) => console.error(err));
   }
 
   function get_frame() {
     invoke<string>("get_frame", { frameIndex: 2000 })
-      .then((msg?: string) => setImage(msg))
-      .catch((err?: string) => console.error(err));
+      .then((msg) => setImage(msg))
+      .catch((err: string) => console.error(err));
+  }
+
+  interface VideoMeta {
+    path: string,
+    frame_rate: number,
+    total_frames: number,
+    shape: Uint32Array,
+  }
+
+  function get_video_meta() {
+    invoke<VideoMeta>("get_video_meta")
+      .then((videoMeta) => console.log(videoMeta))
+      .catch((err: string) => console.error(err));
+  }
+
+  function set_video_path() {
+    invoke<VideoMeta>("set_video_path", { path: "fake" })
+      .then((videoMeta) => console.log(videoMeta))
+      .catch((err: string) => console.error(err));
+  }
+
+  interface DAQMeta {
+    path: string,
+    total_rows: number,
+  }
+
+  function get_daq_meta() {
+    invoke<DAQMeta>("get_daq_meta")
+      .then((daqMeta) => console.log(daqMeta))
+      .catch((err: string) => console.error(err));
+  }
+
+
+  function set_daq_path() {
+    invoke<DAQMeta>("set_daq_path", { path: "fake.lvm" })
+      .catch((err: string) => console.error(err));
+  }
+
+  function get_daq() {
+    invoke<string>("get_daq")
+      .then((msg) => console.log(msg))
+      .then((daqMeta) => console.log(daqMeta))
+      .catch((err: string) => console.error(err));
   }
 
   function set_start_frame() {
-    invoke<void>("set_start_frame", { startFrame: 1 })
-      .catch((err?: string) => console.error(err));
+    invoke<void>("set_start_frame", { startFrame: 1 }).catch((err: string) => console.error(err));
   }
 
   function set_start_row() {
-    invoke<void>("set_start_row", { startRow: 1 })
-      .catch((err?: string) => console.error(err));
+    invoke<void>("set_start_row", { startRow: 1 }).catch((err: string) => console.error(err));
   }
 
 
   function set_area() {
     invoke<void>("set_area", { area: [100, 100, 800, 1000] })
-      .catch((err?: string) => console.error(err));
+      .catch((err: string) => console.error(err));
   }
 
   return (
     <div>
       <div>Hello TLC</div>
       <br />
-      <button onClick={get_save_info}>get_save_info</button>
+      <button onClick={get_save_root_dir}>get_save_root_dir</button>
+      <br />
+      <button onClick={get_frame}>get_frame</button>
+      <br />
+      <button onClick={get_video_meta}>get_video_meta</button>
       <br />
       <button onClick={set_video_path}>set_video_path</button>
       <br />
-      <button onClick={set_daq_path}>set_daq_path</button>
+      <button onClick={get_daq}>get_daq</button>
       <br />
-      <button onClick={get_frame}>get_frame</button>
+      <button onClick={get_daq_meta}>get_daq_meta</button>
+      <br />
+      <button onClick={set_daq_path}>set_daq_path</button>
       <br />
       <button onClick={set_start_frame}>set_start_frame</button>
       <br />

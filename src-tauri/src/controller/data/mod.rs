@@ -12,7 +12,7 @@ use ffmpeg_next as ffmpeg;
 
 use anyhow::{anyhow, bail, Result};
 use image::{codecs::jpeg::JpegEncoder, ColorType::Rgb8};
-use ndarray::Array2;
+use ndarray::{ArcArray2, Array2};
 use parking_lot::RwLock;
 use tokio::sync::oneshot;
 use tracing::debug;
@@ -153,8 +153,8 @@ impl TLCData {
         })
     }
 
-    pub fn get_daq(&self) -> Array2<f64> {
-        self.daq.clone()
+    pub fn get_daq(&self) -> ArcArray2<f64> {
+        self.daq.to_shared()
     }
 
     pub async fn build_g2(&mut self, g2_parameter: G2Param) -> Result<Arc<Array2<u8>>> {

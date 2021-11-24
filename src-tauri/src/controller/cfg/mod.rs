@@ -55,7 +55,7 @@ pub struct PhysicalParam {
     air_thermal_conductivity: Option<f64>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct VideoMeta {
     /// Path of TLC video file.
     pub path: PathBuf,
@@ -70,7 +70,7 @@ pub struct VideoMeta {
     pub shape: (u32, u32),
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct DAQMeta {
     /// Path of TLC data acquisition file.
     pub path: PathBuf,
@@ -120,6 +120,14 @@ impl TLCConfig {
         let cfg = toml::from_slice(&buf)?;
 
         Ok(cfg)
+    }
+
+    pub fn get_video_meta(&self) -> Option<VideoMeta> {
+        self.video_meta.clone()
+    }
+
+    pub fn get_daq_meta(&self) -> Option<DAQMeta> {
+        self.daq_meta.clone()
     }
 
     pub fn get_video_path(&self) -> Option<&Path> {

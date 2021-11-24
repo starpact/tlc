@@ -3,15 +3,16 @@ mod data;
 
 use std::path::{Path, PathBuf};
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use tokio::sync::RwLock;
 use tracing::debug;
 
 use cfg::TLCConfig;
+pub use cfg::{DAQMeta, VideoMeta};
 use data::filter;
 pub use data::FilterMethod;
 use data::TLCData;
-use ndarray::Array2;
+use ndarray::ArcArray2;
 
 pub struct TLCController {
     /// `cfg` can be mapped to a calculation result set and will be saved to disk.
@@ -73,25 +74,45 @@ impl TLCController {
         self.cfg.write().await.save_root_dir = Some(save_root_dir.as_ref().to_owned());
     }
 
-    pub async fn get_daq(&self) -> Array2<f64> {
-        self.data.read().await.get_daq()
+    pub async fn get_frame(&self, frame_index: usize) -> Result<String> {
+        self.data.read().await.get_frame(frame_index).await
+    }
+
+    pub async fn get_video_meta(&self) -> Result<VideoMeta> {
+        self.cfg
+            .read()
+            .await
+            .get_video_meta()
+            .ok_or_else(|| anyhow!("video path unset"))
+    }
+
+    pub async fn get_daq_meta(&self) -> Result<DAQMeta> {
+        self.cfg
+            .read()
+            .await
+            .get_daq_meta()
+            .ok_or_else(|| anyhow!("daq path unset"))
     }
 
     // `set_video_path` has two side effects:
     // 1. Another thread is spawned to read from new video path.
     // 2. Some configurations are no longer valid so we need to update/invalidate them.
-    pub async fn set_video_path<P: AsRef<Path>>(&self, video_path: P) -> Result<()> {
+    pub async fn set_video_path<P: AsRef<Path>>(&self, video_path: P) -> Result<VideoMeta> {
         let video_meta = self.data.read().await.read_video(&video_path).await?;
-        self.cfg.write().await.on_video_load(video_meta)
+        self.cfg.write().await.on_video_load(video_meta.clone());
+
+        Ok(video_meta)
     }
 
-    pub async fn get_frame(&self, frame_index: usize) -> Result<String> {
-        self.data.read().await.get_frame(frame_index).await
+    pub async fn get_daq(&self) -> ArcArray2<f64> {
+        self.data.read().await.get_daq()
     }
 
-    pub async fn set_daq_path<P: AsRef<Path>>(&self, daq_path: P) -> Result<()> {
+    pub async fn set_daq_path<P: AsRef<Path>>(&self, daq_path: P) -> Result<DAQMeta> {
         let daq_meta = self.data.write().await.read_daq(&daq_path).await?;
-        self.cfg.write().await.on_daq_load(daq_meta)
+        self.cfg.write().await.on_daq_load(daq_meta.clone());
+
+        Ok(daq_meta)
     }
 
     pub async fn set_start_frame(&self, start_frame: usize) -> Result<()> {
