@@ -7,7 +7,9 @@ where
     T: Send + 'static,
 {
     let (tx, rx) = oneshot::channel();
-    rayon::spawn(move || tx.send(f()).unwrap_or_default());
+    rayon::spawn(move || {
+        let _ = tx.send(f());
+    });
 
     Ok(rx.await?)
 }

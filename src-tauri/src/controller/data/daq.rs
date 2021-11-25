@@ -14,7 +14,7 @@ pub fn read_daq<P: AsRef<Path>>(daq_path: P) -> Result<Array2<f64>> {
     let daq = match daq_path
         .as_ref()
         .extension()
-        .ok_or_else(|| anyhow!("failed to read daq from {:?}", daq_path.as_ref()))?
+        .ok_or_else(|| anyhow!("invalid daq path: {:?}", daq_path.as_ref()))?
         .to_str()
     {
         Some("lvm") => read_daq_from_lvm(&daq_path),

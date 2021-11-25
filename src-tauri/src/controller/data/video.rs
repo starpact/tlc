@@ -1,35 +1,34 @@
-use std::cell::{RefCell, RefMut};
-use std::ops::{Deref, DerefMut};
-use std::path::{Path, PathBuf};
+use std::{
+    cell::{RefCell, RefMut},
+    ops::{Deref, DerefMut},
+    path::{Path, PathBuf},
+};
 
+use anyhow::{anyhow, bail, Result};
 use ffmpeg_next as ffmpeg;
-
-use anyhow::{anyhow, Result};
-use ffmpeg::codec::{self, packet::Packet};
-use ffmpeg::format::context::input::{Input, PacketIter};
-use ffmpeg::format::Pixel::RGB24;
-use ffmpeg::software::scaling::{self, flag::Flags};
-use ffmpeg::util::frame::video::Video;
+use ffmpeg_next::{
+    codec,
+    codec::packet::Packet,
+    format::{
+        context::input::{Input, PacketIter},
+        Pixel::RGB24,
+    },
+    software::{scaling, scaling::flag::Flags},
+    util::frame::video::Video,
+};
 use ndarray::prelude::*;
 use parking_lot::Mutex;
 use rayon::prelude::*;
 use thread_local::ThreadLocal;
 use tracing::debug;
 
-use crate::controller::cfg::G2Param;
-use crate::util::timing;
+use crate::{controller::cfg::G2Param, util::timing};
 
 #[derive(Default)]
 pub struct VideoCache {
-    /// Identifies the current video.
-    pub path: Option<PathBuf>,
-    /// Total packet/frame number of the current video.
-    /// This is used for:
-    /// 1. Validate the `frame_index` parameter of `get_frame`.
-    /// 2. Check whether reading has finished.
-    pub total_frames: usize,
+    state: State,
     /// Cache thread-local decoder.
-    pub decoder_cache: DecoderCache,
+    decoder_cache: DecoderCache,
     /// > [For video, one packet should typically contain one compressed frame
     /// ](https://libav.org/documentation/doxygen/master/structAVPacket.html).
     ///
@@ -45,8 +44,26 @@ pub struct VideoCache {
     pub packets: Vec<Packet>,
 }
 
+enum State {
+    Uninitialized,
+    Reading {
+        /// Identifies the current video.
+        path: PathBuf,
+        /// Total packet/frame number of the current video, which is
+        /// used to validate the `frame_index` parameter of `get_frame`.
+        total_frames: usize,
+    },
+    Finished,
+}
+
+impl Default for State {
+    fn default() -> Self {
+        Self::Uninitialized
+    }
+}
+
 #[derive(Default)]
-pub struct DecoderCache {
+struct DecoderCache {
     video_ctx: Mutex<codec::Context>,
     decoders: ThreadLocal<RefCell<Decoder>>,
 }
@@ -66,31 +83,58 @@ impl VideoCache {
         video_ctx: codec::Context,
         total_frames: usize,
     ) {
-        self.path = Some(path.as_ref().to_owned());
         self.decoder_cache.reset(video_ctx);
-        self.total_frames = total_frames;
+        self.state = State::Reading {
+            path: path.as_ref().to_owned(),
+            total_frames,
+        };
         self.packets.clear();
     }
 
-    pub fn path_changed<P: AsRef<Path>>(&self, path: P) -> bool {
-        let old = match self.path {
-            Some(ref path) => path,
-            None => return true,
-        };
-        let new = path.as_ref();
-
-        old != new
+    pub fn get_decoder(&self) -> Result<RefMut<Decoder>> {
+        self.decoder_cache.get_decoder()
     }
 
-    pub fn build_g2(&self, g2_parameter: G2Param) -> Result<Array2<u8>> {
+    pub fn target_changed<P: AsRef<Path>>(&self, original_path: P) -> bool {
+        match self.state {
+            State::Reading { ref path, .. } => original_path.as_ref() != path.as_path(),
+            _ => false,
+        }
+    }
+
+    pub fn worth_waiting(&self, frame_index: usize) -> Result<()> {
+        match self.state {
+            State::Reading { total_frames, .. } => {
+                if total_frames < frame_index {
+                    // This is an invalid `frame_index` from frontend and will never get the frame.
+                    // So directly abort current thread. Then `rx` will be dropped and `tx` outside
+                    // will stop pending(returning an `RecvError`).
+                    bail!("frame_index({}) out of range", frame_index)
+                }
+                Ok(())
+            }
+            State::Finished => Ok(()),
+            State::Uninitialized => bail!("video path unset"),
+        }
+    }
+
+    pub fn mark_finished(&mut self) {
+        self.state = State::Finished;
+    }
+
+    pub fn finished(&self) -> bool {
+        matches!(self.state, State::Finished)
+    }
+
+    pub fn build_g2(&self, g2_param: G2Param) -> Result<Array2<u8>> {
         let _timing = timing::start("building g2");
-        debug!("{:#?}", g2_parameter);
+        debug!("{:#?}", g2_param);
 
         let G2Param {
             start_frame,
             frame_num,
             area: (tl_y, tl_x, h, w),
-        } = g2_parameter;
+        } = g2_param;
         let byte_w = self.decoder_cache.get_decoder()?.shape().1 as usize * 3;
         let [tl_y, tl_x, h, w] = [tl_y as usize, tl_x as usize, h as usize, w as usize];
 
@@ -128,7 +172,7 @@ impl VideoCache {
 }
 
 impl DecoderCache {
-    pub fn get_decoder(&self) -> Result<RefMut<Decoder>> {
+    fn get_decoder(&self) -> Result<RefMut<Decoder>> {
         let decoder = self.decoders.get_or_try(|| -> Result<RefCell<Decoder>> {
             let decoder = Decoder::new(self.video_ctx.lock())?;
             Ok(RefCell::new(decoder))

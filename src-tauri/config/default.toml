@@ -1,6 +1,7 @@
 save_root_dir = "D:\\Archive\\2021yhj\\EXP\\result\\imp"
 start_frame = 0
 start_row = 0
+area = [100, 100, 800, 1000]
 
 [video_meta]
 path = "D:\\Archive\\2021yhj\\EXP\\imp\\video\\imp_20000_1_up.avi"

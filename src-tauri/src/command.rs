@@ -1,5 +1,7 @@
-use std::fmt;
-use std::path::{Path, PathBuf};
+use std::{
+    fmt,
+    path::{Path, PathBuf},
+};
 
 use ndarray::ArcArray2;
 use serde::Serialize;
@@ -66,12 +68,15 @@ pub async fn set_daq_path(path: &Path, state: State<'_, TLCController>) -> TLCRe
 }
 
 #[tauri::command]
-pub async fn set_start_frame(start_frame: usize, state: State<'_, TLCController>) -> TLCResult<()> {
+pub async fn set_start_frame(
+    start_frame: usize,
+    state: State<'_, TLCController>,
+) -> TLCResult<usize> {
     state.set_start_frame(start_frame).await.to()
 }
 
 #[tauri::command]
-pub async fn set_start_row(start_row: usize, state: State<'_, TLCController>) -> TLCResult<()> {
+pub async fn set_start_row(start_row: usize, state: State<'_, TLCController>) -> TLCResult<usize> {
     state.set_start_row(start_row).await.to()
 }
 

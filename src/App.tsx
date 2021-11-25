@@ -54,22 +54,29 @@ function App() {
 
   function get_daq() {
     invoke<string>("get_daq")
-      .then((msg) => console.log(msg))
-      .then((daqMeta) => console.log(daqMeta))
+      .then((daq) => console.log(daq))
       .catch((err: string) => console.error(err));
   }
 
   function set_start_frame() {
-    invoke<void>("set_start_frame", { startFrame: 1 }).catch((err: string) => console.error(err));
+    invoke<number>("set_start_frame", { startFrame: 1 })
+      .then((cal_num) => console.log(cal_num))
+      .catch((err: string) => console.error(err));
   }
 
   function set_start_row() {
-    invoke<void>("set_start_row", { startRow: 1 }).catch((err: string) => console.error(err));
+    invoke<number>("set_start_row", { startRow: 1 })
+      .then((cal_num) => console.log(cal_num))
+      .catch((err: string) => console.error(err));
   }
 
 
   function set_area() {
-    invoke<void>("set_area", { area: [100, 100, 800, 1000] })
+    invoke<void>("set_area", { area: [200, 200, 800, 1000] }).catch((err: string) => console.error(err));
+  }
+
+  function set_filter_method() {
+    invoke<void>("set_filter_method", { filterMethod: { Median: 5 } })
       .catch((err: string) => console.error(err));
   }
 
@@ -96,6 +103,8 @@ function App() {
       <button onClick={set_start_row}>set_start_row</button>
       <br />
       <button onClick={set_area}>set_area</button>
+      <br />
+      <button onClick={set_filter_method}>set_filter_method</button>
       <br />
       <img alt="frame" src={`data:image/jpeg;base64,${image}`} />
     </div>
