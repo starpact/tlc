@@ -1,84 +1,99 @@
 import { invoke } from "@tauri-apps/api/tauri";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+
+interface CalProgress {
+  current: number,
+  total: number,
+}
+
+interface VideoMeta {
+  path: string,
+  frame_rate: number,
+  total_frames: number,
+  shape: Uint32Array,
+}
+
+interface DAQMeta {
+  path: string,
+  total_rows: number,
+}
 
 function App() {
   const [image, setImage] = useState<string>();
+  const [filterProgress, setFilterProgress] = useState<CalProgress>();
 
   function get_save_root_dir() {
     invoke<string>("get_save_root_dir")
       .then((msg) => console.log(msg))
-      .catch((err: string) => console.error(err));
+      .catch(console.error);
   }
 
   function get_frame() {
-    invoke<string>("get_frame", { frameIndex: 2000 })
-      .then((msg) => setImage(msg))
-      .catch((err: string) => console.error(err));
-  }
-
-  interface VideoMeta {
-    path: string,
-    frame_rate: number,
-    total_frames: number,
-    shape: Uint32Array,
+    for (let index = 0; index < 100; index++) {
+      invoke<string>("get_frame", { frameIndex: 2000 + index })
+        .then((msg) => setImage(msg))
+        .catch(console.error);
+    }
   }
 
   function get_video_meta() {
     invoke<VideoMeta>("get_video_meta")
       .then((videoMeta) => console.log(videoMeta))
-      .catch((err: string) => console.error(err));
+      .catch(console.error);
   }
 
   function set_video_path() {
     invoke<VideoMeta>("set_video_path", { path: "fake" })
       .then((videoMeta) => console.log(videoMeta))
-      .catch((err: string) => console.error(err));
-  }
-
-  interface DAQMeta {
-    path: string,
-    total_rows: number,
+      .catch(console.error);
   }
 
   function get_daq_meta() {
     invoke<DAQMeta>("get_daq_meta")
       .then((daqMeta) => console.log(daqMeta))
-      .catch((err: string) => console.error(err));
+      .catch(console.error);
   }
 
 
   function set_daq_path() {
     invoke<DAQMeta>("set_daq_path", { path: "fake.lvm" })
-      .catch((err: string) => console.error(err));
+      .catch(console.error);
   }
 
   function get_daq() {
     invoke<string>("get_daq")
       .then((daq) => console.log(daq))
-      .catch((err: string) => console.error(err));
+      .catch(console.error);
   }
 
   function set_start_frame() {
     invoke<number>("set_start_frame", { startFrame: 1 })
       .then((cal_num) => console.log(cal_num))
-      .catch((err: string) => console.error(err));
+      .catch(console.error);
   }
 
   function set_start_row() {
     invoke<number>("set_start_row", { startRow: 1 })
       .then((cal_num) => console.log(cal_num))
-      .catch((err: string) => console.error(err));
+      .catch(console.error);
   }
 
-
   function set_area() {
-    invoke<void>("set_area", { area: [200, 200, 800, 1000] }).catch((err: string) => console.error(err));
+    invoke<void>("set_area", { area: [200, 200, 800, 1000] }).catch(console.error);
   }
 
   function set_filter_method() {
     invoke<void>("set_filter_method", { filterMethod: { Median: 5 } })
-      .catch((err: string) => console.error(err));
+      .catch(console.error);
   }
+
+  useEffect(() => {
+    setInterval(() => {
+      invoke<CalProgress>("get_filter_progress")
+        .then((progress) => setFilterProgress(progress))
+        .catch(console.error);
+    }, 250);
+  }, []);
 
   return (
     <div>
@@ -106,6 +121,12 @@ function App() {
       <br />
       <button onClick={set_filter_method}>set_filter_method</button>
       <br />
+      {
+        filterProgress &&
+        <p>
+          {`${filterProgress.current}/${filterProgress.total}`}
+        </p>
+      }
       <img alt="frame" src={`data:image/jpeg;base64,${image}`} />
     </div>
   )

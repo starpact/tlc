@@ -1,13 +1,11 @@
-use std::sync::Arc;
-
-use anyhow::Result;
 use dwt::{transform, wavelet::Wavelet, Operation};
 use median::Filter;
-use ndarray::{parallel::prelude::*, prelude::*};
+use ndarray::{parallel::prelude::*, prelude::*, ArcArray2};
 use serde::{Deserialize, Serialize};
 use tracing::debug;
 
 use crate::util::timing;
+use crossbeam::channel::{SendError, Sender};
 
 #[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq)]
 pub enum FilterMethod {
@@ -18,48 +16,54 @@ pub enum FilterMethod {
 
 impl Default for FilterMethod {
     fn default() -> Self {
-        FilterMethod::No
+        Self::No
     }
 }
 
-pub fn filter(g2: Arc<Array2<u8>>, filter_method: FilterMethod) -> Result<Arc<Array2<u8>>> {
+pub fn filter(
+    g2: ArcArray2<u8>,
+    filter_method: FilterMethod,
+    tx: Sender<()>,
+) -> anyhow::Result<ArcArray2<u8>> {
     let _timing = timing::start("filtering g2");
     debug!("filter method: {:?}", filter_method);
 
-    let filtered_g2 = match filter_method {
-        FilterMethod::No => return Ok(g2),
-        FilterMethod::Median(window_size) => cal(g2, median_fn(window_size)),
-        FilterMethod::Wavelet(threshold_ratio) => cal(g2, wavelet_fn(threshold_ratio)),
-    };
-
-    Ok(Arc::new(filtered_g2))
+    use FilterMethod::*;
+    match filter_method {
+        No => {
+            // This is really stupid but I want to keep things consistent.
+            (0..g2.dim().1).try_for_each(|_| tx.send(()))?;
+            Ok(g2)
+        }
+        Median(window_size) => cal(g2, move |g1| {
+            median(g1, window_size);
+            tx.send(())
+        }),
+        Wavelet(threshold_ratio) => cal(g2, move |g1| {
+            wavelet(g1, threshold_ratio);
+            tx.send(())
+        }),
+    }
 }
 
-fn cal<F>(g2: Arc<Array2<u8>>, f: F) -> Array2<u8>
+fn cal<F>(mut g2: ArcArray2<u8>, f: F) -> anyhow::Result<ArcArray2<u8>>
 where
-    F: Fn(ArrayViewMut1<u8>) + Send + Sync + 'static,
+    F: Fn(ArrayViewMut1<u8>) -> Result<(), SendError<()>> + Send + Sync,
 {
-    let mut filtered_g2 = g2.as_ref().clone();
-    filtered_g2
+    g2.view_mut()
         .axis_iter_mut(Axis(1))
         .into_par_iter()
-        .for_each(f);
+        .try_for_each(f)?;
 
-    filtered_g2
+    Ok(g2)
 }
 
-#[inline]
 fn median(mut g1: ArrayViewMut1<u8>, window_size: usize) {
     let mut filter = Filter::new(window_size);
     g1.iter_mut().for_each(|g| *g = filter.consume(*g));
 }
 
-fn median_fn(window_size: usize) -> impl Fn(ArrayViewMut1<u8>) {
-    move |g1| median(g1, window_size)
-}
-
 /// Refer to [pywavelets](https://pywavelets.readthedocs.io/en/latest/ref)
-#[inline]
 fn wavelet(mut g1: ArrayViewMut1<u8>, threshold_ratio: f64) {
     let data_len = g1.len();
     let wavelet = db8();
@@ -102,12 +106,9 @@ fn wavelet(mut g1: ArrayViewMut1<u8>, threshold_ratio: f64) {
     g1.iter_mut().zip(g1f).for_each(|(g, b)| *g = b as u8);
 }
 
-fn wavelet_fn(threshold_ratio: f64) -> impl Fn(ArrayViewMut1<u8>) {
-    move |g1| wavelet(g1, threshold_ratio)
-}
-
 /// Refer to [Daubechies 8](http://wavelets.pybytes.com/wavelet/db8)。
 /// Horizontal flip.
+#[inline]
 fn db8() -> Wavelet<f64> {
     #[rustfmt::skip]
     let lo = vec![

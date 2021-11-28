@@ -8,6 +8,7 @@ use ndarray::ArcArray2;
 use tokio::sync::RwLock;
 use tracing::debug;
 
+pub use self::data::CalProgress;
 use cfg::TLCConfig;
 pub use cfg::{DAQMeta, VideoMeta};
 pub use data::FilterMethod;
@@ -120,8 +121,8 @@ impl TLCController {
     pub async fn set_start_frame(&self, start_frame: usize) -> Result<usize> {
         let mut cfg = self.cfg.write().await;
         let g2_param = cfg.set_start_frame(start_frame)?.get_g2_param()?;
-
         let cal_num = g2_param.frame_num;
+
         self.data.build_g2(g2_param).await.filter(cfg.filter_method);
 
         Ok(cal_num)
@@ -130,8 +131,8 @@ impl TLCController {
     pub async fn set_start_row(&self, start_row: usize) -> Result<usize> {
         let mut cfg = self.cfg.write().await;
         let g2_param = cfg.set_start_row(start_row)?.get_g2_param()?;
-
         let cal_num = g2_param.frame_num;
+
         self.data.build_g2(g2_param).await.filter(cfg.filter_method);
 
         Ok(cal_num)
@@ -151,11 +152,15 @@ impl TLCController {
         if cfg.filter_method == filter_method {
             bail!("filter method same as before, no need to rebuild g2");
         }
-        cfg.get_g2_param()?;
         cfg.filter_method = filter_method;
+        cfg.get_g2_param()?;
 
         self.data.filter(cfg.filter_method);
 
         Ok(())
+    }
+
+    pub fn get_filter_progress(&self) -> Option<CalProgress> {
+        self.data.get_filter_progress()
     }
 }

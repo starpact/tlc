@@ -12,11 +12,13 @@ use ffmpeg_next as ffmpeg;
 use image::{codecs::jpeg::JpegEncoder, ColorType::Rgb8};
 use ndarray::{ArcArray2, Array1, Array2};
 use parking_lot::{Mutex, RwLock};
+use serde::Serialize;
 use tokio::sync::oneshot;
 use tracing::debug;
 
 use super::cfg::{DAQMeta, G2Param, VideoMeta};
-use crate::util::timing;
+use crate::util::{blocking, timing};
+use crossbeam::channel::Receiver;
 pub use filter::{filter, FilterMethod};
 pub use interp::InterpMethod;
 pub use solve::IterationMethod;
@@ -45,13 +47,15 @@ struct GreenRelated {
     /// frame 2: |X1Y1 X2Y1 ... XnY1 X1Y2 X2Y2 ... XnY2 ...... XnYn|
     ///
     /// ......
-    g2: Arc<Array2<u8>>,
+    g2: Option<ArcArray2<u8>>,
     /// If we do not filter `g2`, then `filtered_g2` and `g2` can shared the same data
     /// so `Arc` is used here to achieve this "copy-on-write" logic.
-    filtered_g2: Arc<Array2<u8>>,
+    filtered_g2: Option<ArcArray2<u8>>,
+    /// Get the progress of filtering.
+    filter_counter: Option<Receiver<()>>,
     /// Frame index of green value peak point.
     #[allow(dead_code)]
-    peak_frames: Array1<usize>,
+    peak_frames: Option<Array1<usize>>,
 }
 
 #[derive(Default)]
@@ -60,6 +64,12 @@ struct TemperatureRelated {
     daq: Array2<f64>,
     #[allow(dead_code)]
     t2d: Option<Array2<f64>>,
+}
+
+#[derive(Serialize)]
+pub struct CalProgress {
+    current: usize,
+    total: usize,
 }
 
 impl TLCData {
@@ -77,7 +87,7 @@ impl TLCData {
         // So this task should be executed in `tokio::task::spawn_blocking` or `rayon::spawn`,
         // here we must use `rayon::spawn` because the `thread-local` decoder is designed
         // to be kept in thread from rayon thread pool.
-        crate::util::blocking::compute(move || loop {
+        blocking::compute(move || loop {
             let vc = video_cache.read();
             vc.worth_waiting(frame_index)?;
             if let Some(packet) = vc.packets.get(frame_index) {
@@ -186,14 +196,15 @@ impl TLCData {
                 }
             };
 
-            gr.g2 = Arc::new(g2);
-            gr.filtered_g2 = gr.g2.clone();
+            let g2 = g2.into_shared();
+            gr.g2 = Some(g2.clone());
+            gr.filtered_g2 = Some(g2);
 
             Ok(())
         });
 
         // We need to make sure the lock has been acquired so that
-        // `filter` will not start until `build_g2` finished.
+        // `filter` will not start until `build_g2` has finished.
         let _ = rx.await;
 
         self
@@ -202,13 +213,31 @@ impl TLCData {
     pub fn filter(&self, filter_method: FilterMethod) {
         let gr = self.gr.clone();
 
-        tokio::task::spawn_blocking(move || -> Result<()> {
-            let mut gr = gr.lock();
+        tokio::task::spawn_blocking(move || {
+            let mut _gr = gr.lock();
+            let g2 = _gr.g2.as_ref()?.clone();
+            // This channel is used to:
+            // 1. Get the current filter progress according to its length.
+            // 2. Abort previous calculation. If `filter` is called before the last one finishes,
+            // the previous `filter_counter` will be replaced(dropped), in other words, the `receiver`
+            // is disconnected and `send` shall fail so that previous calculation will be aborted.
+            let (tx, rx) = crossbeam::channel::bounded(g2.dim().1);
+            _gr.filter_counter = Some(rx);
+            drop(_gr);
 
-            let filtered_g2 = filter(gr.g2.clone(), filter_method)?;
-            gr.filtered_g2 = filtered_g2;
+            let filtered_g2 = filter(g2, filter_method, tx).ok()?;
+            debug!("{:?}", filtered_g2);
+            gr.lock().filtered_g2 = Some(filtered_g2);
 
-            Ok(())
+            Some(())
         });
+    }
+
+    pub fn get_filter_progress(&self) -> Option<CalProgress> {
+        let gr = self.gr.try_lock()?;
+        let total = gr.g2.as_ref()?.dim().1;
+        let current = gr.filter_counter.as_ref()?.len();
+
+        Some(CalProgress { current, total })
     }
 }

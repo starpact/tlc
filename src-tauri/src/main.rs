@@ -1,3 +1,5 @@
+#![feature(once_cell)]
+
 mod command;
 mod controller;
 mod util;
@@ -41,6 +43,7 @@ async fn main() {
             set_area,
             //
             set_filter_method,
+            get_filter_progress,
         ])
         .run(tauri::generate_context!())
         .unwrap_or_else(|e| error!("uncaught error: {}", e));

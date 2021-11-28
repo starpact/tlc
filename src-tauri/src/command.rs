@@ -7,7 +7,7 @@ use ndarray::ArcArray2;
 use serde::Serialize;
 use tauri::State;
 
-use crate::controller::{DAQMeta, FilterMethod, TLCController, VideoMeta};
+use crate::controller::{CalProgress, DAQMeta, FilterMethod, TLCController, VideoMeta};
 
 pub type TLCResult<T> = Result<T, String>;
 
@@ -94,4 +94,9 @@ pub async fn set_filter_method(
     state: State<'_, TLCController>,
 ) -> TLCResult<()> {
     state.set_filter_method(filter_method).await.to()
+}
+
+#[tauri::command]
+pub fn get_filter_progress(state: State<TLCController>) -> Option<CalProgress> {
+    state.get_filter_progress()
 }
