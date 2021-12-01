@@ -5,21 +5,27 @@ mod plot;
 mod solve;
 mod video;
 
-use std::{path::Path, sync::Arc};
+use std::{
+    path::Path,
+    sync::{
+        atomic::{AtomicI64, Ordering},
+        Arc,
+    },
+};
 
 use anyhow::{anyhow, Result};
+use arc_swap::ArcSwap;
 use ffmpeg_next as ffmpeg;
 use image::{codecs::jpeg::JpegEncoder, ColorType::Rgb8};
 use ndarray::{ArcArray2, Array1, Array2};
 use parking_lot::{Mutex, RwLock};
 use serde::Serialize;
-use tokio::sync::oneshot;
+use tokio::sync::{oneshot, Semaphore};
 use tracing::debug;
 
 use super::cfg::{DAQMeta, G2Param, VideoMeta};
 use crate::util::{blocking, timing};
-use crossbeam::channel::Receiver;
-pub use filter::{filter, FilterMethod};
+pub use filter::{filter, filter_single_point, FilterMethod};
 pub use interp::InterpMethod;
 pub use solve::IterationMethod;
 use video::{open_video, VideoCache};
@@ -34,8 +40,15 @@ pub struct TLCData {
     /// 2. There is no need to keep it locked across an `.await` point. Can refer to
     /// [this](https://docs.rs/tokio/1.13.0/tokio/sync/struct.Mutex.html#which-kind-of-mutex-should-you-use).
     gr: Arc<Mutex<GreenRelated>>,
+
     /// Temperature related data.
-    tr: Mutex<TemperatureRelated>,
+    tr: Arc<Mutex<TemperatureRelated>>,
+
+    /// Build g2 progress watcher.
+    bpw: Arc<ProgressWatcher>,
+
+    /// Build g2 progress watcher.
+    fpw: Arc<ProgressWatcher>,
 }
 
 #[derive(Default)]
@@ -48,11 +61,11 @@ struct GreenRelated {
     ///
     /// ......
     g2: Option<ArcArray2<u8>>,
+
     /// If we do not filter `g2`, then `filtered_g2` and `g2` can shared the same data
     /// so `Arc` is used here to achieve this "copy-on-write" logic.
     filtered_g2: Option<ArcArray2<u8>>,
-    /// Get the progress of filtering.
-    filter_counter: Option<Receiver<()>>,
+
     /// Frame index of green value peak point.
     #[allow(dead_code)]
     peak_frames: Option<Array1<usize>>,
@@ -60,25 +73,58 @@ struct GreenRelated {
 
 #[derive(Default)]
 struct TemperatureRelated {
-    #[allow(dead_code)]
-    daq: Array2<f64>,
+    daq: ArcArray2<f64>,
+
     #[allow(dead_code)]
     t2d: Option<Array2<f64>>,
 }
 
+#[derive(Default)]
+struct ProgressWatcher {
+    /// We do need the interior mutability for task cancellation.
+    /// * current progress: lower 32 bits
+    /// * total progress: higher 32 bits
+    inner: ArcSwap<AtomicI64>,
+}
+
+impl ProgressWatcher {
+    fn get_progress(&self) -> Option<CalProgress> {
+        let inner = self.inner.load().load(Ordering::Relaxed);
+        if inner <= 0 {
+            return None;
+        }
+
+        let current = (inner & (u32::MAX as i64)) as u32;
+        let total = (inner >> 32) as u32;
+
+        Some(CalProgress { current, total })
+    }
+}
+
 #[derive(Serialize)]
 pub struct CalProgress {
-    current: usize,
-    total: usize,
+    current: u32,
+    total: u32,
 }
 
 impl TLCData {
-    pub fn reset(&self) {
-        *self.gr.lock() = GreenRelated::default();
-        *self.tr.lock() = TemperatureRelated::default();
+    pub async fn reset(&self) {
+        let gr = self.gr.clone();
+        let tr = self.tr.clone();
+        let vc = self.video_cache.clone();
+
+        let _ = tokio::task::spawn_blocking(move || {
+            *gr.lock() = GreenRelated::default();
+            *tr.lock() = TemperatureRelated::default();
+            *vc.write() = VideoCache::default();
+        })
+        .await;
     }
 
     pub async fn get_frame(&self, frame_index: usize) -> Result<String> {
+        static PENDING_COUNTER: Semaphore = Semaphore::const_new(3);
+        let _counter = PENDING_COUNTER.try_acquire();
+
         let video_cache = self.video_cache.clone();
 
         // `get_frame` is regarded as synchronous blocking because:
@@ -126,7 +172,7 @@ impl TLCData {
             });
 
             // `packet_cache` is reset before start reading from file.
-            video_cache.write().reset(&path, video_ctx, total_frames);
+            video_cache.write().init(&path, video_ctx, total_frames);
 
             let mut cnt = 0;
             loop {
@@ -168,7 +214,7 @@ impl TLCData {
         let path = daq_path.as_ref().to_owned();
         let daq = tokio::task::spawn_blocking(move || daq::read_daq(&path)).await??;
         let total_rows = daq.dim().0;
-        self.tr.lock().daq = daq;
+        self.tr.lock().daq = daq.into_shared();
 
         Ok(DAQMeta {
             path: daq_path.as_ref().to_owned(),
@@ -177,22 +223,29 @@ impl TLCData {
     }
 
     pub fn get_daq(&self) -> ArcArray2<f64> {
-        self.tr.lock().daq.to_shared()
+        self.tr.lock().daq.clone()
     }
 
-    pub async fn build_g2(&self, g2_param: G2Param) -> &Self {
+    pub fn build_g2(&self, g2_param: G2Param) -> &Self {
         let video_cache = self.video_cache.clone();
         let gr = self.gr.clone();
-        let (tx, rx) = oneshot::channel();
+        let bpw = self.bpw.clone();
+        let fpw = self.fpw.clone();
+        let (tx, rx) = crossbeam::channel::bounded(0);
 
         tokio::task::spawn_blocking(move || -> Result<()> {
+            fpw.inner.load().store(i64::MIN, Ordering::Relaxed);
+            let new = Arc::new(AtomicI64::new((g2_param.frame_num as i64) << 32));
+            let old = bpw.inner.swap(new.clone());
+            old.store(i64::MIN, Ordering::Relaxed);
+
             let mut gr = gr.lock();
             let _ = tx.send(());
 
             let g2 = loop {
                 let vc = &video_cache.read();
                 if vc.finished() {
-                    break vc.build_g2(g2_param)?;
+                    break vc.build_g2(g2_param, &new)?;
                 }
             };
 
@@ -200,44 +253,65 @@ impl TLCData {
             gr.g2 = Some(g2.clone());
             gr.filtered_g2 = Some(g2);
 
+            fpw.inner.load().store(0, Ordering::Relaxed);
+
             Ok(())
         });
 
-        // We need to make sure the lock has been acquired so that
-        // `filter` will not start until `build_g2` has finished.
-        let _ = rx.await;
+        // We need to make sure the lock has been acquired so that `filter` will not
+        // start until `build_g2` has finished. It won't block for long here because
+        // current calculation is terminated before waiting for the lock.
+        let _ = rx.recv();
 
         self
     }
 
     pub fn filter(&self, filter_method: FilterMethod) {
         let gr = self.gr.clone();
+        let fpw = self.fpw.clone();
 
         tokio::task::spawn_blocking(move || {
-            let mut _gr = gr.lock();
-            let g2 = _gr.g2.as_ref()?.clone();
-            // This channel is used to:
-            // 1. Get the current filter progress according to its length.
-            // 2. Abort previous calculation. If `filter` is called before the last one finishes,
-            // the previous `filter_counter` will be replaced(dropped), in other words, the `receiver`
-            // is disconnected and `send` shall fail so that previous calculation will be aborted.
-            let (tx, rx) = crossbeam::channel::bounded(g2.dim().1);
-            _gr.filter_counter = Some(rx);
-            drop(_gr);
+            let g2 = gr.lock().g2.as_ref()?.clone();
+            if fpw.inner.load().load(Ordering::Relaxed) < 0 {
+                return None;
+            }
 
-            let filtered_g2 = filter(g2, filter_method, tx).ok()?;
-            debug!("{:?}", filtered_g2);
+            // Store total progress in higher 32 bits and the current progress is zero.
+            let new = Arc::new(AtomicI64::new((g2.dim().1 as i64) << 32));
+            let old = fpw.inner.swap(new.clone());
+            old.store(i64::MIN, Ordering::Relaxed);
+
+            let filtered_g2 = filter(filter_method, g2, &new).ok()?;
             gr.lock().filtered_g2 = Some(filtered_g2);
 
             Some(())
         });
     }
 
-    pub fn get_filter_progress(&self) -> Option<CalProgress> {
-        let gr = self.gr.try_lock()?;
-        let total = gr.g2.as_ref()?.dim().1;
-        let current = gr.filter_counter.as_ref()?.len();
+    pub async fn filter_single_point(
+        &self,
+        filter_method: FilterMethod,
+        pos: usize,
+    ) -> Result<Vec<u8>> {
+        let gr = self.gr.clone();
 
-        Some(CalProgress { current, total })
+        tokio::task::spawn_blocking(move || {
+            let g2 = gr
+                .lock()
+                .g2
+                .as_ref()
+                .ok_or_else(|| anyhow!("g2 not built"))?
+                .clone();
+            filter_single_point(filter_method, g2, pos)
+        })
+        .await?
+    }
+
+    pub fn get_build_progress(&self) -> Option<CalProgress> {
+        self.bpw.get_progress()
+    }
+
+    pub fn get_filter_progress(&self) -> Option<CalProgress> {
+        self.fpw.get_progress()
     }
 }

@@ -43,6 +43,8 @@ async fn main() {
             set_area,
             //
             set_filter_method,
+            filter_single_point,
+            get_build_progress,
             get_filter_progress,
         ])
         .run(tauri::generate_context!())

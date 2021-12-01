@@ -2,6 +2,7 @@ use std::{
     cell::{RefCell, RefMut},
     ops::{Deref, DerefMut},
     path::{Path, PathBuf},
+    sync::atomic::{AtomicI64, Ordering},
 };
 
 use anyhow::{anyhow, bail, Result};
@@ -29,6 +30,7 @@ pub struct VideoCache {
     state: State,
     /// Cache thread-local decoder.
     decoder_cache: DecoderCache,
+
     /// > [For video, one packet should typically contain one compressed frame
     /// ](https://libav.org/documentation/doxygen/master/structAVPacket.html).
     ///
@@ -77,7 +79,7 @@ pub struct VideoMeta {
 }
 
 impl VideoCache {
-    pub fn reset<P: AsRef<Path>>(
+    pub fn init<P: AsRef<Path>>(
         &mut self,
         path: P,
         video_ctx: codec::Context,
@@ -126,7 +128,7 @@ impl VideoCache {
         matches!(self.state, State::Finished)
     }
 
-    pub fn build_g2(&self, g2_param: G2Param) -> Result<Array2<u8>> {
+    pub fn build_g2(&self, g2_param: G2Param, progress: &AtomicI64) -> Result<Array2<u8>> {
         let _timing = timing::start("building g2");
         debug!("{:#?}", g2_param);
 
@@ -162,6 +164,10 @@ impl VideoCache {
                             *b = rgb[j];
                         }
                     }
+                }
+
+                if progress.fetch_add(1, Ordering::SeqCst) < 0 {
+                    bail!("aborted");
                 }
 
                 Ok(())

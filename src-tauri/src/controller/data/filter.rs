@@ -1,3 +1,6 @@
+use std::sync::atomic::{AtomicI64, Ordering};
+
+use anyhow::{anyhow, bail};
 use dwt::{transform, wavelet::Wavelet, Operation};
 use median::Filter;
 use ndarray::{parallel::prelude::*, prelude::*, ArcArray2};
@@ -5,7 +8,6 @@ use serde::{Deserialize, Serialize};
 use tracing::debug;
 
 use crate::util::timing;
-use crossbeam::channel::{SendError, Sender};
 
 #[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq)]
 pub enum FilterMethod {
@@ -21,9 +23,9 @@ impl Default for FilterMethod {
 }
 
 pub fn filter(
-    g2: ArcArray2<u8>,
     filter_method: FilterMethod,
-    tx: Sender<()>,
+    g2: ArcArray2<u8>,
+    progress: &AtomicI64,
 ) -> anyhow::Result<ArcArray2<u8>> {
     let _timing = timing::start("filtering g2");
     debug!("filter method: {:?}", filter_method);
@@ -32,28 +34,56 @@ pub fn filter(
     match filter_method {
         No => {
             // This is really stupid but I want to keep things consistent.
-            (0..g2.dim().1).try_for_each(|_| tx.send(()))?;
+            progress.fetch_add(g2.dim().1 as i64, Ordering::SeqCst);
             Ok(g2)
         }
         Median(window_size) => cal(g2, move |g1| {
             median(g1, window_size);
-            tx.send(())
+            if progress.fetch_add(1, Ordering::SeqCst) < 0 {
+                Err(())
+            } else {
+                Ok(())
+            }
         }),
         Wavelet(threshold_ratio) => cal(g2, move |g1| {
             wavelet(g1, threshold_ratio);
-            tx.send(())
+            if progress.fetch_add(1, Ordering::SeqCst) < 0 {
+                Err(())
+            } else {
+                Ok(())
+            }
         }),
     }
 }
 
+pub fn filter_single_point(
+    filter_method: FilterMethod,
+    g2: ArcArray2<u8>,
+    pos: usize,
+) -> anyhow::Result<Vec<u8>> {
+    if pos >= g2.dim().1 {
+        bail!("index({}) out of bounds({})", pos, g2.dim().1);
+    }
+
+    let mut g1 = g2.column(pos).to_owned();
+    match filter_method {
+        FilterMethod::No => {}
+        FilterMethod::Median(window_size) => median(g1.view_mut(), window_size),
+        FilterMethod::Wavelet(threshold_ratio) => wavelet(g1.view_mut(), threshold_ratio),
+    };
+
+    Ok(g1.to_vec())
+}
+
 fn cal<F>(mut g2: ArcArray2<u8>, f: F) -> anyhow::Result<ArcArray2<u8>>
 where
-    F: Fn(ArrayViewMut1<u8>) -> Result<(), SendError<()>> + Send + Sync,
+    F: Fn(ArrayViewMut1<u8>) -> Result<(), ()> + Send + Sync,
 {
     g2.view_mut()
         .axis_iter_mut(Axis(1))
         .into_par_iter()
-        .try_for_each(f)?;
+        .try_for_each(f)
+        .map_err(|_| anyhow!("aborted"))?;
 
     Ok(g2)
 }

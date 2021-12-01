@@ -232,6 +232,10 @@ impl TLCConfig {
         Ok(self)
     }
 
+    pub fn get_area(&self) -> Option<(u32, u32, u32, u32)> {
+        self.area
+    }
+
     pub fn set_area(&mut self, area: (u32, u32, u32, u32)) -> Result<&mut Self> {
         match self.area {
             Some(old_area) if old_area == area => {

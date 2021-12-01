@@ -20,6 +20,7 @@ interface DAQMeta {
 
 function App() {
   const [image, setImage] = useState<string>();
+  const [buildProgress, setBuildProgress] = useState<CalProgress>();
   const [filterProgress, setFilterProgress] = useState<CalProgress>();
 
   function get_save_root_dir() {
@@ -89,6 +90,14 @@ function App() {
 
   useEffect(() => {
     setInterval(() => {
+      invoke<CalProgress>("get_build_progress")
+        .then((progress) => setBuildProgress(progress))
+        .catch(console.error);
+    }, 250);
+  }, []);
+
+  useEffect(() => {
+    setInterval(() => {
       invoke<CalProgress>("get_filter_progress")
         .then((progress) => setFilterProgress(progress))
         .catch(console.error);
@@ -121,13 +130,9 @@ function App() {
       <br />
       <button onClick={set_filter_method}>set_filter_method</button>
       <br />
-      {
-        filterProgress &&
-        <p>
-          {`${filterProgress.current}/${filterProgress.total}`}
-        </p>
-      }
-      <img alt="frame" src={`data:image/jpeg;base64,${image}`} />
+      {buildProgress && <p>build progress: {`${buildProgress.current}/${buildProgress.total}`}</p>}
+      {filterProgress && <p>filter progress: {`${filterProgress.current}/${filterProgress.total}`}</p>}
+      {image && <img alt="frame" src={`data:image/jpeg;base64,${image}`} />}
     </div>
   )
 }
