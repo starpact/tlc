@@ -78,8 +78,8 @@ impl TLCController {
         self.cfg.write().save_root_dir = Some(save_root_dir.as_ref().to_owned());
     }
 
-    pub async fn get_frame(&self, frame_index: usize) -> Result<String> {
-        self.data.get_frame(frame_index).await
+    pub async fn read_frame(&self, frame_index: usize) -> Result<String> {
+        self.data.read_frame(frame_index).await
     }
 
     pub fn get_video_meta(&self) -> Result<VideoMeta> {

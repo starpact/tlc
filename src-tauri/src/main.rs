@@ -1,4 +1,6 @@
 #![feature(once_cell)]
+#![feature(array_windows)]
+#![feature(test)]
 
 mod command;
 mod controller;
@@ -30,7 +32,7 @@ async fn main() {
             get_save_root_dir,
             set_save_root_dir,
             //
-            get_frame,
+            read_frame,
             get_video_meta,
             set_video_path,
             //

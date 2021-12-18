@@ -121,9 +121,11 @@ impl TLCData {
         .await;
     }
 
-    pub async fn get_frame(&self, frame_index: usize) -> Result<String> {
+    pub async fn read_frame(&self, frame_index: usize) -> Result<String> {
         static PENDING_COUNTER: Semaphore = Semaphore::const_new(3);
-        let _counter = PENDING_COUNTER.try_acquire();
+        let _counter = PENDING_COUNTER
+            .try_acquire()
+            .map_err(|e| anyhow!("busy: {}", e))?;
 
         let video_cache = self.video_cache.clone();
 

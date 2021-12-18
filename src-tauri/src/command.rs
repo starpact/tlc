@@ -38,8 +38,8 @@ pub fn set_save_root_dir(path: &Path, state: State<'_, TLCController>) -> TLCRes
 }
 
 #[tauri::command]
-pub async fn get_frame(frame_index: usize, state: State<'_, TLCController>) -> TLCResult<String> {
-    state.get_frame(frame_index).await.to()
+pub async fn read_frame(frame_index: usize, state: State<'_, TLCController>) -> TLCResult<String> {
+    state.read_frame(frame_index).await.to()
 }
 
 #[tauri::command]

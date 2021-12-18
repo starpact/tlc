@@ -21,25 +21,34 @@ pub struct TLCConfig {
     /// * nu_matrix_path: {root_dir}/nu_matrix/{case_name}.csv
     /// * plot_matrix_path: {root_dir}/nu_plot/{case_name}.png
     pub save_root_dir: Option<PathBuf>,
+
     /// Video metadata: attributes of the video. Once video path is determined, so are
     /// other attributes. So these can be regarded as a cache.
     video_meta: Option<VideoMeta>,
-    ///
+
     daq_meta: Option<DAQMeta>,
+
     /// Start frame of video involved in the calculation.
     start_frame: Option<usize>,
+
     /// Start row of DAQ data involved in the calculation.
     start_row: Option<usize>,
+
     /// Calculation area(top_left_y, top_left_x, area_height, area_width).
     area: Option<(u32, u32, u32, u32)>,
+
     /// Storage and positions of thermocouples.
     thermocouples: Option<Vec<Thermocouple>>,
+
     /// Filter method of green matrix along the time axis.
     pub filter_method: FilterMethod,
+
     /// Interpolation method of thermocouple temperature distribution.
     interp_method: InterpMethod,
+
     /// Iteration method used when solving heat transfer equation.
     iteration_method: IterationMethod,
+
     /// All physical parameters used when solving heat transfer equation.
     physical_param: PhysicalParam,
 }
@@ -57,12 +66,15 @@ pub struct PhysicalParam {
 pub struct VideoMeta {
     /// Path of TLC video file.
     pub path: PathBuf,
+
     /// Frame rate of video.
     #[serde(default)]
     pub frame_rate: usize,
+
     /// Total frames of video.
     #[serde(default)]
     pub total_frames: usize,
+
     /// (video_height, video_width)
     #[serde(default)]
     pub shape: (u32, u32),
@@ -72,6 +84,7 @@ pub struct VideoMeta {
 pub struct DAQMeta {
     /// Path of TLC data acquisition file.
     pub path: PathBuf,
+
     /// Total raws of DAQ data.
     #[serde(default)]
     pub total_rows: usize,
@@ -81,6 +94,7 @@ pub struct DAQMeta {
 pub struct Thermocouple {
     /// Column index of this thermocouple in the DAQ file.
     pub column_index: usize,
+
     /// Position of this thermocouple(y, x). Thermocouples
     /// may not be in the video area, so coordinate can be negative.
     pub pos: (i32, i32),

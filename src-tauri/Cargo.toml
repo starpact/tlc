@@ -33,6 +33,9 @@ median = "0.3.2"
 dwt = "0.5.2"
 crossbeam = "0.8.1"
 arc-swap = "1.5.0"
+libm = "0.2.1"
+packed_simd = { version = "0.3.6", package = "packed_simd_2" }
+approx = "0.5.0"
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]
