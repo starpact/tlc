@@ -8,24 +8,24 @@ edition = "2021"
 build = "src/build.rs"
 
 [build-dependencies]
-tauri-build = { version = "1.0.0-beta.4" }
+tauri-build = { version = "1.0.0-beta.4", features = ["codegen"] }
 
 [dependencies]
-tauri = { version = "1.0.0-beta.8", features = ["api-all"] }
-tokio = { version = "1", features = ["full"] }
+tauri = { version = "1.0.0-beta", features = ["api-all"] }
+tokio = { version = "1.16.1", features = ["full"] }
 rayon = "1.5.1"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde = { version = "1.0.136", features = ["derive"] }
+serde_json = "1.0.78"
 toml = "0.5.8"
-anyhow = "1.0.45"
-tracing = "0.1.29"
-tracing-subscriber = "0.3.1"
-parking_lot = "0.11.2"
+anyhow = "1.0.53"
+tracing = "0.1.30"
+tracing-subscriber = "0.3.8"
+parking_lot = "0.12.0"
 ffmpeg-next = "4.4.0"
-thread_local = "1.1.3"
-image = "0.23.14"
+thread_local = "1.1.4"
+image = "0.24.0"
 base64 = "0.13.0"
-ndarray = { version = "0.15.3", features = ["rayon", "serde"] }
+ndarray = { version = "0.15.4", features = ["rayon", "serde"] }
 csv = "1.1.6"
 calamine = "0.18.0"
 plotters = "0.3.1"
@@ -33,9 +33,9 @@ median = "0.3.2"
 dwt = "0.5.2"
 crossbeam = "0.8.1"
 arc-swap = "1.5.0"
-libm = "0.2.1"
-packed_simd = { version = "0.3.6", package = "packed_simd_2" }
-approx = "0.5.0"
+libm = "0.2.2"
+packed_simd = { version = "0.3.7", package = "packed_simd_2" }
+approx = "0.5.1"
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]
