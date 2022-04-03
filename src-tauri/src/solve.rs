@@ -4,6 +4,15 @@ use libm::erfc;
 use packed_simd::{f64x4, Simd};
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Deserialize, Serialize)]
+pub struct PhysicalParam {
+    peak_temperature: f64,
+    solid_thermal_conductivity: f64,
+    solid_thermal_diffusivity: f64,
+    characteristic_length: f64,
+    air_thermal_conductivity: f64,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub enum IterationMethod {
     NewtonTangent { h0: f64, max_iter_num: usize },
@@ -78,6 +87,7 @@ impl PointData<'_> {
     }
 }
 
+// Fake SIMD version erfc.
 fn erfc_simd(arr: Simd<[f64; 4]>) -> Simd<[f64; 4]> {
     unsafe {
         f64x4::new(
@@ -93,10 +103,11 @@ fn erfc_simd(arr: Simd<[f64; 4]>) -> Simd<[f64; 4]> {
 mod tests {
     extern crate test;
     use super::*;
-    use crate::controller::data;
     use approx::assert_relative_eq;
     use ndarray::Array1;
     use test::Bencher;
+
+    use crate::daq::read_daq;
 
     impl PointData<'_> {
         fn iter_no_simd(&self, h: f64, dt: f64, k: f64, a: f64, tw: f64) -> (f64, f64) {
@@ -154,11 +165,13 @@ mod tests {
     }
 
     fn new_temps() -> Array1<f64> {
-        data::daq::read_daq("D:/Archive/2021yhj/EXP/imp/daq/imp_20000_1.lvm")
+        read_daq("/home/yhj/Documents/2021yhj/EXP/imp/daq/imp_20000_1.lvm")
             .unwrap()
             .column(3)
             .to_owned()
     }
+
+    const I: (f64, f64, f64, f64, f64) = (100.0, 0.04, 0.19, 1.091e-7, 35.48);
 
     #[test]
     fn test_result_correct() {
@@ -167,9 +180,9 @@ mod tests {
             peak_frame_index: 800,
             temps: temps.as_slice_memory_order().unwrap(),
         };
-        let r1 = point_data.heat_transfer_equation(100.0, 0.04, 0.19, 1.091e-7, 35.48);
-        let r2 = point_data.iter_no_simd(100.0, 0.04, 0.19, 1.091e-7, 35.48);
-        let r3 = point_data.no_iter_no_simd(100.0, 0.04, 0.19, 1.091e-7, 35.48);
+        let r1 = point_data.heat_transfer_equation(I.0, I.1, I.2, I.3, I.4);
+        let r2 = point_data.iter_no_simd(I.0, I.1, I.2, I.3, I.4);
+        let r3 = point_data.no_iter_no_simd(I.0, I.1, I.2, I.3, I.4);
         println!(
             "simd:\t\t\t{:?}\niter_no_simd:\t\t{:?}\nno_iter_no_simd:\t{:?}",
             r1, r2, r3
@@ -181,6 +194,10 @@ mod tests {
         assert_relative_eq!(r1.1, r3.1, max_relative = 1e-6);
     }
 
+    // Bench on:
+    // OS: Win11.
+    // CPU: AMD Ryzen 7 4800H with Radeon Graphics (16) @ 2.900GHz.
+    //
     // 1. SIMD is about 40% faster than scalar version. Considering that we do not
     // find vectorized erfc implementation for rust, this is acceptable.
     // 2. Generally iteration has the same performance as for loop. No auto-vectorization
@@ -195,7 +212,7 @@ mod tests {
         };
 
         // 8,658 ns/iter (+/- 90)
-        b.iter(|| point_data.heat_transfer_equation(100.0, 0.04, 0.19, 1.091e-7, 35.48));
+        b.iter(|| point_data.heat_transfer_equation(I.0, I.1, I.2, I.3, I.4));
     }
 
     #[bench]
@@ -207,7 +224,7 @@ mod tests {
         };
 
         // 13,194 ns/iter (+/- 194)
-        b.iter(|| point_data.iter_no_simd(100.0, 0.04, 0.19, 1.091e-7, 35.48));
+        b.iter(|| point_data.iter_no_simd(I.0, I.1, I.2, I.3, I.4));
     }
 
     #[bench]
@@ -219,6 +236,6 @@ mod tests {
         };
 
         // 13,198 ns/iter (+/- 175)
-        b.iter(|| point_data.no_iter_no_simd(100.0, 0.04, 0.19, 1.091e-7, 35.48));
+        b.iter(|| point_data.no_iter_no_simd(I.0, I.1, I.2, I.3, I.4));
     }
 }

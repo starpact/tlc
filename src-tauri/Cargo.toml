@@ -1,29 +1,31 @@
 [package]
-name = "app"
+name = "tlc"
 version = "0.1.0"
-description = "customized transient liquid crystal"
-authors = ["starpact"]
+description = "Transient Liquid Crystal Experiment Data Processing"
+authors = ["yhj.await@gmail.com"]
 license = "MIT"
+repository = "https://github/starpact/tlc"
+default-run = "tlc"
 edition = "2021"
-build = "src/build.rs"
+rust-version = "1.58"
 
 [build-dependencies]
-tauri-build = { version = "1.0.0-beta.4", features = ["codegen"] }
+tauri-build = { version = "1.0.0-rc.5", features = [] }
 
 [dependencies]
-tauri = { version = "1.0.0-beta", features = ["api-all"] }
-tokio = { version = "1.16.1", features = ["full"] }
-rayon = "1.5.1"
-serde = { version = "1.0.136", features = ["derive"] }
-serde_json = "1.0.78"
+tauri = { version = "1.0.0-rc.5", features = ["api-all"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1.17.0", features = ["full"] }
+rayon = "1.5"
 toml = "0.5.8"
-anyhow = "1.0.53"
-tracing = "0.1.30"
-tracing-subscriber = "0.3.8"
+anyhow = "1.0.56"
+tracing = "0.1.32"
+tracing-subscriber = "0.3.9"
 parking_lot = "0.12.0"
-ffmpeg-next = "4.4.0"
+ffmpeg-next = "5.0.3"
 thread_local = "1.1.4"
-image = "0.24.0"
+image = "0.24.1"
 base64 = "0.13.0"
 ndarray = { version = "0.15.4", features = ["rayon", "serde"] }
 csv = "1.1.6"
@@ -38,8 +40,8 @@ packed_simd = { version = "0.3.7", package = "packed_simd_2" }
 approx = "0.5.1"
 
 [features]
-custom-protocol = ["tauri/custom-protocol"]
 default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
 
 [profile.dev]
 debug = false

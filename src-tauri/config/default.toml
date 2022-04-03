@@ -1,16 +1,16 @@
-save_root_dir = "D:\\Archive\\2021yhj\\EXP\\result\\imp"
+save_root_dir = "/home/yhj/Documents/2021yhj/EXP/result/imp"
 start_frame = 0
 start_row = 0
 area = [100, 100, 800, 1000]
 
-[video_meta]
-path = "D:\\Archive\\2021yhj\\EXP\\imp\\video\\imp_20000_1_up.avi"
+[video_metadata]
+path = "/home/yhj/Documents/2021yhj/EXP/imp/videos/imp_20000_1_up.avi"
 frame_rate = 25
-total_frames = 2444
+nframes = 2444
 
-[daq_meta]
-path = "D:\\Archive\\2021yhj\\EXP\\imp\\daq\\imp_20000_1.lvm"
-total_rows = 3000
+[daq_metadata]
+path = "/home/yhj/Documents/2021yhj/EXP/imp/daq/imp_20000_1.lvm"
+nrows = 3000
 
 [physical_param]
 peak_temperature = 35.48

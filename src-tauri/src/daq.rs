@@ -1,11 +1,30 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, bail, Result};
 use calamine::{open_workbook, Reader, Xlsx};
 use ndarray::Array2;
+use serde::{Deserialize, Serialize};
 use tracing::debug;
 
 use crate::util::timing;
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct DaqMetadata {
+    /// Path of TLC data acquisition file.
+    path: PathBuf,
+    /// Total raws of DAQ data.
+    #[serde(skip_deserializing)]
+    nrows: usize,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct Thermocouple {
+    /// Column index of this thermocouple in the DAQ file.
+    column_index: usize,
+    /// Position of this thermocouple(y, x). Thermocouples
+    /// may not be in the video area, so coordinate can be negative.
+    position: (i32, i32),
+}
 
 pub fn read_daq<P: AsRef<Path>>(daq_path: P) -> Result<Array2<f64>> {
     let _timing = timing::start("reading daq");

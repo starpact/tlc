@@ -1,54 +1,35 @@
-#![feature(once_cell)]
-#![feature(array_windows)]
-#![feature(test)]
+#![feature(test, array_windows)]
 
 mod command;
-mod controller;
+mod config;
+mod daq;
+mod filter;
+mod interpolation;
+mod solve;
+mod state;
 mod util;
+mod video;
 
 use ffmpeg_next as ffmpeg;
+use tokio::sync::RwLock;
 use tracing::{error, Level};
 
-use crate::controller::TLCController;
 use command::*;
+use state::*;
 
-#[tokio::main]
-async fn main() {
+fn main() {
     tracing_subscriber::fmt()
-        .pretty()
         .with_max_level(Level::DEBUG)
+        .pretty()
         .init();
 
-    ffmpeg::init().expect("failed to init ffmpeg");
+    ffmpeg::init().expect("Failed to init ffmpeg");
 
-    let tlc_controller = TLCController::new().await;
+    let mut tlc_state = TlcState::new();
 
     tauri::Builder::default()
-        .manage(tlc_controller)
-        .invoke_handler(tauri::generate_handler![
-            //
-            load_config,
-            //
-            get_save_root_dir,
-            set_save_root_dir,
-            //
-            read_frame,
-            get_video_meta,
-            set_video_path,
-            //
-            get_daq,
-            get_daq_meta,
-            set_daq_path,
-            //
-            set_start_frame,
-            set_start_row,
-            set_area,
-            //
-            set_filter_method,
-            filter_single_point,
-            get_build_progress,
-            get_filter_progress,
-        ])
+        .manage(RwLock::new(tlc_state))
+        .invoke_handler(tauri::generate_handler![set_video_path, read_frame])
         .run(tauri::generate_context!())
-        .unwrap_or_else(|e| error!("uncaught error: {}", e));
+        .unwrap_or_else(|e| error!("Uncaught error: {}", e));
 }
