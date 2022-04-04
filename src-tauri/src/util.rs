@@ -35,7 +35,7 @@ pub mod blocking {
     use rayon::ThreadPoolBuilder;
     use tokio::sync::oneshot;
 
-    pub fn compute<F, T>(f: F) -> Result<T>
+    pub async fn compute<F, T>(f: F) -> Result<T>
     where
         T: Send + 'static,
         F: FnOnce() -> T + Send + 'static,

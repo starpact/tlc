@@ -76,6 +76,10 @@ impl TlcConfig {
         Ok(cfg)
     }
 
+    pub fn video_metadata(&self) -> &Option<VideoMetadata> {
+        &self.video_metadata
+    }
+
     pub fn set_video_metadata(&mut self, video_metadata: VideoMetadata) {
         self.video_metadata = Some(video_metadata);
         self.start_frame = None;

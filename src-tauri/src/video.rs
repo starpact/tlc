@@ -19,14 +19,62 @@ use parking_lot::{Mutex, RwLock};
 use serde::{Deserialize, Serialize};
 use thread_local::ThreadLocal;
 use tokio::sync::{oneshot, Semaphore};
-use tracing::{debug, error};
+use tracing::debug;
 
 use crate::util;
+
+#[derive(Default)]
+pub struct VideoCache {
+    state: State,
+    /// Cache thread-local decoder.
+    decoder_cache: DecoderCache,
+    /// > [For video, one packet should typically contain one compressed frame](
+    /// https://libav.org/documentation/doxygen/master/structAVPacket.html).
+    ///
+    /// There are two key points:
+    /// 1. Will *one* packet contain more than *one* frame? As videos used
+    /// in TLC experiments are lossless and have high-resolution, we can assert
+    /// that one packet only contains one frame, which make multi-threaded
+    /// decoding [much easier](https://www.cnblogs.com/TaigaCon/p/10220356.html).
+    /// 2. Why not cache the frame data, which should be more straight forward?
+    /// This is because packet is *compressed*. Specifically, a typical video
+    /// in our experiments of 1.9GB will expend to 9.1GB if decoded to rgb byte
+    /// array, which may cause some trouble on PC.
+    pub packets: Vec<Packet>,
+}
+
+#[derive(Debug)]
+enum State {
+    Uninitialized,
+    Reading {
+        /// Identifier of the current video.
+        path: PathBuf,
+        /// Total packet/frame number of the current video, which is
+        /// used to validate the `frame_index` parameter of `get_frame`.
+        nframes: usize,
+    },
+    Finished,
+}
+
+#[derive(Default)]
+struct DecoderCache {
+    parameters: Mutex<codec::Parameters>,
+    decoders: ThreadLocal<RefCell<Decoder>>,
+}
+
+struct Decoder {
+    codec_ctx: ffmpeg::decoder::Video,
+    sws_ctx: SendableSwsCtx,
+    /// `src_frame` and `dst_frame` are used to avoid frequent allocation.
+    /// This can speed up decoding by about 10%.
+    src_frame: Video,
+    dst_frame: Video,
+}
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct VideoMetadata {
     /// Path of TLC video file.
-    path: PathBuf,
+    pub path: PathBuf,
     /// `frame_rate`, `total_frames`, `shape` is determined once the video(path)
     /// is determined, so we do not deserialize them from the config file but
     /// always directly get them from video stat. However, they are still recorded
@@ -42,7 +90,8 @@ pub struct VideoMetadata {
     shape: (u32, u32),
 }
 
-pub async fn read_video<P: AsRef<Path>>(
+/// Spawn a thread to load all video packets into memory.
+pub async fn load_packets<P: AsRef<Path>>(
     video_cache: Arc<RwLock<VideoCache>>,
     video_path: P,
 ) -> Result<VideoMetadata> {
@@ -64,17 +113,15 @@ pub async fn read_video<P: AsRef<Path>>(
         let nframes = video_stream.frames() as usize;
         let decoder = codec_ctx.decoder().video()?;
 
-        if let Err(_) = tx.send(VideoMetadata {
+        tx.send(VideoMetadata {
             path: path.clone(),
             frame_rate,
             nframes,
             shape: (decoder.height(), decoder.width()),
-        }) {
-            error!("The receiver has been dropped");
-        }
+        })
+        .expect("The receiver has been dropped");
 
-        // `packet_cache` is reset before start reading from file.
-        video_cache.write().reset(&path, parameters, nframes);
+        video_cache.write().init(&path, parameters, nframes);
 
         let mut packet_iter = input.packets();
         let mut cnt = 0;
@@ -117,7 +164,10 @@ pub async fn read_video<P: AsRef<Path>>(
     }
 }
 
-async fn get_frame(video_cache: Arc<RwLock<VideoCache>>, frame_index: usize) -> Result<String> {
+pub async fn read_single_frame(
+    video_cache: Arc<RwLock<VideoCache>>,
+    frame_index: usize,
+) -> Result<String> {
     static PENDING_COUNTER: Semaphore = Semaphore::const_new(3);
     let _counter = PENDING_COUNTER
         .try_acquire()
@@ -126,57 +176,24 @@ async fn get_frame(video_cache: Arc<RwLock<VideoCache>>, frame_index: usize) -> 
     // `get_frame` is regarded as synchronous blocking because:
     // 1. When the targeted frame is not loaded yet, it will block on the `RWLock`.
     // 2. Decoding will take some time(10~20ms) even for a single frame.
-    // So this task should be executed in `tokio::task::spawn_blocking` or `rayon::spawn`,
-    // here we must use `rayon::spawn` because the `thread-local` decoder is designed
+    // So this task should be executed in `tokio::task::spawn_blocking` or `rayon::spawn`.
+    // Here we must use `rayon::spawn` because the `thread-local` decoder is designed
     // to be kept in thread from rayon thread pool.
-    util::blocking::compute(move || {
+    util::blocking::compute(move || loop {
         let vc = video_cache.read();
         vc.worth_waiting(frame_index)?;
         if let Some(packet) = vc.packets.get(frame_index) {
             let mut decoder = vc.decoder_cache.get()?;
             let (h, w) = decoder.shape();
-            // This pre-alloc size is just an empirical estimate.
+            // This pre-alloc size is an empirical estimate.
             let mut buf = Vec::with_capacity((h * w) as usize);
-            let jpeg_encoder = JpegEncoder::new_with_quality(&mut buf, 100);
+            let mut jpeg_encoder = JpegEncoder::new_with_quality(&mut buf, 100);
             jpeg_encoder.encode(decoder.decode(packet)?.data(0), w, h, Rgb8)?;
 
-            Ok(base64::encode(buf));
+            break Ok(base64::encode(buf));
         }
     })
     .await?
-}
-
-#[derive(Default)]
-pub struct VideoCache {
-    state: State,
-    /// Cache thread-local decoder.
-    decoder_cache: DecoderCache,
-    /// > [For video, one packet should typically contain one compressed frame](
-    /// https://libav.org/documentation/doxygen/master/structAVPacket.html).
-    ///
-    /// There are two key points:
-    /// 1. Will *one* packet contain more than *one* frame? As videos used
-    /// in TLC experiments are lossless and have high-resolution, we can assert
-    /// that one packet only contains one frame, which make multi-threaded
-    /// decoding [much easier](https://www.cnblogs.com/TaigaCon/p/10220356.html).
-    /// 2. Why not cache the frame data, which should be more straight forward?
-    /// This is because packet is *compressed*. Specifically, a typical video
-    /// in our experiments of 1.9GB will expend to 9.1GB if decoded to rgb byte
-    /// array, which may cause some trouble on PC.
-    pub packets: Vec<Packet>,
-}
-
-#[derive(Debug)]
-enum State {
-    Uninitialized,
-    Reading {
-        /// Identifier of the current video.
-        path: PathBuf,
-        /// Total packet/frame number of the current video, which is
-        /// used to validate the `frame_index` parameter of `get_frame`.
-        nframes: usize,
-    },
-    Finished,
 }
 
 impl Default for State {
@@ -185,14 +202,8 @@ impl Default for State {
     }
 }
 
-#[derive(Default)]
-struct DecoderCache {
-    parameters: Mutex<codec::Parameters>,
-    decoders: ThreadLocal<RefCell<Decoder>>,
-}
-
 impl VideoCache {
-    fn reset<P: AsRef<Path>>(
+    fn init<P: AsRef<Path>>(
         &mut self,
         path: P,
         parameters: codec::Parameters,
@@ -202,27 +213,24 @@ impl VideoCache {
             path: path.as_ref().to_owned(),
             nframes: total_frames,
         };
-        self.decoder_cache.reset(parameters);
+        self.decoder_cache.init(parameters);
         self.packets.clear();
     }
 
     fn target_changed<P: AsRef<Path>>(&self, original_path: P) -> bool {
-        match self.state {
-            State::Reading { ref path, .. } => original_path.as_ref() != path.as_path(),
-            ref state @ _ => unreachable!("invalid state: {:?}", state),
+        match &self.state {
+            State::Reading { path, .. } => original_path.as_ref() != path.as_path(),
+            state => unreachable!("invalid state: {:?}", state),
         }
     }
 
     fn worth_waiting(&self, frame_index: usize) -> Result<()> {
         match self.state {
-            State::Reading {
-                nframes: total_frames,
-                ..
-            } => {
-                if frame_index >= total_frames {
+            State::Reading { nframes, .. } => {
+                if frame_index >= nframes {
                     // This is an invalid `frame_index` from frontend and will never get the frame.
                     // So directly abort current thread.
-                    bail!("frame_index({}) out of range", frame_index)
+                    bail!("frame_index({}) out of range({})", frame_index, nframes);
                 }
                 Ok(())
             }
@@ -241,7 +249,7 @@ impl VideoCache {
 }
 
 impl DecoderCache {
-    fn reset(&mut self, parameters: codec::Parameters) {
+    fn init(&mut self, parameters: codec::Parameters) {
         self.parameters = Mutex::new(parameters);
         self.decoders.clear();
     }
@@ -256,7 +264,7 @@ impl DecoderCache {
     }
 }
 
-/// wrap `Context` to pass between threads(because of the raw pointer)
+/// Wrap `Context` to pass between threads(because of the raw pointer).
 struct SendableSwsCtx(scaling::Context);
 
 #[allow(clippy::non_send_fields_in_send_ty)]
@@ -274,15 +282,6 @@ impl DerefMut for SendableSwsCtx {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
-}
-
-pub struct Decoder {
-    codec_ctx: ffmpeg::decoder::Video,
-    sws_ctx: SendableSwsCtx,
-    /// `src_frame` and `dst_frame` are used to avoid frequent allocation.
-    /// This can speed up decoding by about 10%.
-    src_frame: Video,
-    dst_frame: Video,
 }
 
 impl Decoder {

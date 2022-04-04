@@ -27,5 +27,5 @@ pub async fn set_video_path(video_path: &Path, state: State<'_>) -> TlcResult<Vi
 
 #[tauri::command]
 pub async fn read_frame(frame_index: usize, state: State<'_>) -> TlcResult<String> {
-    state.read().await.read_frame(frame_index).await.to()
+    state.read().await.read_single_frame(frame_index).await.to()
 }
