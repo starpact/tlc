@@ -194,9 +194,7 @@ mod tests {
         assert_relative_eq!(r1.1, r3.1, max_relative = 1e-6);
     }
 
-    // Bench on:
-    // OS: Win11.
-    // CPU: AMD Ryzen 7 4800H with Radeon Graphics (16) @ 2.900GHz.
+    // Bench on AMD Ryzen 7 4800H with Radeon Graphics (16) @ 2.900GHz.
     //
     // 1. SIMD is about 40% faster than scalar version. Considering that we do not
     // find vectorized erfc implementation for rust, this is acceptable.

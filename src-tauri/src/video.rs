@@ -15,6 +15,7 @@ use ffmpeg::{
 };
 use ffmpeg_next as ffmpeg;
 use image::{codecs::jpeg::JpegEncoder, ColorType::Rgb8};
+use ndarray::{parallel::prelude::*, prelude::*};
 use parking_lot::{Mutex, RwLock};
 use serde::{Deserialize, Serialize};
 use thread_local::ThreadLocal;
@@ -28,6 +29,9 @@ pub struct VideoCache {
     state: State,
     /// Cache thread-local decoder.
     decoder_cache: DecoderCache,
+    /// Total packet/frame number of the current video, which is used
+    /// to validate the `frame_index` parameter of `read_single_frame`.
+    nframes: usize,
     /// > [For video, one packet should typically contain one compressed frame](
     /// https://libav.org/documentation/doxygen/master/structAVPacket.html).
     ///
@@ -46,13 +50,8 @@ pub struct VideoCache {
 #[derive(Debug)]
 enum State {
     Uninitialized,
-    Reading {
-        /// Identifier of the current video.
-        path: PathBuf,
-        /// Total packet/frame number of the current video, which is
-        /// used to validate the `frame_index` parameter of `get_frame`.
-        nframes: usize,
-    },
+    /// Identifier of the current video.
+    Reading(PathBuf),
     Finished,
 }
 
@@ -81,13 +80,20 @@ pub struct VideoMetadata {
     /// in the config file because they might be useful information for users.
     /// Frame rate of video.
     #[serde(skip_deserializing)]
-    frame_rate: usize,
+    pub frame_rate: usize,
     /// Total frames of video.
     #[serde(skip_deserializing)]
-    nframes: usize,
+    pub nframes: usize,
     /// (video_height, video_width)
     #[serde(skip_deserializing)]
-    shape: (u32, u32),
+    pub shape: (u32, u32),
+}
+
+#[derive(Debug, Clone)]
+pub struct Green2Param {
+    pub start_frame: usize,
+    pub cal_num: usize,
+    pub area: (u32, u32, u32, u32),
 }
 
 /// Spawn a thread to load all video packets into memory.
@@ -99,6 +105,8 @@ pub async fn load_packets<P: AsRef<Path>>(
     let (tx, rx) = oneshot::channel();
 
     let join_handle = tokio::task::spawn_blocking(move || -> Result<()> {
+        let _timing = util::timing::start("loading packets");
+
         let mut input = ffmpeg::format::input(&path)?;
         let video_stream = input
             .streams()
@@ -136,7 +144,7 @@ pub async fn load_packets<P: AsRef<Path>>(
                 }
                 if vc.target_changed(&path) {
                     // Video path has been changed, which means user changed the path before
-                    // previous reading finishes. So we should abort this reading at once.
+                    // previous loading finishes. So we should abort current loading at once.
                     // Other threads should be waiting for the lock to read from the latest path
                     // at this point.
                     return Ok(());
@@ -168,7 +176,7 @@ pub async fn read_single_frame(
     video_cache: Arc<RwLock<VideoCache>>,
     frame_index: usize,
 ) -> Result<String> {
-    static PENDING_COUNTER: Semaphore = Semaphore::const_new(3);
+    static PENDING_COUNTER: Semaphore = Semaphore::const_new(util::blocking::NUM_THREAD);
     let _counter = PENDING_COUNTER
         .try_acquire()
         .map_err(|e| anyhow!("busy: {}", e))?;
@@ -177,11 +185,18 @@ pub async fn read_single_frame(
     // 1. When the targeted frame is not loaded yet, it will block on the `RWLock`.
     // 2. Decoding will take some time(10~20ms) even for a single frame.
     // So this task should be executed in `tokio::task::spawn_blocking` or `rayon::spawn`.
-    // Here we must use `rayon::spawn` because the `thread-local` decoder is designed
-    // to be kept in thread from rayon thread pool.
+    // As `thread-local` decoders are designed to be kept in just a few threads, we use
+    // customized `rayon` thread pool to implement this.
     util::blocking::compute(move || loop {
         let vc = video_cache.read();
-        vc.worth_waiting(frame_index)?;
+        if !vc.initialized() {
+            bail!("uninitialized");
+        }
+        if frame_index >= vc.nframes {
+            // This is an invalid `frame_index` from frontend and will never get the frame.
+            // So directly abort current thread.
+            bail!("frame_index({}) out of range({})", frame_index, vc.nframes);
+        }
         if let Some(packet) = vc.packets.get(frame_index) {
             let mut decoder = vc.decoder_cache.get()?;
             let (h, w) = decoder.shape();
@@ -196,6 +211,54 @@ pub async fn read_single_frame(
     .await?
 }
 
+pub fn build_green2(
+    video_cache: Arc<RwLock<VideoCache>>,
+    green2_param: Green2Param,
+) -> Result<Array2<u8>> {
+    let _timing = util::timing::start("building green2");
+
+    let vc = loop {
+        let vc = video_cache.read();
+        if vc.finished() {
+            break vc;
+        }
+    };
+
+    let byte_w = vc.decoder_cache.get()?.shape().1 as usize * 3;
+    let (tl_y, tl_x, h, w) = green2_param.area;
+    let (tl_y, tl_x, h, w) = (tl_y as usize, tl_x as usize, h as usize, w as usize);
+    let mut green2 = Array2::zeros((green2_param.cal_num, h * w));
+
+    vc.packets
+        .par_iter()
+        .skip(green2_param.start_frame)
+        .zip(green2.axis_iter_mut(Axis(0)).into_iter())
+        .try_for_each(|(packet, mut row)| -> Result<()> {
+            let mut decoder = vc.decoder_cache.get()?;
+            let dst_frame = decoder.decode(packet)?;
+
+            // each frame is stored in a u8 array:
+            // |r g b r g b...r g b|r g b r g b...r g b|......|r g b r g b...r g b|
+            // |.......row_0.......|.......row_1.......|......|.......row_n.......|
+            let rgb = dst_frame.data(0);
+            let mut row_iter = row.iter_mut();
+
+            for i in (0..).step_by(byte_w).skip(tl_y).take(h) {
+                for j in (i..).skip(1).step_by(3).skip(tl_x).take(w) {
+                    // Bounds check can be removed by optimization so no need to use unsafe.
+                    // Same performance as `unwrap_unchecked` + `get_unchecked`.
+                    if let Some(b) = row_iter.next() {
+                        *b = rgb[j];
+                    }
+                }
+            }
+
+            Ok(())
+        })?;
+
+    Ok(green2)
+}
+
 impl Default for State {
     fn default() -> Self {
         Self::Uninitialized
@@ -203,40 +266,22 @@ impl Default for State {
 }
 
 impl VideoCache {
-    fn init<P: AsRef<Path>>(
-        &mut self,
-        path: P,
-        parameters: codec::Parameters,
-        total_frames: usize,
-    ) {
-        self.state = State::Reading {
-            path: path.as_ref().to_owned(),
-            nframes: total_frames,
-        };
+    fn init<P: AsRef<Path>>(&mut self, path: P, parameters: codec::Parameters, nframes: usize) {
+        self.state = State::Reading(path.as_ref().to_owned());
         self.decoder_cache.init(parameters);
+        self.nframes = nframes;
         self.packets.clear();
     }
 
     fn target_changed<P: AsRef<Path>>(&self, original_path: P) -> bool {
         match &self.state {
-            State::Reading { path, .. } => original_path.as_ref() != path.as_path(),
+            State::Reading(path) => original_path.as_ref() != path.as_path(),
             state => unreachable!("invalid state: {:?}", state),
         }
     }
 
-    fn worth_waiting(&self, frame_index: usize) -> Result<()> {
-        match self.state {
-            State::Reading { nframes, .. } => {
-                if frame_index >= nframes {
-                    // This is an invalid `frame_index` from frontend and will never get the frame.
-                    // So directly abort current thread.
-                    bail!("frame_index({}) out of range({})", frame_index, nframes);
-                }
-                Ok(())
-            }
-            State::Finished => Ok(()),
-            State::Uninitialized => bail!("video path unset"),
-        }
+    fn initialized(&self) -> bool {
+        !matches!(self.state, State::Uninitialized)
     }
 
     fn finished(&self) -> bool {
@@ -311,5 +356,75 @@ impl Decoder {
 
     fn shape(&self) -> (u32, u32) {
         (self.codec_ctx.height(), self.codec_ctx.width())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_load_packets() {
+        util::log::init();
+        let video_metadata = load_packets(
+            Arc::new(RwLock::new(VideoCache::default())),
+            "/home/yhj/Documents/2021yhj/EXP/imp/videos/imp_50000_1_up.avi",
+        )
+        .await
+        .unwrap();
+        println!("{:#?}", video_metadata);
+        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+    }
+
+    #[tokio::test]
+    async fn test_read_single_frame_pending_until_available() {
+        util::log::init();
+        let video_cache = Arc::new(RwLock::new(VideoCache::default()));
+        let video_metadata = load_packets(
+            video_cache.clone(),
+            "/home/yhj/Documents/2021yhj/EXP/imp/videos/imp_50000_1_up.avi",
+        )
+        .await
+        .unwrap();
+
+        let last_frame_index = video_metadata.nframes - 1;
+        println!("waiting for frame {}", last_frame_index);
+        let frame_str = read_single_frame(video_cache.clone(), last_frame_index)
+            .await
+            .unwrap();
+        println!("{}", frame_str.len());
+
+        assert_eq!(
+            format!(
+                "frame_index({nframes}) out of range({nframes})",
+                nframes = video_metadata.nframes
+            ),
+            read_single_frame(video_cache, video_metadata.nframes)
+                .await
+                .unwrap_err()
+                .to_string(),
+        );
+    }
+
+    #[tokio::test]
+    async fn test_build_green2() {
+        util::log::init();
+        let video_cache = Arc::new(RwLock::new(VideoCache::default()));
+        load_packets(
+            video_cache.clone(),
+            "/home/yhj/Documents/2021yhj/EXP/imp/videos/imp_50000_1_up.avi",
+        )
+        .await
+        .unwrap();
+        let green2 = build_green2(
+            video_cache,
+            Green2Param {
+                start_frame: 0,
+                cal_num: 2000,
+                area: (0, 0, 1000, 800),
+            },
+        )
+        .unwrap();
+        println!("{:?}", green2);
     }
 }

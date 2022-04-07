@@ -12,20 +12,17 @@ mod video;
 
 use ffmpeg_next as ffmpeg;
 use tokio::sync::RwLock;
-use tracing::{error, Level};
+use tracing::error;
 
 use command::*;
 use state::*;
 
 fn main() {
-    tracing_subscriber::fmt()
-        .with_max_level(Level::DEBUG)
-        .pretty()
-        .init();
+    util::log::init();
 
     ffmpeg::init().expect("Failed to init ffmpeg");
 
-    let mut tlc_state = TlcState::new();
+    let tlc_state = TlcState::new();
 
     tauri::Builder::default()
         .manage(RwLock::new(tlc_state))

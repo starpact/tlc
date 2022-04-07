@@ -1,3 +1,12 @@
+pub mod log {
+    pub fn init() {
+        tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::DEBUG)
+            .pretty()
+            .init();
+    }
+}
+
 pub mod timing {
     use std::time::Instant;
 
@@ -35,6 +44,8 @@ pub mod blocking {
     use rayon::ThreadPoolBuilder;
     use tokio::sync::oneshot;
 
+    pub const NUM_THREAD: usize = 4;
+
     pub async fn compute<F, T>(f: F) -> Result<T>
     where
         T: Send + 'static,
@@ -47,7 +58,7 @@ pub mod blocking {
         static POOL: SyncOnceCell<rayon::ThreadPool> = SyncOnceCell::new();
 
         let (tx, rx) = oneshot::channel();
-        POOL.get_or_try_init(|| ThreadPoolBuilder::new().num_threads(7).build())?
+        POOL.get_or_try_init(|| ThreadPoolBuilder::new().num_threads(NUM_THREAD).build())?
             .spawn(move || {
                 let _ = tx.send(f());
             });
