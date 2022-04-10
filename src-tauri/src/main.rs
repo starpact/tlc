@@ -26,7 +26,12 @@ fn main() {
 
     tauri::Builder::default()
         .manage(RwLock::new(tlc_state))
-        .invoke_handler(tauri::generate_handler![set_video_path, read_frame])
+        .invoke_handler(tauri::generate_handler![
+            set_video_path,
+            read_frame,
+            set_start_frame,
+            set_start_row
+        ])
         .run(tauri::generate_context!())
         .unwrap_or_else(|e| error!("Uncaught error: {}", e));
 }

@@ -12,7 +12,6 @@ function App() {
       .catch(console.error);
   }
 
-
   return (
     <div className="App">
       <header className="App-header">
