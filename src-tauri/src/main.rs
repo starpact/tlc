@@ -1,4 +1,4 @@
-#![feature(test, array_windows, once_cell)]
+#![feature(test, array_windows, once_cell, bool_to_option)]
 
 mod command;
 mod config;

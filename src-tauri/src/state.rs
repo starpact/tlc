@@ -38,6 +38,15 @@ impl TlcState {
         Ok(video_metadata)
     }
 
+    pub fn synchronize_video_and_daq(
+        &mut self,
+        start_frame: usize,
+        start_row: usize,
+    ) -> Result<()> {
+        self.config
+            .synchronize_video_and_daq(start_frame, start_row)
+    }
+
     pub fn set_start_frame(&mut self, start_frame: usize) -> Result<()> {
         self.config.set_start_frame(start_frame)?;
         self.try_spawn_build_green2();

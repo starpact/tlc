@@ -6,7 +6,6 @@ use std::{
 
 use anyhow::{anyhow, bail, Result};
 use serde::{Deserialize, Serialize};
-use tracing::debug;
 
 use crate::{
     daq::{DaqMetadata, Thermocouple},
@@ -28,10 +27,8 @@ pub struct TlcConfig {
     video_metadata: Option<VideoMetadata>,
     /// Path and some attributes of DAQ data.
     daq_metadata: Option<DaqMetadata>,
-    /// Start frame of video involved in the calculation.
-    start_frame: Option<usize>,
-    /// Start row of DAQ data involved in the calculation.
-    start_row: Option<usize>,
+    /// Start index of video and DAQ after synchronization.
+    start_index: Option<StartIndex>,
     /// Calculation area(top_left_y, top_left_x, area_height, area_width).
     area: Option<(u32, u32, u32, u32)>,
     /// Storage info and positions of thermocouples.
@@ -47,6 +44,14 @@ pub struct TlcConfig {
     iteration_method: IterationMethod,
     /// All physical parameters used when solving heat transfer equation.
     physical_param: Option<PhysicalParam>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, Copy)]
+struct StartIndex {
+    /// Start frame of video involved in the calculation.
+    start_frame: usize,
+    /// Start row of DAQ data involved in the calculation.
+    start_row: usize,
 }
 
 impl TlcConfig {
@@ -70,75 +75,6 @@ impl TlcConfig {
         Ok(cfg)
     }
 
-    pub fn start_frame(&self) -> Option<usize> {
-        self.start_frame
-    }
-
-    pub fn set_start_frame(&mut self, start_frame: usize) -> Result<()> {
-        let nframes = self
-            .video_metadata
-            .as_ref()
-            .ok_or_else(|| anyhow!("video path unset"))?
-            .nframes;
-        if start_frame >= nframes {
-            bail!("frame_index({}) out of range({})", start_frame, nframes);
-        }
-        let nrows = self
-            .daq_metadata
-            .as_ref()
-            .ok_or_else(|| anyhow!("daq path unset"))?
-            .nrows;
-        if let Some(old_start_frame) = self.start_frame.replace(start_frame) {
-            if let Some(old_start_row) = self.start_row {
-                if old_start_row + start_frame < old_start_frame {
-                    bail!("invalid start_frame");
-                }
-                let start_row = old_start_row + start_frame - old_start_frame;
-                if start_row >= nrows {
-                    bail!("row_index({}) out of range({})", start_row, nrows);
-                }
-                self.start_row = Some(start_row);
-            }
-        }
-
-        Ok(())
-    }
-
-    pub fn start_row(&self) -> Option<usize> {
-        self.start_row
-    }
-
-    pub fn set_start_row(&mut self, start_row: usize) -> Result<()> {
-        let nrows = self
-            .daq_metadata
-            .as_ref()
-            .ok_or_else(|| anyhow!("daq path unset"))?
-            .nrows;
-        debug!("{}", nrows);
-        if start_row >= nrows {
-            bail!("row_index({}) out of range({})", start_row, nrows);
-        }
-        let nframes = self
-            .video_metadata
-            .as_ref()
-            .ok_or_else(|| anyhow!("video path unset"))?
-            .nframes;
-        if let Some(old_start_row) = self.start_row.replace(start_row) {
-            if let Some(old_start_frame) = self.start_frame {
-                if old_start_frame + start_row < old_start_row {
-                    bail!("invalid start_row");
-                }
-                let start_frame = old_start_frame + start_row - old_start_row;
-                if start_frame >= nframes {
-                    bail!("frame_index({}) out of range({})", start_frame, nframes);
-                }
-                self.start_frame = Some(start_frame);
-            }
-        }
-
-        Ok(())
-    }
-
     pub fn video_metadata(&self) -> Option<&VideoMetadata> {
         self.video_metadata.as_ref()
     }
@@ -160,25 +96,128 @@ impl TlcConfig {
         }
 
         self.video_metadata = Some(video_metadata);
-        self.start_frame = None;
-        self.start_row = None;
+        self.start_index = None;
     }
 
-    pub fn green2_param(&self) -> Result<Green2Param> {
-        let nframes = self
+    fn nframes(&self) -> Result<usize> {
+        Ok(self
             .video_metadata
             .as_ref()
             .ok_or_else(|| anyhow!("video path unset"))?
-            .nframes;
-        let nrows = self
+            .nframes)
+    }
+
+    fn nrows(&self) -> Result<usize> {
+        Ok(self
             .daq_metadata
             .as_ref()
             .ok_or_else(|| anyhow!("daq path unset"))?
-            .nrows;
-        let start_frame = self
-            .start_frame
-            .ok_or_else(|| anyhow!("start frame unset"))?;
-        let start_row = self.start_row.ok_or_else(|| anyhow!("start row unset"))?;
+            .nrows)
+    }
+
+    pub fn start_frame(&self) -> Result<usize> {
+        Ok(self
+            .start_index
+            .ok_or_else(|| anyhow!("not synchronized yet"))?
+            .start_frame)
+    }
+
+    pub fn start_row(&self) -> Result<usize> {
+        Ok(self
+            .start_index
+            .ok_or_else(|| anyhow!("not synchronized yet"))?
+            .start_row)
+    }
+
+    pub fn synchronize_video_and_daq(
+        &mut self,
+        start_frame: usize,
+        start_row: usize,
+    ) -> Result<()> {
+        let nframes = self.nframes()?;
+        if start_frame >= nframes {
+            bail!("frame_index({}) out of range({})", start_frame, nframes);
+        }
+        let nrows = self.nrows()?;
+        if start_row >= nrows {
+            bail!("row_index({}) out of range({})", start_row, nrows);
+        }
+
+        self.start_index = Some(StartIndex {
+            start_frame,
+            start_row,
+        });
+
+        Ok(())
+    }
+
+    pub fn set_start_frame(&mut self, start_frame: usize) -> Result<()> {
+        let nframes = self.nframes()?;
+        if start_frame >= nframes {
+            bail!("frame_index({}) out of range({})", start_frame, nframes);
+        }
+
+        let StartIndex {
+            start_frame: old_start_frame,
+            start_row: old_start_row,
+        } = self
+            .start_index
+            .ok_or_else(|| anyhow!("not synchronized yet"))?;
+        let nrows = self.nrows()?;
+        if old_start_row + start_frame < old_start_frame {
+            bail!("invalid start_frame");
+        }
+        let start_row = old_start_row + start_frame - old_start_frame;
+        if start_row >= nrows {
+            bail!("row_index({}) out of range({})", start_row, nrows);
+        }
+
+        self.start_index = Some(StartIndex {
+            start_frame,
+            start_row,
+        });
+
+        Ok(())
+    }
+
+    pub fn set_start_row(&mut self, start_row: usize) -> Result<()> {
+        let nrows = self.nrows()?;
+        if start_row >= nrows {
+            bail!("row_index({}) out of range({})", start_row, nrows);
+        }
+
+        let StartIndex {
+            start_frame: old_start_frame,
+            start_row: old_start_row,
+        } = self
+            .start_index
+            .ok_or_else(|| anyhow!("not synchronized yet"))?;
+        let nframes = self.nframes()?;
+        if old_start_frame + start_row < old_start_row {
+            bail!("invalid start_row");
+        }
+        let start_frame = old_start_frame + start_row - old_start_row;
+        if start_frame >= nframes {
+            bail!("frames_index({}) out of range({})", start_frame, nframes);
+        }
+
+        self.start_index = Some(StartIndex {
+            start_frame,
+            start_row,
+        });
+
+        Ok(())
+    }
+
+    pub fn green2_param(&self) -> Result<Green2Param> {
+        let nframes = self.nframes()?;
+        let nrows = self.nrows()?;
+        let StartIndex {
+            start_frame,
+            start_row,
+        } = self
+            .start_index
+            .ok_or_else(|| anyhow!("not synchronized yet"))?;
         let area = self.area.ok_or_else(|| anyhow!("area unset"))?;
 
         let cal_num = (nframes - start_frame).min(nrows - start_row);

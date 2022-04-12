@@ -1,9 +1,8 @@
 use std::sync::atomic::{AtomicI64, Ordering};
 
-use anyhow::{anyhow, Result};
 use dwt::{transform, wavelet::Wavelet, Operation};
 use median::Filter;
-use ndarray::{parallel::prelude::*, prelude::*, ArcArray2};
+use ndarray::{parallel::prelude::*, prelude::*};
 use serde::{Deserialize, Serialize};
 use tracing::debug;
 
@@ -25,8 +24,8 @@ impl Default for FilterMethod {
 pub fn filter_all(
     filter_method: FilterMethod,
     progress: &AtomicI64,
-    green2: ArcArray2<u8>,
-) -> Result<ArcArray2<u8>> {
+    green2: ArrayView2<u8>,
+) -> Option<Array2<u8>> {
     let _timing = timing::start("filtering gmat");
     debug!("filter method: {:?}", filter_method);
 
@@ -34,45 +33,41 @@ pub fn filter_all(
     match filter_method {
         No => {
             progress.fetch_add(green2.dim().1 as i64, Ordering::SeqCst);
-            Ok(green2)
+            None
         }
-        Median(window_size) => cal(progress, green2, move |g1| median(g1, window_size)),
-        Wavelet(threshold_ratio) => cal(progress, green2, move |g1| wavelet(g1, threshold_ratio)),
+        Median(window_size) => Some(cal(progress, green2, move |g1| median(g1, window_size))),
+        Wavelet(threshold) => Some(cal(progress, green2, move |g1| wavelet(g1, threshold))),
     }
 }
 
-pub fn filter_single_point(filter_method: FilterMethod, green1: ArrayView1<u8>) -> Result<Vec<u8>> {
+pub fn filter_single_point(filter_method: FilterMethod, green1: ArrayView1<u8>) -> Option<Vec<u8>> {
     let mut green1 = green1.to_owned();
 
     use FilterMethod::*;
     match filter_method {
-        No => {}
+        No => return None,
         Median(window_size) => median(green1.view_mut(), window_size),
         Wavelet(threshold_ratio) => wavelet(green1.view_mut(), threshold_ratio),
     };
 
-    Ok(green1.to_vec())
+    Some(green1.to_vec())
 }
 
-fn cal<F>(progress: &AtomicI64, mut green2: ArcArray2<u8>, f: F) -> Result<ArcArray2<u8>>
+fn cal<F>(progress: &AtomicI64, green2: ArrayView2<u8>, f: F) -> Array2<u8>
 where
     F: Fn(ArrayViewMut1<u8>) + Send + Sync,
 {
-    green2
+    let mut green2_filtered = green2.to_owned();
+    green2_filtered
         .view_mut()
         .axis_iter_mut(Axis(1)) // per point
         .into_par_iter()
         .try_for_each(|green_history| {
             f(green_history);
-            if progress.fetch_add(1, Ordering::SeqCst) < 0 {
-                Err(())
-            } else {
-                Ok(())
-            }
-        })
-        .map_err(|_| anyhow!("aborted"))?;
+            (progress.fetch_add(1, Ordering::SeqCst) > 0).then_some(())
+        });
 
-    Ok(green2)
+    green2_filtered
 }
 
 fn median(mut green1: ArrayViewMut1<u8>, window_size: usize) {
