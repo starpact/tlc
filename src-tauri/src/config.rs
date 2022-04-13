@@ -79,24 +79,50 @@ impl TlcConfig {
         self.video_metadata.as_ref()
     }
 
-    pub fn set_video_metadata(&mut self, video_metadata: VideoMetadata) {
-        match self.video_metadata {
-            Some(ref old) if old.shape == video_metadata.shape => {}
-            _ => {
-                // Most of the time we can make use of the former position
-                // setting rather than directly invalidate it because within
-                // a series of experiments the position settings should be similar.
-                // We can only get this point when working with a brand new config
-                // or different camera parameters were used. Then we just put
-                // the select box in the center by default.
-                let (h, w) = video_metadata.shape;
-                self.area = Some((h / 4, w / 4, h / 2, w / 2));
-                self.thermocouples.clear();
+    pub fn set_video_metadata(&mut self, video_metadata: Option<VideoMetadata>) {
+        let video_metadata = match video_metadata {
+            Some(video_metadata) => video_metadata,
+            None => {
+                self.video_metadata = None;
+                self.start_index = None;
+                return;
             }
+        };
+
+        if !matches!(&self.video_metadata, Some(old) if old.path == video_metadata.path) {
+            self.start_index = None;
+        }
+
+        if !matches!(&self.video_metadata, Some(old) if old.shape == video_metadata.shape) {
+            // Most of the time we can make use of the former position
+            // setting rather than directly invalidate it because within
+            // a series of experiments the position settings should be similar.
+            // We can only get this point when working with a brand new config
+            // or different camera parameters were used. Then we just put
+            // the select box in the center by default.
+            let (h, w) = video_metadata.shape;
+            self.area = Some((h / 4, w / 4, h / 2, w / 2));
+            self.thermocouples.clear();
         }
 
         self.video_metadata = Some(video_metadata);
-        self.start_index = None;
+    }
+
+    pub fn daq_metadata(&self) -> Option<&DaqMetadata> {
+        self.daq_metadata.as_ref()
+    }
+
+    pub fn set_daq_metadata(&mut self, daq_metadata: Option<DaqMetadata>) {
+        let daq_metadata = match daq_metadata {
+            Some(daq_metadata) => daq_metadata,
+            None => {
+                self.daq_metadata = None;
+                self.start_index = None;
+                return;
+            }
+        };
+
+        self.daq_metadata = Some(daq_metadata);
     }
 
     fn nframes(&self) -> Result<usize> {

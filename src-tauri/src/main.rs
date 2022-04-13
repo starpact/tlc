@@ -1,4 +1,7 @@
-#![feature(test, array_windows, once_cell, bool_to_option)]
+#![feature(test)]
+#![feature(array_windows)]
+#![feature(once_cell)]
+#![feature(bool_to_option)]
 
 mod command;
 mod config;
@@ -17,12 +20,13 @@ use tracing::error;
 use command::*;
 use state::*;
 
-fn main() {
+#[tokio::main]
+async fn main() {
     util::log::init();
 
     ffmpeg::init().expect("Failed to init ffmpeg");
 
-    let tlc_state = TlcState::new();
+    let tlc_state = TlcState::new().await;
 
     tauri::Builder::default()
         .manage(RwLock::new(tlc_state))

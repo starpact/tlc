@@ -26,12 +26,12 @@ use crate::util;
 
 #[derive(Default)]
 pub struct VideoCache {
-    state: State,
-    /// Cache thread-local decoder.
-    decoder_cache: DecoderCache,
+    path: Option<PathBuf>,
     /// Total packet/frame number of the current video, which is used
     /// to validate the `frame_index` parameter of `read_single_frame`.
     nframes: usize,
+    /// Cache thread-local decoder.
+    decoder_cache: DecoderCache,
     /// > [For video, one packet should typically contain one compressed frame](
     /// https://libav.org/documentation/doxygen/master/structAVPacket.html).
     ///
@@ -44,15 +44,7 @@ pub struct VideoCache {
     /// This is because packet is *compressed*. Specifically, a typical video
     /// in our experiments of 1.9GB will expend to 9.1GB if decoded to rgb byte
     /// array, which may cause some trouble on PC.
-    pub packets: Vec<Packet>,
-}
-
-#[derive(Debug)]
-enum State {
-    Uninitialized,
-    /// Identifier of the current video.
-    Reading(PathBuf),
-    Finished,
+    packets: Vec<Packet>,
 }
 
 #[derive(Default)]
@@ -97,7 +89,7 @@ pub struct Green2Param {
 }
 
 /// Spawn a thread to load all video packets into memory.
-pub async fn load_packets<P: AsRef<Path>>(
+pub async fn spawn_load_packets<P: AsRef<Path>>(
     video_cache: Arc<RwLock<VideoCache>>,
     video_path: P,
 ) -> Result<VideoMetadata> {
@@ -129,32 +121,25 @@ pub async fn load_packets<P: AsRef<Path>>(
         })
         .expect("The receiver has been dropped");
 
-        video_cache.write().init(&path, parameters, nframes);
+        video_cache.write().init(&path, nframes, parameters);
 
-        let mut packet_iter = input.packets();
         let mut cnt = 0;
-        loop {
+        for (stream, packet) in input.packets() {
             // `RwLockWriteGuard` is intentionally holden all the way during
             // reading *each* frame to avoid busy loop within `get_frame`.
             let mut vc = video_cache.write();
-
-            if let Some((stream, packet)) = packet_iter.next() {
-                if stream.index() != video_stream_index {
-                    continue;
-                }
-                if vc.target_changed(&path) {
-                    // Video path has been changed, which means user changed the path before
-                    // previous loading finishes. So we should abort current loading at once.
-                    // Other threads should be waiting for the lock to read from the latest path
-                    // at this point.
-                    return Ok(());
-                }
-                vc.packets.push(packet);
-                cnt += 1;
-            } else {
-                vc.mark_finished();
-                break;
+            if stream.index() != video_stream_index {
+                continue;
             }
+            if vc.target_changed(&path) {
+                // Video path has been changed, which means user changed the path before
+                // previous loading finishes. So we should abort current loading at once.
+                // Other threads should be waiting for the lock to read from the latest path
+                // at this point.
+                return Ok(());
+            }
+            vc.packets.push(packet);
+            cnt += 1;
         }
 
         debug_assert!(cnt == nframes);
@@ -259,37 +244,24 @@ pub fn build_green2(
     Ok(green2)
 }
 
-impl Default for State {
-    fn default() -> Self {
-        Self::Uninitialized
-    }
-}
-
 impl VideoCache {
-    fn init<P: AsRef<Path>>(&mut self, path: P, parameters: codec::Parameters, nframes: usize) {
-        self.state = State::Reading(path.as_ref().to_owned());
-        self.decoder_cache.init(parameters);
+    fn init<P: AsRef<Path>>(&mut self, path: P, nframes: usize, parameters: codec::Parameters) {
+        self.path = Some(path.as_ref().to_owned());
         self.nframes = nframes;
+        self.decoder_cache.init(parameters);
         self.packets.clear();
     }
 
     fn target_changed<P: AsRef<Path>>(&self, original_path: P) -> bool {
-        match &self.state {
-            State::Reading(path) => original_path.as_ref() != path.as_path(),
-            state => unreachable!("invalid state: {:?}", state),
-        }
+        matches!(&self.path, Some(path) if path == original_path.as_ref())
     }
 
     fn initialized(&self) -> bool {
-        !matches!(self.state, State::Uninitialized)
+        self.path.is_some()
     }
 
     fn finished(&self) -> bool {
-        matches!(self.state, State::Finished)
-    }
-
-    fn mark_finished(&mut self) {
-        self.state = State::Finished;
+        self.nframes == self.packets.len()
     }
 }
 
@@ -366,7 +338,7 @@ mod tests {
     #[tokio::test]
     async fn test_load_packets() {
         util::log::init();
-        let video_metadata = load_packets(
+        let video_metadata = spawn_load_packets(
             Arc::new(RwLock::new(VideoCache::default())),
             "/home/yhj/Documents/2021yhj/EXP/imp/videos/imp_50000_1_up.avi",
         )
@@ -380,7 +352,7 @@ mod tests {
     async fn test_read_single_frame_pending_until_available() {
         util::log::init();
         let video_cache = Arc::new(RwLock::new(VideoCache::default()));
-        let video_metadata = load_packets(
+        let video_metadata = spawn_load_packets(
             video_cache.clone(),
             "/home/yhj/Documents/2021yhj/EXP/imp/videos/imp_50000_1_up.avi",
         )
@@ -410,7 +382,7 @@ mod tests {
     async fn test_build_green2() {
         util::log::init();
         let video_cache = Arc::new(RwLock::new(VideoCache::default()));
-        load_packets(
+        spawn_load_packets(
             video_cache.clone(),
             "/home/yhj/Documents/2021yhj/EXP/imp/videos/imp_50000_1_up.avi",
         )
