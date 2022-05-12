@@ -1,7 +1,6 @@
 #![feature(test)]
 #![feature(array_windows)]
 #![feature(once_cell)]
-#![feature(bool_to_option)]
 
 mod command;
 mod config;

@@ -2,7 +2,7 @@ use std::{
     cell::{RefCell, RefMut},
     ops::{Deref, DerefMut},
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{Arc, Mutex, RwLock},
 };
 
 use anyhow::{anyhow, bail, Result};
@@ -16,7 +16,6 @@ use ffmpeg::{
 use ffmpeg_next as ffmpeg;
 use image::{codecs::jpeg::JpegEncoder, ColorType::Rgb8};
 use ndarray::{parallel::prelude::*, prelude::*};
-use parking_lot::{Mutex, RwLock};
 use serde::{Deserialize, Serialize};
 use thread_local::ThreadLocal;
 use tokio::sync::{oneshot, Semaphore};
@@ -121,13 +120,16 @@ pub async fn spawn_load_packets<P: AsRef<Path>>(
         })
         .expect("The receiver has been dropped");
 
-        video_cache.write().init(&path, nframes, parameters);
+        video_cache
+            .write()
+            .unwrap()
+            .init(&path, nframes, parameters);
 
         let mut cnt = 0;
         for (stream, packet) in input.packets() {
             // `RwLockWriteGuard` is intentionally holden all the way during
             // reading *each* frame to avoid busy loop within `get_frame`.
-            let mut vc = video_cache.write();
+            let mut vc = video_cache.write().unwrap();
             if stream.index() != video_stream_index {
                 continue;
             }
@@ -173,7 +175,7 @@ pub async fn read_single_frame(
     // As `thread-local` decoders are designed to be kept in just a few threads, we use
     // customized `rayon` thread pool to implement this.
     util::blocking::compute(move || loop {
-        let vc = video_cache.read();
+        let vc = video_cache.read().unwrap();
         if !vc.initialized() {
             bail!("uninitialized");
         }
@@ -185,8 +187,7 @@ pub async fn read_single_frame(
         if let Some(packet) = vc.packets.get(frame_index) {
             let mut decoder = vc.decoder_cache.get()?;
             let (h, w) = decoder.shape();
-            // This pre-alloc size is an empirical estimate.
-            let mut buf = Vec::with_capacity((h * w) as usize);
+            let mut buf = Vec::new();
             let mut jpeg_encoder = JpegEncoder::new_with_quality(&mut buf, 100);
             jpeg_encoder.encode(decoder.decode(packet)?.data(0), w, h, Rgb8)?;
 
@@ -203,7 +204,7 @@ pub fn build_green2(
     let _timing = util::timing::start("building green2");
 
     let vc = loop {
-        let vc = video_cache.read();
+        let vc = video_cache.read().unwrap();
         if vc.finished() {
             break vc;
         }
@@ -273,7 +274,7 @@ impl DecoderCache {
 
     fn get(&self) -> Result<RefMut<Decoder>> {
         let decoder = self.decoders.get_or_try(|| -> Result<RefCell<Decoder>> {
-            let decoder = Decoder::new(self.parameters.lock().clone())?;
+            let decoder = Decoder::new(self.parameters.lock().unwrap().clone())?;
             Ok(RefCell::new(decoder))
         })?;
 

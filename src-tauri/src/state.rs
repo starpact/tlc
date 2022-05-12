@@ -1,8 +1,10 @@
-use std::{path::Path, sync::Arc};
+use std::{
+    path::Path,
+    sync::{Arc, Mutex, RwLock},
+};
 
 use anyhow::Result;
 use ndarray::{prelude::*, ArcArray2};
-use parking_lot::{Mutex, RwLock};
 use tracing::{debug, error};
 
 use crate::{
@@ -25,6 +27,7 @@ impl TlcState {
             config: TlcConfig::from_default_path().unwrap_or_default(),
             ..Default::default()
         };
+
         if let Some(video_metadata) = tlc_state.config.video_metadata() {
             match video::spawn_load_packets(tlc_state.video_cache.clone(), &video_metadata.path)
                 .await
@@ -36,6 +39,7 @@ impl TlcState {
                 }
             }
         }
+
         if let Some(daq_metadata) = tlc_state.config.daq_metadata() {
             match daq::read_daq(&daq_metadata.path) {
                 Ok(temperature2) => {
@@ -100,7 +104,7 @@ impl TlcState {
             let shared_green2 = self.green2.clone();
             std::thread::spawn(move || {
                 if let Ok(green2) = video::build_green2(video_cache, green2_param) {
-                    *shared_green2.lock() = Some(green2);
+                    *shared_green2.lock().unwrap() = Some(green2);
                 }
             });
         }
