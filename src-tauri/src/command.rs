@@ -4,9 +4,9 @@ use anyhow::Result;
 use serde::Serialize;
 use tokio::sync::RwLock;
 
-use crate::{state::TlcState, video::VideoMetadata};
+use crate::{state::GlobalState, video::VideoMetadata};
 
-type State<'a> = tauri::State<'a, RwLock<TlcState>>;
+type State<'a> = tauri::State<'a, RwLock<GlobalState>>;
 
 type TlcResult<T> = Result<T, String>;
 

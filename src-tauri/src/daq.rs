@@ -97,3 +97,18 @@ fn read_daq_excel<P: AsRef<Path>>(daq_path: P) -> Result<Array2<f64>> {
 
     Ok(daq)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_read_daq() {
+        util::log::init();
+
+        assert_eq!(
+            read_daq("/home/yhj/Documents/2021yhj/EXP/imp/daq/imp_20000_1.lvm").unwrap(),
+            read_daq("/home/yhj/Documents/2021yhj/EXP/imp/daq/imp_20000_1.xlsx").unwrap()
+        );
+    }
+}

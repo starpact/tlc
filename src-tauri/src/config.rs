@@ -16,32 +16,41 @@ use crate::{
 };
 
 #[derive(Debug, Default, Deserialize, Serialize)]
-pub struct TlcConfig {
+pub struct Config {
     /// Directory in which you save your data.
     /// As the `video_path` is unique, we can use its file stem as `case_name`.
     /// * config_path: {root_dir}/config/{case_name}.toml
     /// * nu_matrix_path: {root_dir}/nu_matrix/{case_name}.csv
     /// * plot_matrix_path: {root_dir}/nu_plot/{case_name}.png
     save_root_dir: Option<PathBuf>,
+
     /// Path and some attributes of video.
     video_metadata: Option<VideoMetadata>,
+
     /// Path and some attributes of DAQ data.
     daq_metadata: Option<DaqMetadata>,
+
     /// Start index of video and DAQ after synchronization.
     start_index: Option<StartIndex>,
+
     /// Calculation area(top_left_y, top_left_x, area_height, area_width).
     area: Option<(u32, u32, u32, u32)>,
+
     /// Storage info and positions of thermocouples.
     #[serde(default)]
     thermocouples: Vec<Thermocouple>,
+
     /// Filter method of green matrix along the time axis.
     #[serde(default)]
     filter_method: FilterMethod,
+
     /// Interpolation method of thermocouple temperature distribution.
     interp_method: Option<InterpMethod>,
+
     /// Iteration method used when solving heat transfer equation.
     #[serde(default)]
     iteration_method: IterationMethod,
+
     /// All physical parameters used when solving heat transfer equation.
     physical_param: Option<PhysicalParam>,
 }
@@ -50,11 +59,12 @@ pub struct TlcConfig {
 struct StartIndex {
     /// Start frame of video involved in the calculation.
     start_frame: usize,
+
     /// Start row of DAQ data involved in the calculation.
     start_row: usize,
 }
 
-impl TlcConfig {
+impl Config {
     const DEFAULT_CONFIG_PATH: &'static str = "./config/default.toml";
 
     /// Automatically called on startup.
@@ -262,7 +272,7 @@ mod tests {
 
     #[test]
     fn read_from_file() {
-        let cfg = TlcConfig::from_path("config/default.toml").unwrap();
+        let cfg = Config::from_path("config/default.toml").unwrap();
         println!("{cfg:#?}");
     }
 }

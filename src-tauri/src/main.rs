@@ -25,10 +25,10 @@ async fn main() {
 
     ffmpeg::init().expect("Failed to init ffmpeg");
 
-    let tlc_state = TlcState::new().await;
+    let global_state = GlobalState::new().await;
 
     tauri::Builder::default()
-        .manage(RwLock::new(tlc_state))
+        .manage(RwLock::new(global_state))
         .invoke_handler(tauri::generate_handler![
             set_video_path,
             read_frame,

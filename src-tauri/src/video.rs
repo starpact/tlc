@@ -2,7 +2,7 @@ use std::{
     cell::{RefCell, RefMut},
     ops::{Deref, DerefMut},
     path::{Path, PathBuf},
-    sync::{Arc, Mutex, RwLock},
+    sync::{atomic::AtomicI64, Arc, Mutex, RwLock},
 };
 
 use anyhow::{anyhow, bail, Result};
@@ -24,13 +24,30 @@ use tracing::debug;
 use crate::util;
 
 #[derive(Default)]
+pub struct VideoDataManager {
+    pub video_data: RwLock<VideoData>,
+    build_progress: AtomicI64,
+    filter_progress: AtomicI64,
+}
+
+#[derive(Default)]
+pub struct VideoData {
+    video_cache: VideoCache,
+    green2: Option<Array2<u8>>,
+    filtered_green2: Option<Array2<u8>>,
+}
+
+#[derive(Default)]
 pub struct VideoCache {
     path: Option<PathBuf>,
+
     /// Total packet/frame number of the current video, which is used
     /// to validate the `frame_index` parameter of `read_single_frame`.
     nframes: usize,
+
     /// Cache thread-local decoder.
     decoder_cache: DecoderCache,
+
     /// > [For video, one packet should typically contain one compressed frame](
     /// https://libav.org/documentation/doxygen/master/structAVPacket.html).
     ///
@@ -55,6 +72,7 @@ struct DecoderCache {
 struct Decoder {
     codec_ctx: ffmpeg::decoder::Video,
     sws_ctx: SendableSwsCtx,
+
     /// `src_frame` and `dst_frame` are used to avoid frequent allocation.
     /// This can speed up decoding by about 10%.
     src_frame: Video,
@@ -65,6 +83,7 @@ struct Decoder {
 pub struct VideoMetadata {
     /// Path of TLC video file.
     pub path: PathBuf,
+
     /// `frame_rate`, `total_frames`, `shape` is determined once the video(path)
     /// is determined, so we do not deserialize them from the config file but
     /// always directly get them from video stat. However, they are still recorded
@@ -72,9 +91,11 @@ pub struct VideoMetadata {
     /// Frame rate of video.
     #[serde(skip_deserializing)]
     pub frame_rate: usize,
+
     /// Total frames of video.
     #[serde(skip_deserializing)]
     pub nframes: usize,
+
     /// (video_height, video_width)
     #[serde(skip_deserializing)]
     pub shape: (u32, u32),
@@ -89,7 +110,7 @@ pub struct Green2Param {
 
 /// Spawn a thread to load all video packets into memory.
 pub async fn spawn_load_packets<P: AsRef<Path>>(
-    video_cache: Arc<RwLock<VideoCache>>,
+    video_data_manager: Arc<VideoDataManager>,
     video_path: P,
 ) -> Result<VideoMetadata> {
     let path = video_path.as_ref().to_owned();
@@ -120,27 +141,29 @@ pub async fn spawn_load_packets<P: AsRef<Path>>(
         })
         .expect("The receiver has been dropped");
 
-        video_cache
+        video_data_manager
+            .video_data
             .write()
             .unwrap()
+            .video_cache
             .init(&path, nframes, parameters);
 
         let mut cnt = 0;
         for (stream, packet) in input.packets() {
             // `RwLockWriteGuard` is intentionally holden all the way during
-            // reading *each* frame to avoid busy loop within `get_frame`.
-            let mut vc = video_cache.write().unwrap();
+            // reading *each* frame to avoid busy loop within `read_single_frame`.
+            let video_cache = &mut video_data_manager.video_data.write().unwrap().video_cache;
             if stream.index() != video_stream_index {
                 continue;
             }
-            if vc.target_changed(&path) {
+            if video_cache.target_changed(&path) {
                 // Video path has been changed, which means user changed the path before
                 // previous loading finishes. So we should abort current loading at once.
                 // Other threads should be waiting for the lock to read from the latest path
                 // at this point.
                 return Ok(());
             }
-            vc.packets.push(packet);
+            video_cache.packets.push(packet);
             cnt += 1;
         }
 
@@ -160,32 +183,36 @@ pub async fn spawn_load_packets<P: AsRef<Path>>(
 }
 
 pub async fn read_single_frame(
-    video_cache: Arc<RwLock<VideoCache>>,
+    video_data_manager: Arc<VideoDataManager>,
     frame_index: usize,
 ) -> Result<String> {
-    static PENDING_COUNTER: Semaphore = Semaphore::const_new(util::blocking::NUM_THREAD);
+    static PENDING_COUNTER: Semaphore = Semaphore::const_new(util::blocking::NUM_THREADS);
     let _counter = PENDING_COUNTER
         .try_acquire()
-        .map_err(|e| anyhow!("busy: {}", e))?;
+        .map_err(|e| anyhow!("no idle worker thread: {}", e))?;
 
     // `get_frame` is regarded as synchronous blocking because:
     // 1. When the targeted frame is not loaded yet, it will block on the `RWLock`.
     // 2. Decoding will take some time(10~20ms) even for a single frame.
     // So this task should be executed in `tokio::task::spawn_blocking` or `rayon::spawn`.
-    // As `thread-local` decoders are designed to be kept in just a few threads, we use
-    // customized `rayon` thread pool to implement this.
+    // As thread-local decoders are designed to be kept in just a few threads, a stand-alone
+    // `rayon` thread pool is used.
     util::blocking::compute(move || loop {
-        let vc = video_cache.read().unwrap();
-        if !vc.initialized() {
+        let video_cache = &video_data_manager.video_data.read().unwrap().video_cache;
+        if !video_cache.initialized() {
             bail!("uninitialized");
         }
-        if frame_index >= vc.nframes {
+        if frame_index >= video_cache.nframes {
             // This is an invalid `frame_index` from frontend and will never get the frame.
             // So directly abort current thread.
-            bail!("frame_index({}) out of range({})", frame_index, vc.nframes);
+            bail!(
+                "frame_index({}) out of range({})",
+                frame_index,
+                video_cache.nframes
+            );
         }
-        if let Some(packet) = vc.packets.get(frame_index) {
-            let mut decoder = vc.decoder_cache.get()?;
+        if let Some(packet) = video_cache.packets.get(frame_index) {
+            let mut decoder = video_cache.decoder_cache.get()?;
             let (h, w) = decoder.shape();
             let mut buf = Vec::new();
             let mut jpeg_encoder = JpegEncoder::new_with_quality(&mut buf, 100);
@@ -197,52 +224,66 @@ pub async fn read_single_frame(
     .await?
 }
 
-pub fn build_green2(
-    video_cache: Arc<RwLock<VideoCache>>,
-    green2_param: Green2Param,
-) -> Result<Array2<u8>> {
-    let _timing = util::timing::start("building green2");
+impl VideoDataManager {
+    pub fn build_green2(&self, green2_param: Green2Param) -> Result<()> {
+        let _timing = util::timing::start("building green2");
 
-    let vc = loop {
-        let vc = video_cache.read().unwrap();
-        if vc.finished() {
-            break vc;
-        }
-    };
+        // Wait until all packets have been loaded.
+        let video_data = loop {
+            let video_data = self.video_data.read().unwrap();
+            if video_data.video_cache.finished() {
+                break video_data;
+            }
+        };
+        let video_cache = &video_data.video_cache;
 
-    let byte_w = vc.decoder_cache.get()?.shape().1 as usize * 3;
-    let (tl_y, tl_x, h, w) = green2_param.area;
-    let (tl_y, tl_x, h, w) = (tl_y as usize, tl_x as usize, h as usize, w as usize);
-    let mut green2 = Array2::zeros((green2_param.cal_num, h * w));
+        let byte_w = video_cache.decoder_cache.get()?.shape().1 as usize * 3;
+        let (tl_y, tl_x, h, w) = green2_param.area;
+        let (tl_y, tl_x, h, w) = (tl_y as usize, tl_x as usize, h as usize, w as usize);
+        let mut green2 = Array2::zeros((green2_param.cal_num, h * w));
 
-    vc.packets
-        .par_iter()
-        .skip(green2_param.start_frame)
-        .zip(green2.axis_iter_mut(Axis(0)).into_iter())
-        .try_for_each(|(packet, mut row)| -> Result<()> {
-            let mut decoder = vc.decoder_cache.get()?;
-            let dst_frame = decoder.decode(packet)?;
+        video_cache
+            .packets
+            .par_iter()
+            .skip(green2_param.start_frame)
+            .zip(green2.axis_iter_mut(Axis(0)).into_iter())
+            .try_for_each(|(packet, mut row)| -> Result<()> {
+                let mut decoder = video_cache.decoder_cache.get()?;
+                let dst_frame = decoder.decode(packet)?;
 
-            // each frame is stored in a u8 array:
-            // |r g b r g b...r g b|r g b r g b...r g b|......|r g b r g b...r g b|
-            // |.......row_0.......|.......row_1.......|......|.......row_n.......|
-            let rgb = dst_frame.data(0);
-            let mut row_iter = row.iter_mut();
+                // each frame is stored in a u8 array:
+                // |r g b r g b...r g b|r g b r g b...r g b|......|r g b r g b...r g b|
+                // |.......row_0.......|.......row_1.......|......|.......row_n.......|
+                let rgb = dst_frame.data(0);
+                let mut row_iter = row.iter_mut();
 
-            for i in (0..).step_by(byte_w).skip(tl_y).take(h) {
-                for j in (i..).skip(1).step_by(3).skip(tl_x).take(w) {
-                    // Bounds check can be removed by optimization so no need to use unsafe.
-                    // Same performance as `unwrap_unchecked` + `get_unchecked`.
-                    if let Some(b) = row_iter.next() {
-                        *b = rgb[j];
+                for i in (0..).step_by(byte_w).skip(tl_y).take(h) {
+                    for j in (i..).skip(1).step_by(3).skip(tl_x).take(w) {
+                        // Bounds check can be removed by optimization so no need to use unsafe.
+                        // Same performance as `unwrap_unchecked` + `get_unchecked`.
+                        if let Some(b) = row_iter.next() {
+                            *b = rgb[j];
+                        }
                     }
                 }
-            }
 
-            Ok(())
-        })?;
+                Ok(())
+            })?;
+        drop(video_data);
+        self.video_data.write().unwrap().green2 = Some(green2);
 
-    Ok(green2)
+        Ok(())
+    }
+}
+
+impl VideoData {
+    pub fn green2(&self) -> Option<ArrayView2<u8>> {
+        Some(self.green2.as_ref()?.view())
+    }
+
+    pub fn filtered_green2(&self) -> Option<ArrayView2<u8>> {
+        Some(self.filtered_green2.as_ref()?.view())
+    }
 }
 
 impl VideoCache {
@@ -254,7 +295,7 @@ impl VideoCache {
     }
 
     fn target_changed<P: AsRef<Path>>(&self, original_path: P) -> bool {
-        matches!(&self.path, Some(path) if path == original_path.as_ref())
+        !matches!(&self.path, Some(path) if path == original_path.as_ref())
     }
 
     fn initialized(&self) -> bool {
@@ -340,7 +381,7 @@ mod tests {
     async fn test_load_packets() {
         util::log::init();
         let video_metadata = spawn_load_packets(
-            Arc::new(RwLock::new(VideoCache::default())),
+            Arc::new(VideoDataManager::default()),
             "/home/yhj/Documents/2021yhj/EXP/imp/videos/imp_50000_1_up.avi",
         )
         .await
@@ -352,9 +393,9 @@ mod tests {
     #[tokio::test]
     async fn test_read_single_frame_pending_until_available() {
         util::log::init();
-        let video_cache = Arc::new(RwLock::new(VideoCache::default()));
+        let video_data_manager = Arc::new(VideoDataManager::default());
         let video_metadata = spawn_load_packets(
-            video_cache.clone(),
+            video_data_manager.clone(),
             "/home/yhj/Documents/2021yhj/EXP/imp/videos/imp_50000_1_up.avi",
         )
         .await
@@ -362,7 +403,7 @@ mod tests {
 
         let last_frame_index = video_metadata.nframes - 1;
         println!("waiting for frame {}", last_frame_index);
-        let frame_str = read_single_frame(video_cache.clone(), last_frame_index)
+        let frame_str = read_single_frame(video_data_manager.clone(), last_frame_index)
             .await
             .unwrap();
         println!("{}", frame_str.len());
@@ -372,7 +413,7 @@ mod tests {
                 "frame_index({nframes}) out of range({nframes})",
                 nframes = video_metadata.nframes
             ),
-            read_single_frame(video_cache, video_metadata.nframes)
+            read_single_frame(video_data_manager, video_metadata.nframes)
                 .await
                 .unwrap_err()
                 .to_string(),
@@ -382,22 +423,20 @@ mod tests {
     #[tokio::test]
     async fn test_build_green2() {
         util::log::init();
-        let video_cache = Arc::new(RwLock::new(VideoCache::default()));
+        let video_data_manager = Arc::new(VideoDataManager::default());
         spawn_load_packets(
-            video_cache.clone(),
+            video_data_manager.clone(),
             "/home/yhj/Documents/2021yhj/EXP/imp/videos/imp_50000_1_up.avi",
         )
         .await
         .unwrap();
-        let green2 = build_green2(
-            video_cache,
-            Green2Param {
+        video_data_manager
+            .build_green2(Green2Param {
                 start_frame: 0,
                 cal_num: 2000,
                 area: (0, 0, 1000, 800),
-            },
-        )
-        .unwrap();
-        println!("{:?}", green2);
+            })
+            .unwrap();
+        println!("{:?}", video_data_manager.video_data.read().unwrap().green2);
     }
 }

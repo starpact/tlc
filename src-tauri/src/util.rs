@@ -49,7 +49,7 @@ pub mod blocking {
     use rayon::ThreadPoolBuilder;
     use tokio::sync::oneshot;
 
-    pub const NUM_THREAD: usize = 4;
+    pub const NUM_THREADS: usize = 4;
 
     pub async fn compute<F, T>(f: F) -> Result<T>
     where
@@ -63,7 +63,7 @@ pub mod blocking {
         static POOL: SyncOnceCell<rayon::ThreadPool> = SyncOnceCell::new();
 
         let (tx, rx) = oneshot::channel();
-        POOL.get_or_try_init(|| ThreadPoolBuilder::new().num_threads(NUM_THREAD).build())?
+        POOL.get_or_try_init(|| ThreadPoolBuilder::new().num_threads(NUM_THREADS).build())?
             .spawn(move || {
                 let _ = tx.send(f());
             });
