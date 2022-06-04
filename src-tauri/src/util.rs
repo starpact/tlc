@@ -17,27 +17,37 @@ pub mod timing {
 
     use tracing::debug;
 
-    pub struct TimingGuard {
+    pub struct Timer {
         t0: Instant,
+        succeeded: bool,
         description: String,
     }
 
-    pub fn start<S: ToString>(description: S) -> TimingGuard {
+    pub fn start<S: ToString>(description: S) -> Timer {
         let description = description.to_string();
         debug!("[TIMING] start {} ......", description);
-        TimingGuard {
+        Timer {
             t0: Instant::now(),
+            succeeded: false,
             description,
         }
     }
 
-    impl Drop for TimingGuard {
+    impl Timer {
+        pub fn finish(&mut self) {
+            self.succeeded = true;
+        }
+    }
+
+    impl Drop for Timer {
         fn drop(&mut self) {
-            debug!(
-                "[TIMING] finish {} in {:?}",
-                self.description,
-                self.t0.elapsed(),
-            );
+            if self.succeeded {
+                debug!(
+                    "[TIMING] finish {} in {:?}",
+                    self.description,
+                    self.t0.elapsed()
+                );
+            }
         }
     }
 }

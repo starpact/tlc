@@ -19,7 +19,7 @@ use ndarray::{parallel::prelude::*, prelude::*};
 use serde::{Deserialize, Serialize};
 use thread_local::ThreadLocal;
 use tokio::sync::{oneshot, Semaphore};
-use tracing::debug;
+use tracing::{debug, info};
 
 use crate::util;
 
@@ -114,10 +114,11 @@ pub async fn spawn_load_packets<P: AsRef<Path>>(
     video_path: P,
 ) -> Result<VideoMetadata> {
     let path = video_path.as_ref().to_owned();
+    info!("video_path: {:?}", path);
     let (tx, rx) = oneshot::channel();
 
     let join_handle = tokio::task::spawn_blocking(move || -> Result<()> {
-        let _timing = util::timing::start("loading packets");
+        let mut timer = util::timing::start("loading packets");
 
         let mut input = ffmpeg::format::input(&path)?;
         let video_stream = input
@@ -167,6 +168,7 @@ pub async fn spawn_load_packets<P: AsRef<Path>>(
             cnt += 1;
         }
 
+        timer.finish();
         debug_assert!(cnt == nframes);
         debug!("total_frames: {}", nframes);
 
@@ -226,7 +228,7 @@ pub async fn read_single_frame(
 
 impl VideoDataManager {
     pub fn build_green2(&self, green2_param: Green2Param) -> Result<()> {
-        let _timing = util::timing::start("building green2");
+        let mut timer = util::timing::start("building green2");
 
         // Wait until all packets have been loaded.
         let video_data = loop {
@@ -269,6 +271,8 @@ impl VideoDataManager {
 
                 Ok(())
             })?;
+        timer.finish();
+
         drop(video_data);
         self.video_data.write().unwrap().green2 = Some(green2);
 

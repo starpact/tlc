@@ -20,45 +20,42 @@ pub struct GlobalState {
 }
 
 impl GlobalState {
-    pub async fn new() -> Self {
-        let mut global_state = GlobalState {
+    pub fn new() -> Self {
+        GlobalState {
             config: Config::from_default_path().unwrap_or_default(),
             ..Default::default()
-        };
+        }
+    }
 
-        if let Some(video_metadata) = global_state.config.video_metadata() {
-            match video::spawn_load_packets(
-                global_state.video_data_manager.clone(),
-                &video_metadata.path,
-            )
-            .await
+    pub async fn try_load_data(&mut self) {
+        if let Some(video_metadata) = self.config.video_metadata() {
+            match video::spawn_load_packets(self.video_data_manager.clone(), &video_metadata.path)
+                .await
             {
-                Ok(video_metadata) => global_state.config.set_video_metadata(Some(video_metadata)),
+                Ok(video_metadata) => self.config.set_video_metadata(Some(video_metadata)),
                 Err(e) => {
                     error!("Failed to read video metadata: {}", e);
-                    global_state.config.set_video_metadata(None);
+                    self.config.set_video_metadata(None);
                 }
             }
         }
 
-        if let Some(daq_metadata) = global_state.config.daq_metadata() {
+        if let Some(daq_metadata) = self.config.daq_metadata() {
             match daq::read_daq(&daq_metadata.path) {
                 Ok(temperature2) => {
                     let path = daq_metadata.path.clone();
-                    global_state.config.set_daq_metadata(Some(DaqMetadata {
+                    self.config.set_daq_metadata(Some(DaqMetadata {
                         path,
                         nrows: temperature2.nrows(),
                     }));
-                    global_state.temperature2 = Some(temperature2.into_shared());
+                    self.temperature2 = Some(temperature2.into_shared());
                 }
                 Err(e) => {
                     error!("Failed to read daq metadata: {}", e);
-                    global_state.config.set_daq_metadata(None);
+                    self.config.set_daq_metadata(None);
                 }
             }
         }
-
-        global_state
     }
 
     pub async fn set_video_path<P: AsRef<Path>>(&mut self, video_path: P) -> Result<VideoMetadata> {
@@ -124,7 +121,8 @@ mod tests {
     #[tokio::test]
     async fn test_trigger_try_spawn_build_green2() {
         util::log::init();
-        let mut global_state = GlobalState::new().await;
+        let mut global_state = GlobalState::new();
+        global_state.try_load_data().await;
         println!("{:#?}", global_state.config);
         let video_metadata = global_state
             .set_video_path("/home/yhj/Documents/2021yhj/EXP/imp/videos/imp_50000_1_up.avi")

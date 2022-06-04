@@ -25,7 +25,11 @@ async fn main() {
 
     ffmpeg::init().expect("Failed to init ffmpeg");
 
-    let global_state = GlobalState::new().await;
+    let global_state: &'static _ = Box::leak(Box::new(RwLock::new(GlobalState::new())));
+    tokio::spawn(async {
+        let mut state = global_state.write().await;
+        state.try_load_data().await;
+    });
 
     tauri::Builder::default()
         .manage(RwLock::new(global_state))

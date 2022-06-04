@@ -4,7 +4,7 @@ use anyhow::{anyhow, bail, Result};
 use calamine::{open_workbook, Reader, Xlsx};
 use ndarray::Array2;
 use serde::{Deserialize, Serialize};
-use tracing::debug;
+use tracing::{debug, info};
 
 use crate::util;
 
@@ -27,8 +27,8 @@ pub struct Thermocouple {
 }
 
 pub fn read_daq<P: AsRef<Path>>(daq_path: P) -> Result<Array2<f64>> {
-    let _timing = util::timing::start("reading daq");
-    debug!("{:?}", daq_path.as_ref());
+    info!("daq_path: {:?}", daq_path.as_ref());
+    let mut timer = util::timing::start("reading daq");
 
     let daq = match daq_path
         .as_ref()
@@ -41,6 +41,7 @@ pub fn read_daq<P: AsRef<Path>>(daq_path: P) -> Result<Array2<f64>> {
         _ => bail!("only .lvm and .xlsx are supported"),
     }?;
 
+    timer.finish();
     debug!("daq:\n{:?}", daq);
 
     Ok(daq)
