@@ -34,7 +34,7 @@ median = "0.3"
 dwt = "0.5"
 crossbeam = "0.8"
 libm = "0.2"
-packed_simd = { version = "0.3", package = "packed_simd_2" }
+packed_simd = { version = "0.3.8", package = "packed_simd_2" }
 approx = "0.5"
 
 [features]

@@ -27,18 +27,6 @@
       "category": "DeveloperTool",
       "shortDescription": "",
       "longDescription": "",
-      "deb": {
-        "depends": [],
-        "useBootstrapper": false
-      },
-      "macOS": {
-        "frameworks": [],
-        "useBootstrapper": false,
-        "exceptionDomain": "",
-        "signingIdentity": null,
-        "providerShortName": null,
-        "entitlements": null
-      },
       "windows": {
         "certificateThumbprint": null,
         "digestAlgorithm": "sha256",
