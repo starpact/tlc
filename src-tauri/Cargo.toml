@@ -10,13 +10,14 @@ edition = "2021"
 rust-version = "1.60"
 
 [build-dependencies]
-tauri-build = { version = "1.0.0-rc.5", features = [] }
+tauri-build = { version = "1.0.0", features = [] }
 
 [dependencies]
-tauri = { version = "1.0.0-rc.5", features = ["api-all"] }
+tauri = { version = "1.0.0", features = ["api-all"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-tokio = { version = "1.18", features = ["full"] }
+tokio = { version = "1.19", features = ["full"] }
+futures = "0.3"
 rayon = "1.5"
 toml = "0.5"
 anyhow = "1.0"
@@ -32,7 +33,6 @@ calamine = "0.18"
 plotters = "0.3"
 median = "0.3"
 dwt = "0.5"
-crossbeam = "0.8"
 libm = "0.2"
 packed_simd = { version = "0.3.8", package = "packed_simd_2" }
 approx = "0.5"

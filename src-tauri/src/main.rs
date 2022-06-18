@@ -19,16 +19,14 @@ use tracing::error;
 use command::*;
 use state::*;
 
-#[tokio::main]
-async fn main() {
+fn main() {
     util::log::init();
 
     ffmpeg::init().expect("Failed to init ffmpeg");
 
     let global_state: &'static _ = Box::leak(Box::new(RwLock::new(GlobalState::new())));
     tokio::spawn(async {
-        let mut state = global_state.write().await;
-        state.try_load_data().await;
+        global_state.write().await.try_load_data().await;
     });
 
     tauri::Builder::default()
