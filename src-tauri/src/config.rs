@@ -34,7 +34,7 @@ pub struct Config {
     start_index: Option<StartIndex>,
 
     /// Calculation area(top_left_y, top_left_x, area_height, area_width).
-    area: Option<(u32, u32, u32, u32)>,
+    area: Option<(usize, usize, usize, usize)>,
 
     /// Storage info and positions of thermocouples.
     #[serde(default)]
@@ -263,6 +263,14 @@ impl Config {
             cal_num,
             area,
         })
+    }
+
+    pub fn iteration_method(&self) -> IterationMethod {
+        self.iteration_method
+    }
+
+    pub fn physical_param(&self) -> Option<PhysicalParam> {
+        self.physical_param
     }
 }
 

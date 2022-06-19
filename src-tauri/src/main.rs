@@ -7,6 +7,7 @@ mod config;
 mod daq;
 mod filter;
 mod interpolation;
+mod plot;
 mod solve;
 mod state;
 mod util;
@@ -27,7 +28,9 @@ async fn main() {
 
     let global_state: &'static _ = Box::leak(Box::new(RwLock::new(GlobalState::new())));
     tokio::spawn(async {
-        global_state.write().await.try_load_data().await;
+        let mut global_state = global_state.write().await;
+        global_state.try_load_video().await;
+        global_state.try_load_daq().await;
     });
 
     tauri::Builder::default()

@@ -1,10 +1,10 @@
-use std::f64::consts::PI;
+use std::f64::{consts::PI, NAN};
 
 use libm::erfc;
 use packed_simd::{f64x4, Simd};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone, Copy)]
 pub struct PhysicalParam {
     peak_temperature: f64,
     solid_thermal_conductivity: f64,
@@ -13,19 +13,28 @@ pub struct PhysicalParam {
     air_thermal_conductivity: f64,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 pub enum IterationMethod {
     NewtonTangent { h0: f64, max_iter_num: usize },
     NewtonDown { h0: f64, max_iter_num: usize },
 }
 
-impl Default for IterationMethod {
-    fn default() -> Self {
-        Self::NewtonTangent {
-            h0: 50.0,
-            max_iter_num: 10,
-        }
-    }
+trait SinglePointSolve {
+    fn single_point_solve(&self, point_data: PointData) -> f64;
+}
+
+struct NewtonTangentSolver {
+    physical_param: PhysicalParam,
+    max_iter_num: usize,
+    h0: f64,
+    dt: f64,
+}
+
+struct NewtonDownSolver {
+    physical_param: PhysicalParam,
+    max_iter_num: usize,
+    h0: f64,
+    dt: f64,
 }
 
 struct PointData<'a> {
@@ -99,16 +108,114 @@ fn erfc_simd(arr: Simd<[f64; 4]>) -> Simd<[f64; 4]> {
     }
 }
 
+impl SinglePointSolve for NewtonTangentSolver {
+    fn single_point_solve(&self, point_data: PointData) -> f64 {
+        let PhysicalParam {
+            peak_temperature: tw,
+            solid_thermal_conductivity: k,
+            solid_thermal_diffusivity: a,
+            ..
+        } = self.physical_param;
+
+        let mut h = self.h0;
+        for _ in 0..self.max_iter_num {
+            let (f, df) = point_data.heat_transfer_equation(h, self.dt, k, a, tw);
+            let next_h = h - f / df;
+            if next_h.abs() > 10000. {
+                return NAN;
+            }
+            if (next_h - h).abs() < 1e-3 {
+                return next_h;
+            }
+            h = next_h;
+        }
+
+        h
+    }
+}
+
+impl SinglePointSolve for NewtonDownSolver {
+    fn single_point_solve(&self, point_data: PointData) -> f64 {
+        let PhysicalParam {
+            peak_temperature: tw,
+            solid_thermal_conductivity: k,
+            solid_thermal_diffusivity: a,
+            ..
+        } = self.physical_param;
+
+        let mut h = self.h0;
+        let (mut f, mut df) = point_data.heat_transfer_equation(h, self.dt, k, a, tw);
+        for _ in 0..self.max_iter_num {
+            let mut lambda = 1.;
+            loop {
+                let next_h = h - lambda * f / df;
+                if (next_h - h).abs() < 1e-3 {
+                    return next_h;
+                }
+                let (next_f, next_df) =
+                    point_data.heat_transfer_equation(next_h, self.dt, k, a, tw);
+                if next_f.abs() < f.abs() {
+                    h = next_h;
+                    f = next_f;
+                    df = next_df;
+                    break;
+                }
+                lambda /= 2.0;
+                if lambda < 1e-3 {
+                    return NAN;
+                }
+            }
+            if h.abs() > 10000.0 {
+                return NAN;
+            }
+        }
+
+        h
+    }
+}
+
+impl Default for IterationMethod {
+    fn default() -> Self {
+        Self::NewtonTangent {
+            h0: 50.0,
+            max_iter_num: 10,
+        }
+    }
+}
+
+pub fn solve(physical_param: PhysicalParam, iteration_method: IterationMethod, frame_rate: usize) {
+    let dt = 1.0 / frame_rate as f64;
+    match iteration_method {
+        IterationMethod::NewtonTangent { h0, max_iter_num } => solve_core(NewtonTangentSolver {
+            physical_param,
+            max_iter_num,
+            dt,
+            h0,
+        }),
+        IterationMethod::NewtonDown { h0, max_iter_num } => solve_core(NewtonDownSolver {
+            physical_param,
+            max_iter_num,
+            dt,
+            h0,
+        }),
+    }
+
+    todo!()
+}
+
+fn solve_core<S: SinglePointSolve>(solver: S) {
+    todo!()
+}
+
 #[cfg(test)]
 mod tests {
     extern crate test;
+    use crate::daq::DaqDataManager;
+
     use super::*;
     use approx::assert_relative_eq;
     use ndarray::Array1;
-    use tauri::async_runtime::block_on;
     use test::Bencher;
-
-    use crate::daq::read_daq;
 
     impl PointData<'_> {
         fn iter_no_simd(&self, h: f64, dt: f64, k: f64, a: f64, tw: f64) -> (f64, f64) {
@@ -170,7 +277,8 @@ mod tests {
             .build()
             .unwrap()
             .block_on(async {
-                read_daq("/home/yhj/Documents/2021yhj/EXP/imp/daq/imp_20000_1.lvm")
+                DaqDataManager::default()
+                    .read_daq("/home/yhj/Documents/2021yhj/EXP/imp/daq/imp_20000_1.lvm")
                     .await
                     .unwrap()
                     .column(3)
