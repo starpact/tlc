@@ -5,7 +5,7 @@ use tracing::{debug, error};
 
 use crate::{
     config::Config,
-    daq::{self, DaqDataManager, DaqMetadata},
+    daq::{DaqDataManager, DaqMetadata},
     solve,
     video::{VideoDataManager, VideoMetadata},
 };

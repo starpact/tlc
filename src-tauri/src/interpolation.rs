@@ -1,6 +1,5 @@
-use anyhow::{anyhow, Result};
 use ndarray::{parallel::prelude::*, prelude::*};
-use packed_simd::f64x8;
+use packed_simd::f64x4;
 use serde::{Deserialize, Serialize};
 
 use crate::daq::Thermocouple;
@@ -94,12 +93,12 @@ fn build_interpolator1(
 
             let row = row.as_slice_memory_order_mut().unwrap();
             let mut frame = 0;
-            while frame + f64x8::lanes() < frame_num {
-                let lv = f64x8::from_slice_unaligned(&l_temps[frame..]);
-                let rv = f64x8::from_slice_unaligned(&r_temps[frame..]);
+            while frame + f64x4::lanes() < frame_num {
+                let lv = f64x4::from_slice_unaligned(&l_temps[frame..]);
+                let rv = f64x4::from_slice_unaligned(&r_temps[frame..]);
                 let v8 = (lv * (r - pos) as f64 + rv * (pos - l) as f64) / (r - l) as f64;
                 v8.write_to_slice_unaligned(&mut row[frame..]);
-                frame += f64x8::lanes();
+                frame += f64x4::lanes();
             }
             while frame < frame_num {
                 let (lv, rv) = (l_temps[frame], r_temps[frame]);
@@ -175,11 +174,11 @@ fn build_interpolator2(
 
             let row = row.as_slice_memory_order_mut().unwrap();
             let mut frame = 0;
-            while frame + f64x8::lanes() < frame_num {
-                let v00 = f64x8::from_slice_unaligned(&t00[frame..]);
-                let v01 = f64x8::from_slice_unaligned(&t01[frame..]);
-                let v10 = f64x8::from_slice_unaligned(&t10[frame..]);
-                let v11 = f64x8::from_slice_unaligned(&t11[frame..]);
+            while frame + f64x4::lanes() < frame_num {
+                let v00 = f64x4::from_slice_unaligned(&t00[frame..]);
+                let v01 = f64x4::from_slice_unaligned(&t01[frame..]);
+                let v10 = f64x4::from_slice_unaligned(&t10[frame..]);
+                let v11 = f64x4::from_slice_unaligned(&t11[frame..]);
                 let v8 = (v00 * (x1 - x) as f64 * (y1 - y) as f64
                     + v01 * (x - x0) as f64 * (y1 - y) as f64
                     + v10 * (x1 - x) as f64 * (y - y0) as f64
@@ -187,7 +186,7 @@ fn build_interpolator2(
                     / (x1 - x0) as f64
                     / (y1 - y0) as f64;
                 v8.write_to_slice_unaligned(&mut row[frame..]);
-                frame += f64x8::lanes();
+                frame += f64x4::lanes();
             }
             while frame < frame_num {
                 let v00 = t00[frame];
