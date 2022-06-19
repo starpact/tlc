@@ -163,7 +163,7 @@ mod tests {
     async fn test_trigger_try_spawn_build_green2() {
         util::log::init();
         let mut global_state = GlobalState::new();
-        global_state.try_load_video().await;
+        global_state.try_load_video().await.unwrap();
         println!("{:#?}", global_state.config);
         let video_metadata = global_state
             .set_video_path("/home/yhj/Documents/2021yhj/EXP/imp/videos/imp_50000_1_up.avi")

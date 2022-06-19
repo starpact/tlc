@@ -29,8 +29,8 @@ async fn main() {
     let global_state: &'static _ = Box::leak(Box::new(RwLock::new(GlobalState::new())));
     tokio::spawn(async {
         let mut global_state = global_state.write().await;
-        global_state.try_load_video().await;
-        global_state.try_load_daq().await;
+        let _ = global_state.try_load_video().await;
+        let _ = global_state.try_load_daq().await;
     });
 
     tauri::Builder::default()
