@@ -2,7 +2,10 @@ use std::{
     cell::{RefCell, RefMut},
     ops::{Deref, DerefMut},
     path::{Path, PathBuf},
-    sync::{atomic::AtomicI64, Arc, Mutex, RwLock},
+    sync::{
+        atomic::{AtomicI64, Ordering},
+        Arc, Mutex, RwLock,
+    },
 };
 
 use anyhow::{anyhow, bail, Result};
@@ -18,7 +21,7 @@ use image::{codecs::jpeg::JpegEncoder, ColorType::Rgb8};
 use ndarray::{parallel::prelude::*, prelude::*};
 use serde::{Deserialize, Serialize};
 use thread_local::ThreadLocal;
-use tokio::sync::{oneshot, Semaphore};
+use tokio::sync::oneshot;
 use tracing::{debug, info};
 
 use crate::util;
@@ -26,8 +29,13 @@ use crate::util;
 #[derive(Default)]
 pub struct VideoDataManager {
     pub video_data: RwLock<VideoData>,
-    build_progress: AtomicI64,
+    build_progress: BuildProgress,
     filter_progress: AtomicI64,
+}
+
+#[derive(Default)]
+struct BuildProgress {
+    inner: AtomicI64,
 }
 
 #[derive(Default)]
@@ -184,50 +192,45 @@ pub async fn spawn_load_packets<P: AsRef<Path>>(
     }
 }
 
-pub async fn read_single_frame(
-    video_data_manager: Arc<VideoDataManager>,
-    frame_index: usize,
-) -> Result<String> {
-    static PENDING_COUNTER: Semaphore = Semaphore::const_new(util::blocking::NUM_THREADS);
-    let _counter = PENDING_COUNTER
-        .try_acquire()
-        .map_err(|e| anyhow!("no idle worker thread: {}", e))?;
-
-    // `get_frame` is regarded as synchronous blocking because:
-    // 1. When the targeted frame is not loaded yet, it will block on the `RWLock`.
-    // 2. Decoding will take some time(10~20ms) even for a single frame.
-    // So this task should be executed in `tokio::task::spawn_blocking` or `rayon::spawn`.
-    // As thread-local decoders are designed to be kept in just a few threads, a stand-alone
-    // `rayon` thread pool is used.
-    util::blocking::compute(move || loop {
-        let video_cache = &video_data_manager.video_data.read().unwrap().video_cache;
-        if !video_cache.initialized() {
-            bail!("uninitialized");
-        }
-        if frame_index >= video_cache.nframes {
-            // This is an invalid `frame_index` from frontend and will never get the frame.
-            // So directly abort current thread.
-            bail!(
-                "frame_index({}) out of range({})",
-                frame_index,
-                video_cache.nframes
-            );
-        }
-        if let Some(packet) = video_cache.packets.get(frame_index) {
-            let mut decoder = video_cache.decoder_cache.get()?;
-            let (h, w) = decoder.shape();
-            let mut buf = Vec::new();
-            let mut jpeg_encoder = JpegEncoder::new_with_quality(&mut buf, 100);
-            jpeg_encoder.encode(decoder.decode(packet)?.data(0), w, h, Rgb8)?;
-
-            break Ok(base64::encode(buf));
-        }
-    })
-    .await?
-}
-
 impl VideoDataManager {
+    pub fn read_single_frame(&self, frame_index: usize) -> Result<String> {
+        loop {
+            let video_cache = &self.video_data.read().unwrap().video_cache;
+            if !video_cache.initialized() {
+                bail!("uninitialized");
+            }
+            if frame_index >= video_cache.nframes {
+                // This is an invalid `frame_index` from frontend and will never get the frame.
+                // So directly abort it.
+                bail!(
+                    "frame_index({}) out of range({})",
+                    frame_index,
+                    video_cache.nframes
+                );
+            }
+            if let Some(packet) = video_cache.packets.get(frame_index) {
+                let mut decoder = video_cache.decoder_cache.get()?;
+                let (h, w) = decoder.shape();
+                let mut buf = Vec::new();
+                let mut jpeg_encoder = JpegEncoder::new_with_quality(&mut buf, 100);
+                jpeg_encoder.encode(decoder.decode(packet)?.data(0), w, h, Rgb8)?;
+
+                break Ok(base64::encode(buf));
+            }
+        }
+    }
+
     pub fn build_green2(&self, green2_param: Green2Param) -> Result<()> {
+        self.build_progress.start(green2_param.cal_num as u32);
+        let ret = self._build_green2(green2_param);
+        if ret.is_err() {
+            self.build_progress.reset();
+        }
+
+        ret
+    }
+
+    fn _build_green2(&self, green2_param: Green2Param) -> Result<()> {
         let mut timer = util::timing::start("building green2");
 
         // Wait until all packets have been loaded.
@@ -269,14 +272,78 @@ impl VideoDataManager {
                     }
                 }
 
+                self.build_progress.add(1)?;
+
                 Ok(())
             })?;
         timer.finish();
+
+        {
+            let x = self.build_progress.inner.load(Ordering::Relaxed);
+            if x > 0 {
+                let (total, count) = split_i64(x);
+                debug_assert!(total == green2_param.cal_num as u32);
+                debug_assert!(total == count);
+            }
+        }
 
         drop(video_data);
         self.video_data.write().unwrap().green2 = Some(green2);
 
         Ok(())
+    }
+}
+
+/// Higher 32 bits: total, lower 32 bits: count.
+fn split_i64(x: i64) -> (u32, u32) {
+    ((x >> 32) as u32, x as u32)
+}
+
+fn idle(x: i64) -> bool {
+    let (total, count) = split_i64(x);
+    // Initial state: total == count == 0
+    // Already finished: total == count
+    // So we just check if total == count
+    total == count
+}
+
+impl BuildProgress {
+    fn get_progress(&self) -> (u32, u32) {
+        split_i64(self.inner.load(Ordering::Relaxed))
+    }
+
+    fn reset(&self) {
+        self.inner.store(0, Ordering::Relaxed);
+    }
+
+    fn start(&self, new_total: u32) {
+        if self
+            .inner
+            .fetch_update(Ordering::SeqCst, Ordering::Acquire, |x| {
+                idle(x).then_some((new_total as i64) << 32)
+            })
+            .is_err()
+        {
+            self.interrupt();
+        }
+    }
+
+    fn add(&self, n: i64) -> Result<()> {
+        if self.inner.fetch_add(n, Ordering::Relaxed) < 0 {
+            bail!("interrupted");
+        }
+        Ok(())
+    }
+
+    fn interrupt(&self) {
+        self.inner.store(i64::MIN, Ordering::Relaxed);
+        for i in 0.. {
+            std::thread::sleep(std::time::Duration::from_millis(1));
+            if idle(self.inner.load(Ordering::Relaxed)) {
+                debug!("Interrupt after {} checks", i);
+                break;
+            }
+        }
     }
 }
 
@@ -407,8 +474,8 @@ mod tests {
 
         let last_frame_index = video_metadata.nframes - 1;
         println!("waiting for frame {}", last_frame_index);
-        let frame_str = read_single_frame(video_data_manager.clone(), last_frame_index)
-            .await
+        let frame_str = video_data_manager
+            .read_single_frame(last_frame_index)
             .unwrap();
         println!("{}", frame_str.len());
 
@@ -417,8 +484,8 @@ mod tests {
                 "frame_index({nframes}) out of range({nframes})",
                 nframes = video_metadata.nframes
             ),
-            read_single_frame(video_data_manager, video_metadata.nframes)
-                .await
+            video_data_manager
+                .read_single_frame(video_metadata.nframes)
                 .unwrap_err()
                 .to_string(),
         );

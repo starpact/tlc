@@ -4,7 +4,7 @@ use anyhow::Result;
 use serde::Serialize;
 use tokio::sync::RwLock;
 
-use crate::{state::GlobalState, video::VideoMetadata};
+use crate::{daq::DaqMetadata, state::GlobalState, video::VideoMetadata};
 
 type State<'a> = tauri::State<'a, RwLock<GlobalState>>;
 
@@ -26,8 +26,26 @@ pub async fn set_video_path(video_path: &Path, state: State<'_>) -> TlcResult<Vi
 }
 
 #[tauri::command]
+pub async fn set_daq_path(daq_path: &Path, state: State<'_>) -> TlcResult<DaqMetadata> {
+    state.write().await.set_daq_path(daq_path).await.to()
+}
+
+#[tauri::command]
 pub async fn read_frame(frame_index: usize, state: State<'_>) -> TlcResult<String> {
     state.read().await.read_single_frame(frame_index).await.to()
+}
+
+#[tauri::command]
+pub async fn synchronize_video_and_daq(
+    start_frame: usize,
+    start_row: usize,
+    state: State<'_>,
+) -> TlcResult<()> {
+    state
+        .write()
+        .await
+        .synchronize_video_and_daq(start_frame, start_row)
+        .to()
 }
 
 #[tauri::command]

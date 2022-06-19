@@ -19,7 +19,8 @@ use tracing::error;
 use command::*;
 use state::*;
 
-fn main() {
+#[tokio::main]
+async fn main() {
     util::log::init();
 
     ffmpeg::init().expect("Failed to init ffmpeg");
@@ -33,7 +34,9 @@ fn main() {
         .manage(RwLock::new(global_state))
         .invoke_handler(tauri::generate_handler![
             set_video_path,
+            set_daq_path,
             read_frame,
+            synchronize_video_and_daq,
             set_start_frame,
             set_start_row
         ])

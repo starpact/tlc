@@ -12,6 +12,7 @@ use crate::util;
 pub struct DaqMetadata {
     /// Path of TLC data acquisition file.
     pub path: PathBuf,
+
     /// Total raws of DAQ data.
     #[serde(skip_deserializing)]
     pub nrows: usize,
@@ -21,30 +22,34 @@ pub struct DaqMetadata {
 pub struct Thermocouple {
     /// Column index of this thermocouple in the DAQ file.
     column_index: usize,
+
     /// Position of this thermocouple(y, x). Thermocouples
     /// may not be in the video area, so coordinate can be negative.
     position: (i32, i32),
 }
 
-pub fn read_daq<P: AsRef<Path>>(daq_path: P) -> Result<Array2<f64>> {
-    info!("daq_path: {:?}", daq_path.as_ref());
-    let mut timer = util::timing::start("reading daq");
+pub async fn read_daq<P: AsRef<Path>>(daq_path: P) -> Result<Array2<f64>> {
+    let daq_path = daq_path.as_ref().to_owned();
+    tokio::task::spawn_blocking(move || {
+        info!("daq_path: {:?}", daq_path);
+        let mut timer = util::timing::start("reading daq");
 
-    let daq = match daq_path
-        .as_ref()
-        .extension()
-        .ok_or_else(|| anyhow!("invalid daq path: {:?}", daq_path.as_ref()))?
-        .to_str()
-    {
-        Some("lvm") => read_daq_lvm(&daq_path),
-        Some("xlsx") => read_daq_excel(&daq_path),
-        _ => bail!("only .lvm and .xlsx are supported"),
-    }?;
+        let daq = match daq_path
+            .extension()
+            .ok_or_else(|| anyhow!("invalid daq path: {:?}", daq_path))?
+            .to_str()
+        {
+            Some("lvm") => read_daq_lvm(&daq_path),
+            Some("xlsx") => read_daq_excel(&daq_path),
+            _ => bail!("only .lvm and .xlsx are supported"),
+        }?;
 
-    timer.finish();
-    debug!("daq:\n{:?}", daq);
+        timer.finish();
+        debug!("daq:\n{:?}", daq);
 
-    Ok(daq)
+        Ok(daq)
+    })
+    .await?
 }
 
 fn read_daq_lvm<P: AsRef<Path>>(daq_path: P) -> Result<Array2<f64>> {
@@ -103,13 +108,17 @@ fn read_daq_excel<P: AsRef<Path>>(daq_path: P) -> Result<Array2<f64>> {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_read_daq() {
+    #[tokio::test]
+    async fn test_read_daq() {
         util::log::init();
 
         assert_eq!(
-            read_daq("/home/yhj/Documents/2021yhj/EXP/imp/daq/imp_20000_1.lvm").unwrap(),
-            read_daq("/home/yhj/Documents/2021yhj/EXP/imp/daq/imp_20000_1.xlsx").unwrap()
+            read_daq("/home/yhj/Documents/2021yhj/EXP/imp/daq/imp_20000_1.lvm")
+                .await
+                .unwrap(),
+            read_daq("/home/yhj/Documents/2021yhj/EXP/imp/daq/imp_20000_1.xlsx")
+                .await
+                .unwrap()
         );
     }
 }
