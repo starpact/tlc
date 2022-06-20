@@ -1,6 +1,7 @@
 use std::path::Path;
 
 use anyhow::Result;
+use ndarray::ArcArray2;
 use serde::Serialize;
 use tokio::sync::RwLock;
 
@@ -33,6 +34,11 @@ pub async fn set_daq_path(daq_path: &Path, state: State<'_>) -> TlcResult<DaqMet
 #[tauri::command]
 pub async fn read_frame(frame_index: usize, state: State<'_>) -> TlcResult<String> {
     state.read().await.read_single_frame(frame_index).await.to()
+}
+
+#[tauri::command]
+pub async fn get_daq_data(state: State<'_>) -> TlcResult<ArcArray2<f64>> {
+    state.read().await.get_daq_data().to()
 }
 
 #[tauri::command]

@@ -39,6 +39,7 @@ async fn main() {
             set_video_path,
             set_daq_path,
             read_frame,
+            get_daq_data,
             synchronize_video_and_daq,
             set_start_frame,
             set_start_row

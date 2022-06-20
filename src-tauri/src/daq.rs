@@ -63,6 +63,10 @@ impl DaqDataManager {
 
         Ok(daq_data)
     }
+
+    pub fn get_daq_data(&self) -> Option<ArcArray2<f64>> {
+        Some(self.daq_data.as_ref()?.view())
+    }
 }
 
 fn read_daq_lvm<P: AsRef<Path>>(daq_path: P) -> Result<Array2<f64>> {

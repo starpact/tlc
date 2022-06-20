@@ -1,6 +1,7 @@
 use std::path::Path;
 
 use anyhow::{anyhow, Result};
+use ndarray::ArcArray2;
 use tracing::{debug, error};
 
 use crate::{
@@ -99,6 +100,12 @@ impl GlobalState {
 
     pub async fn read_single_frame(&self, frame_index: usize) -> Result<String> {
         self.video_data_manager.read_single_frame(frame_index).await
+    }
+
+    pub fn get_daq_data(&self) -> Result<ArcArray2<f64>> {
+        self.daq_data_manager
+            .get_daq_data()
+            .ok_or_else(|| anyhow!("daq not loaded"))
     }
 
     pub fn synchronize_video_and_daq(

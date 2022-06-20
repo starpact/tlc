@@ -263,7 +263,7 @@ impl VideoDataManagerInner {
     pub fn build_green2(&self, green2_param: Green2Param) -> Result<()> {
         let cal_num = green2_param.cal_num as u32;
         self.build_progress.start(cal_num);
-        let ret = self._build_green2(green2_param);
+        let ret = self.build_green2_core(green2_param);
         match ret {
             Ok(_) => {
                 let x = self.build_progress.inner.load(Ordering::Relaxed);
@@ -279,7 +279,7 @@ impl VideoDataManagerInner {
         ret
     }
 
-    fn _build_green2(&self, green2_param: Green2Param) -> Result<()> {
+    fn build_green2_core(&self, green2_param: Green2Param) -> Result<()> {
         let mut timer = util::timing::start("building green2");
 
         // Wait until all packets have been loaded.
@@ -357,16 +357,6 @@ impl FrameReader {
             .build()
             .expect("Failed to init rayon thread pool");
 
-        // When user drags the progress bar quickly, the decoding can not keep up
-        // and there will be significant lag. Actually, we do not have to decode
-        // every frames, and the key is how to give up decoding some frames properly.
-        // The naive solution to avoid too much backlog is maintaining the number of
-        // pending tasks and directly abort current decoding if it already exceeds the
-        // limit. But it's not perfect for this use case because it can not guarantee
-        // decoding the frame where the progress bar **stops**.
-        // To solve this, we introduce an unbounded channel to accept all frame indexes
-        // but only **the latest few** will be actually decoded.
-
         Self {
             thread_pool,
             semaphore: Semaphore::new(NUM_THREADS),
@@ -379,6 +369,17 @@ impl FrameReader {
         frame_index: usize,
         video_data_manager: Arc<VideoDataManagerInner>,
     ) -> Result<String> {
+        // When user drags the progress bar quickly, the decoding can not keep up
+        // and there will be a significant lag. Actually, we do not have to decode
+        // every frames, and the key is how to give up decoding some frames properly.
+        // The naive solution to avoid too much backlog is maintaining the number of
+        // pending tasks and directly abort current decoding if it already exceeds the
+        // limit. But it's not perfect for this use case because it can not guarantee
+        // decoding the frame where the progress bar **stops**.
+
+        // An asynchronous semaphore is used to ensure we are not synchronounsly blocked
+        // at `spawn` when there is no idle worker threads. The number of permits should
+        // be the same as the number of threads of the pool.
         if let Ok(_permit) = self.semaphore.try_acquire() {
             return self
                 .read_single_frame_may_blocking(frame_index, video_data_manager)
@@ -388,6 +389,10 @@ impl FrameReader {
         self.last_pending.store(frame_index, Ordering::Relaxed);
 
         let _permit = self.semaphore.acquire().await;
+
+        // While awaiting here, the `last_pending` may be modified by subsequent requests.
+        // So we need to check if this is still the last one, otherwise we should abort it
+        // to make sure the last one is processed.
         if self.last_pending.load(Ordering::Relaxed) != frame_index {
             bail!("no idle worker thread");
         }
