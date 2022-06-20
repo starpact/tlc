@@ -3,7 +3,7 @@ use std::{
     ops::{Deref, DerefMut},
     path::{Path, PathBuf},
     sync::{
-        atomic::{AtomicI64, Ordering},
+        atomic::{AtomicI64, AtomicUsize, Ordering},
         Arc, Mutex, RwLock, RwLockReadGuard,
     },
 };
@@ -19,10 +19,10 @@ use ffmpeg::{
 use ffmpeg_next as ffmpeg;
 use image::{codecs::jpeg::JpegEncoder, ColorType::Rgb8};
 use ndarray::{parallel::prelude::*, prelude::*};
-use rayon::ThreadPoolBuilder;
+use rayon::{ThreadPool, ThreadPoolBuilder};
 use serde::{Deserialize, Serialize};
 use thread_local::ThreadLocal;
-use tokio::sync::oneshot;
+use tokio::sync::{oneshot, Semaphore};
 use tracing::{debug, info};
 
 use crate::util;
@@ -47,7 +47,9 @@ pub struct VideoData {
 }
 
 pub struct FrameReader {
-    inner: flume::Sender<(usize, oneshot::Sender<Result<String>>)>,
+    thread_pool: ThreadPool,
+    semaphore: Semaphore,
+    last_pending: AtomicUsize,
 }
 
 #[derive(Default)]
@@ -215,7 +217,9 @@ impl VideoDataManager {
     }
 
     pub async fn read_single_frame(&self, frame_index: usize) -> Result<String> {
-        self.frame_reader.read_single_frame(frame_index).await
+        self.frame_reader
+            .read_single_frame(frame_index, self.video_data_manager.clone())
+            .await
     }
 
     pub fn spawn_build_green2(&self, green2_param: Green2Param) {
@@ -342,58 +346,68 @@ impl VideoData {
 
 impl FrameReader {
     fn new(video_data_manager: Arc<VideoDataManagerInner>) -> Self {
-        let (tx, rx) = flume::unbounded();
-        let frame_reader = Self { inner: tx };
+        // As thread-local decoders are designed to be kept in just a few threads,
+        // so a standalone `rayon` thread pool is used.
+        // `spawn` form `rayon`'s global thread pool will block when something like
+        // `par_iter` is working as `rayon` uses `depth-first` strategy for highest
+        // efficiency. So another dedicated thread pool is used.
+        const NUM_THREADS: usize = 4;
+        let thread_pool = ThreadPoolBuilder::new()
+            .num_threads(NUM_THREADS)
+            .build()
+            .expect("Failed to init rayon thread pool");
 
-        std::thread::spawn(move || {
-            // As thread-local decoders are designed to be kept in just a few threads,
-            // so a standalone `rayon` thread pool is used.
-            // `spawn` form `rayon`'s global thread pool will block when something like
-            // `par_iter` is working as `rayon` uses `depth-first` strategy for highest
-            // efficiency. So another dedicated thread pool is used.
-            const NUM_THREADS: usize = 4;
-            let thread_pool = ThreadPoolBuilder::new()
-                .num_threads(NUM_THREADS)
-                .build()
-                .expect("Failed to init rayon thread pool");
+        // When user drags the progress bar quickly, the decoding can not keep up
+        // and there will be significant lag. Actually, we do not have to decode
+        // every frames, and the key is how to give up decoding some frames properly.
+        // The naive solution to avoid too much backlog is maintaining the number of
+        // pending tasks and directly abort current decoding if it already exceeds the
+        // limit. But it's not perfect for this use case because it can not guarantee
+        // decoding the frame where the progress bar **stops**.
+        // To solve this, we introduce an unbounded channel to accept all frame indexes
+        // but only **the latest few** will be actually decoded.
 
-            // When user drags the progress bar quickly, the decoding can not keep up
-            // and there will be significant lag. Actually, we do not have to decode
-            // every frames, and the key is how to give up decoding some frames properly.
-            // The naive solution to avoid too much backlog is maintaining the number of
-            // pending tasks and directly abort current decoding if it already exceeds the
-            // limit. But it's not perfect for this use case because it can not guarantee
-            // decoding the frame where the progress bar **stops**.
-            // To solve this, we introduce an unbounded channel to accept all frame indexes
-            // but only **the latest few** will be actually decoded.
-            while let Ok((frame_index, tx)) = rx.recv() {
-                let video_data_manager = video_data_manager.clone();
-                thread_pool.spawn(move || {
-                    let ret = video_data_manager.read_single_frame(frame_index);
-                    let _ = tx.send(ret);
-                });
-
-                loop {
-                    let len = rx.len();
-                    if len <= NUM_THREADS {
-                        break;
-                    }
-                    for _ in 0..len - NUM_THREADS {
-                        let _ = rx.recv();
-                    }
-                }
-            }
-        });
-
-        frame_reader
+        Self {
+            thread_pool,
+            semaphore: Semaphore::new(NUM_THREADS),
+            last_pending: AtomicUsize::new(0),
+        }
     }
 
-    async fn read_single_frame(&self, frame_index: usize) -> Result<String> {
+    async fn read_single_frame(
+        &self,
+        frame_index: usize,
+        video_data_manager: Arc<VideoDataManagerInner>,
+    ) -> Result<String> {
+        if let Ok(_permit) = self.semaphore.try_acquire() {
+            return self
+                .read_single_frame_may_blocking(frame_index, video_data_manager)
+                .await;
+        }
+
+        self.last_pending.store(frame_index, Ordering::Relaxed);
+
+        let _permit = self.semaphore.acquire().await;
+        if self.last_pending.load(Ordering::Relaxed) != frame_index {
+            bail!("no idle worker thread");
+        }
+
+        self.read_single_frame_may_blocking(frame_index, video_data_manager)
+            .await
+    }
+
+    async fn read_single_frame_may_blocking(
+        &self,
+        frame_index: usize,
+        video_data_manager: Arc<VideoDataManagerInner>,
+    ) -> Result<String> {
         let (tx, rx) = oneshot::channel();
-        self.inner
-            .send((frame_index, tx))
-            .expect("Frame grab daemon exited unexptedly");
-        rx.await.map_err(|_| anyhow!("no idle worker thread"))?
+        self.thread_pool.spawn(move || {
+            let ret = video_data_manager.read_single_frame(frame_index);
+            let _ = tx.send(ret);
+        });
+
+        rx.await?
     }
 }
 
