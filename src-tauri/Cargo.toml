@@ -36,6 +36,7 @@ libm = "0.2"
 packed_simd = { version = "0.3.8", package = "packed_simd_2" }
 approx = "0.5"
 flume = "0.10.13"
+once_cell = "1.12.0"
 
 [features]
 default = ["custom-protocol"]

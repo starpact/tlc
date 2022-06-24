@@ -19,8 +19,13 @@ pub enum IterationMethod {
     NewtonDown { h0: f64, max_iter_num: usize },
 }
 
-trait SinglePointSolve {
-    fn single_point_solve(&self, point_data: PointData) -> f64;
+struct PointData<'a> {
+    peak_frame_index: usize,
+    temperatures: &'a [f64],
+}
+
+trait SolveSinglePoint {
+    fn solve_single_point(&self, point_data: PointData) -> f64;
 }
 
 struct NewtonTangentSolver {
@@ -37,15 +42,10 @@ struct NewtonDownSolver {
     dt: f64,
 }
 
-struct PointData<'a> {
-    peak_frame_index: usize,
-    temps: &'a [f64],
-}
-
 impl PointData<'_> {
     fn heat_transfer_equation(&self, h: f64, dt: f64, k: f64, a: f64, tw: f64) -> (f64, f64) {
         let peak_frame_index = self.peak_frame_index;
-        let temps = self.temps;
+        let temps = self.temperatures;
 
         // We use the average of first 4 values to calculate the initial temperature.
         const FIRST_FEW_TO_CAL_T0: usize = 4;
@@ -108,8 +108,8 @@ fn erfc_simd(arr: Simd<[f64; 4]>) -> Simd<[f64; 4]> {
     }
 }
 
-impl SinglePointSolve for NewtonTangentSolver {
-    fn single_point_solve(&self, point_data: PointData) -> f64 {
+impl SolveSinglePoint for NewtonTangentSolver {
+    fn solve_single_point(&self, point_data: PointData) -> f64 {
         let PhysicalParam {
             peak_temperature: tw,
             solid_thermal_conductivity: k,
@@ -134,8 +134,8 @@ impl SinglePointSolve for NewtonTangentSolver {
     }
 }
 
-impl SinglePointSolve for NewtonDownSolver {
-    fn single_point_solve(&self, point_data: PointData) -> f64 {
+impl SolveSinglePoint for NewtonDownSolver {
+    fn solve_single_point(&self, point_data: PointData) -> f64 {
         let PhysicalParam {
             peak_temperature: tw,
             solid_thermal_conductivity: k,
@@ -203,7 +203,7 @@ pub fn solve(physical_param: PhysicalParam, iteration_method: IterationMethod, f
     todo!()
 }
 
-fn solve_core<S: SinglePointSolve>(solver: S) {
+fn solve_core<S: SolveSinglePoint>(solver: S) {
     todo!()
 }
 
@@ -220,12 +220,13 @@ mod tests {
     impl PointData<'_> {
         fn iter_no_simd(&self, h: f64, dt: f64, k: f64, a: f64, tw: f64) -> (f64, f64) {
             let peak_frame_index = self.peak_frame_index;
-            let temps = self.temps;
+            let temperatures = self.temperatures;
             // We use the average of first 4 values to calculate the initial temperature.
             const FIRST_FEW_TO_CAL_T0: usize = 4;
-            let t0 = temps[..FIRST_FEW_TO_CAL_T0].iter().sum::<f64>() / FIRST_FEW_TO_CAL_T0 as f64;
+            let t0 = temperatures[..FIRST_FEW_TO_CAL_T0].iter().sum::<f64>()
+                / FIRST_FEW_TO_CAL_T0 as f64;
 
-            let (sum, diff_sum) = temps
+            let (sum, diff_sum) = temperatures
                 .array_windows::<2>()
                 .take(peak_frame_index)
                 .enumerate()
@@ -247,7 +248,7 @@ mod tests {
 
         fn no_iter_no_simd(&self, h: f64, dt: f64, k: f64, a: f64, tw: f64) -> (f64, f64) {
             let peak_frame_index = self.peak_frame_index;
-            let temps = self.temps;
+            let temps = self.temperatures;
             // We use the average of first 4 values to calculate the initial temperature.
             const FIRST_FEW_TO_CAL_T0: usize = 4;
             let t0 = temps[..FIRST_FEW_TO_CAL_T0].iter().sum::<f64>() / FIRST_FEW_TO_CAL_T0 as f64;
@@ -293,7 +294,7 @@ mod tests {
         let temps = new_temps();
         let point_data = PointData {
             peak_frame_index: 800,
-            temps: temps.as_slice_memory_order().unwrap(),
+            temperatures: temps.as_slice_memory_order().unwrap(),
         };
         let r1 = point_data.heat_transfer_equation(I.0, I.1, I.2, I.3, I.4);
         let r2 = point_data.iter_no_simd(I.0, I.1, I.2, I.3, I.4);
@@ -321,7 +322,7 @@ mod tests {
         let temps = new_temps();
         let point_data = PointData {
             peak_frame_index: 800,
-            temps: temps.as_slice_memory_order().unwrap(),
+            temperatures: temps.as_slice_memory_order().unwrap(),
         };
 
         // 8,658 ns/iter (+/- 90)
@@ -333,7 +334,7 @@ mod tests {
         let temps = new_temps();
         let point_data = PointData {
             peak_frame_index: 800,
-            temps: temps.as_slice_memory_order().unwrap(),
+            temperatures: temps.as_slice_memory_order().unwrap(),
         };
 
         // 13,194 ns/iter (+/- 194)
@@ -345,7 +346,7 @@ mod tests {
         let temps = new_temps();
         let point_data = PointData {
             peak_frame_index: 800,
-            temps: temps.as_slice_memory_order().unwrap(),
+            temperatures: temps.as_slice_memory_order().unwrap(),
         };
 
         // 13,198 ns/iter (+/- 175)

@@ -1,7 +1,8 @@
-use std::{lazy::SyncOnceCell, path::Path};
+use std::path::Path;
 
 use anyhow::Result;
 use ndarray::prelude::*;
+use once_cell::sync::OnceCell;
 use plotters::prelude::*;
 
 pub fn draw_area<P: AsRef<Path>>(
@@ -36,7 +37,7 @@ pub fn draw_area<P: AsRef<Path>>(
     Ok(())
 }
 
-static CELL: SyncOnceCell<[[f64; 3]; 256]> = SyncOnceCell::new();
+static CELL: OnceCell<[[f64; 3]; 256]> = OnceCell::new();
 
 /// jet colormap from Matlab
 const JET: [[f64; 3]; 256] = [

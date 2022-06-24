@@ -65,7 +65,7 @@ impl DaqDataManager {
     }
 
     pub fn get_daq_data(&self) -> Option<ArcArray2<f64>> {
-        Some(self.daq_data.as_ref()?.view())
+        Some(self.daq_data.as_ref()?.clone())
     }
 }
 

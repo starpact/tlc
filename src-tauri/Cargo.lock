@@ -3745,6 +3745,7 @@ dependencies = [
  "libm 0.2.2",
  "median",
  "ndarray",
+ "once_cell",
  "packed_simd_2",
  "plotters",
  "rayon",
