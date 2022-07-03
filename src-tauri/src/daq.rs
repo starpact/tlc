@@ -4,6 +4,7 @@ use anyhow::{anyhow, bail, Result};
 use calamine::{open_workbook, Reader, Xlsx};
 use ndarray::{ArcArray2, Array2};
 use serde::{Deserialize, Serialize};
+use tauri::async_runtime;
 use tracing::{debug, info};
 
 use crate::{interpolation::Interpolator, util};
@@ -37,7 +38,7 @@ pub struct Thermocouple {
 impl DaqDataManager {
     pub async fn read_daq<P: AsRef<Path>>(&mut self, daq_path: P) -> Result<ArcArray2<f64>> {
         let daq_path = daq_path.as_ref().to_owned();
-        let daq_data = tokio::task::spawn_blocking(move || {
+        let daq_data = async_runtime::spawn_blocking(move || {
             info!("daq_path: {:?}", daq_path);
             let mut timer = util::timing::start("reading daq");
 

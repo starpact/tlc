@@ -2,9 +2,9 @@ import React from 'react';
 
 import { invoke } from "@tauri-apps/api/tauri";
 
+// TODO: Migrate FE code from old version.
 function App() {
   function load_config() {
-    console.log("aaaaaaaa");
     invoke<string>("load_config")
       .then((msg) => console.log(msg))
       .catch(console.error);

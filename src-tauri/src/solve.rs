@@ -215,6 +215,7 @@ mod tests {
     use super::*;
     use approx::assert_relative_eq;
     use ndarray::Array1;
+    use tauri::async_runtime;
     use test::Bencher;
 
     impl PointData<'_> {
@@ -274,17 +275,14 @@ mod tests {
     }
 
     fn new_temps() -> Array1<f64> {
-        tokio::runtime::Builder::new_current_thread()
-            .build()
-            .unwrap()
-            .block_on(async {
-                DaqDataManager::default()
-                    .read_daq("/home/yhj/Documents/2021yhj/EXP/imp/daq/imp_20000_1.lvm")
-                    .await
-                    .unwrap()
-                    .column(3)
-                    .to_owned()
-            })
+        async_runtime::block_on(async {
+            DaqDataManager::default()
+                .read_daq("/home/yhj/Documents/2021yhj/EXP/imp/daq/imp_20000_1.lvm")
+                .await
+                .unwrap()
+                .column(3)
+                .to_owned()
+        })
     }
 
     const I: (f64, f64, f64, f64, f64) = (100.0, 0.04, 0.19, 1.091e-7, 35.48);

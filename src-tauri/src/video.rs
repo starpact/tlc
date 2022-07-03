@@ -21,6 +21,7 @@ use image::{codecs::jpeg::JpegEncoder, ColorType::Rgb8};
 use ndarray::{parallel::prelude::*, prelude::*};
 use rayon::{ThreadPool, ThreadPoolBuilder};
 use serde::{Deserialize, Serialize};
+use tauri::async_runtime;
 use thread_local::ThreadLocal;
 use tokio::sync::{oneshot, Semaphore};
 use tracing::{debug, info};
@@ -149,7 +150,7 @@ impl VideoDataManager {
         info!("video_path: {:?}", path);
         let (tx, rx) = oneshot::channel();
 
-        let join_handle = tokio::task::spawn_blocking(move || -> Result<()> {
+        let join_handle = async_runtime::spawn_blocking(move || -> Result<()> {
             let mut timer = util::timing::start("loading packets");
 
             let mut input = ffmpeg::format::input(&path)?;
@@ -224,7 +225,7 @@ impl VideoDataManager {
 
     pub fn spawn_build_green2(&self, green2_param: Green2Param) {
         let video_data_manager = self.video_data_manager.clone();
-        tokio::task::spawn_blocking(move || {
+        async_runtime::spawn_blocking(move || {
             if let Err(e) = video_data_manager.build_green2(green2_param) {
                 debug!("{}", e);
             }

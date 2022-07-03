@@ -13,20 +13,20 @@ mod util;
 mod video;
 
 use ffmpeg_next as ffmpeg;
+use tauri::async_runtime;
 use tokio::sync::RwLock;
 use tracing::error;
 
 use command::*;
 use state::*;
 
-#[tokio::main]
-async fn main() {
+fn main() {
     util::log::init();
 
     ffmpeg::init().expect("Failed to init ffmpeg");
 
     let global_state: &'static _ = Box::leak(Box::new(RwLock::new(GlobalState::new())));
-    tokio::spawn(async {
+    async_runtime::spawn(async {
         let mut global_state = global_state.write().await;
         let _ = global_state.try_load_video().await;
         let _ = global_state.try_load_daq().await;
