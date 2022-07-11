@@ -1,8 +1,13 @@
-use std::f64::{consts::PI, NAN};
+use std::{
+    f64::{consts::PI, NAN},
+    sync::{Arc, RwLock},
+};
 
 use libm::erfc;
 use packed_simd::{f64x4, Simd};
 use serde::{Deserialize, Serialize};
+
+use crate::video::VideoData;
 
 #[derive(Debug, Deserialize, Serialize, Clone, Copy)]
 pub struct PhysicalParam {
@@ -183,27 +188,37 @@ impl Default for IterationMethod {
     }
 }
 
-pub fn solve(physical_param: PhysicalParam, iteration_method: IterationMethod, frame_rate: usize) {
-    let dt = 1.0 / frame_rate as f64;
-    match iteration_method {
-        IterationMethod::NewtonTangent { h0, max_iter_num } => solve_core(NewtonTangentSolver {
-            physical_param,
-            max_iter_num,
-            dt,
-            h0,
-        }),
-        IterationMethod::NewtonDown { h0, max_iter_num } => solve_core(NewtonDownSolver {
-            physical_param,
-            max_iter_num,
-            dt,
-            h0,
-        }),
-    }
+pub fn solve(
+    video_data: Arc<RwLock<VideoData>>,
+    physical_param: PhysicalParam,
+    iteration_method: IterationMethod,
+    frame_rate: usize,
+) {
+    rayon::spawn(move || {
+        let _green2 = video_data.read().unwrap().green2().unwrap();
+        let dt = 1.0 / frame_rate as f64;
+        match iteration_method {
+            IterationMethod::NewtonTangent { h0, max_iter_num } => {
+                solve_core(NewtonTangentSolver {
+                    physical_param,
+                    max_iter_num,
+                    dt,
+                    h0,
+                })
+            }
+            IterationMethod::NewtonDown { h0, max_iter_num } => solve_core(NewtonDownSolver {
+                physical_param,
+                max_iter_num,
+                dt,
+                h0,
+            }),
+        }
+    });
 
     todo!()
 }
 
-fn solve_core<S: SolveSinglePoint>(solver: S) {
+fn solve_core<S: SolveSinglePoint>(_solver: S) {
     todo!()
 }
 

@@ -3740,7 +3740,6 @@ dependencies = [
  "csv",
  "dwt",
  "ffmpeg-next",
- "flume",
  "image 0.24.2",
  "libm 0.2.2",
  "median",

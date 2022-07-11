@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Result};
 use ndarray::ArcArray2;
@@ -8,6 +8,7 @@ use crate::{
     config::Config,
     daq::{DaqDataManager, DaqMetadata},
     solve,
+    util::progress_bar::Progress,
     video::{VideoDataManager, VideoMetadata},
 };
 
@@ -65,6 +66,14 @@ impl GlobalState {
         Ok(())
     }
 
+    pub fn get_video_metadata(&self) -> Result<VideoMetadata> {
+        Ok(self
+            .config
+            .video_metadata()
+            .ok_or_else(|| anyhow!("video path unset"))?
+            .clone())
+    }
+
     pub async fn set_video_path<P: AsRef<Path>>(&mut self, video_path: P) -> Result<VideoMetadata> {
         if let Some(video_metadata) = self.config.video_metadata() {
             if video_metadata.path == video_path.as_ref() {
@@ -79,6 +88,14 @@ impl GlobalState {
         self.config.set_video_metadata(Some(video_metadata.clone()));
 
         Ok(video_metadata)
+    }
+
+    pub fn get_daq_metadata(&self) -> Result<DaqMetadata> {
+        Ok(self
+            .config
+            .daq_metadata()
+            .ok_or_else(|| anyhow!(""))?
+            .clone())
     }
 
     pub async fn set_daq_path<P: AsRef<Path>>(&mut self, daq_path: P) -> Result<DaqMetadata> {
@@ -98,8 +115,10 @@ impl GlobalState {
         Ok(daq_metadata)
     }
 
-    pub async fn read_single_frame(&self, frame_index: usize) -> Result<String> {
-        self.video_data_manager.read_single_frame(frame_index).await
+    pub async fn read_single_frame_base64(&self, frame_index: usize) -> Result<String> {
+        self.video_data_manager
+            .read_single_frame_base64(frame_index)
+            .await
     }
 
     pub fn get_daq_data(&self) -> Result<ArcArray2<f64>> {
@@ -117,6 +136,12 @@ impl GlobalState {
             .synchronize_video_and_daq(start_frame, start_row)
     }
 
+    pub fn get_start_frame(&self) -> Result<usize> {
+        self.config
+            .start_frame()
+            .ok_or_else(|| anyhow!("video and daq not synchronized yet"))
+    }
+
     pub fn set_start_frame(&mut self, start_frame: usize) -> Result<()> {
         self.config.set_start_frame(start_frame)?;
         if let Err(e) = self.try_spawn_build_green2() {
@@ -124,6 +149,12 @@ impl GlobalState {
         }
 
         Ok(())
+    }
+
+    pub fn get_start_row(&self) -> Result<usize> {
+        self.config
+            .start_row()
+            .ok_or_else(|| anyhow!("video and daq not synchronized yet"))
     }
 
     pub fn set_start_row(&mut self, start_row: usize) -> Result<()> {
@@ -143,6 +174,10 @@ impl GlobalState {
         Ok(())
     }
 
+    pub fn get_build_green2_progress(&self) -> Progress {
+        self.video_data_manager.progress()
+    }
+
     pub async fn solve(&mut self) -> Result<()> {
         let physical_param = self
             .config
@@ -154,7 +189,12 @@ impl GlobalState {
             .ok_or_else(|| anyhow!("video not loaded"))?
             .frame_rate;
 
-        solve::solve(physical_param, self.config.iteration_method(), frame_rate);
+        solve::solve(
+            self.video_data_manager.data(),
+            physical_param,
+            self.config.iteration_method(),
+            frame_rate,
+        );
 
         todo!()
     }
@@ -183,7 +223,13 @@ mod tests {
         tokio::time::sleep(std::time::Duration::from_secs(6)).await;
         println!(
             "{:?}",
-            global_state.video_data_manager.data().green2().unwrap()
+            global_state
+                .video_data_manager
+                .data()
+                .read()
+                .unwrap()
+                .green2()
+                .unwrap()
         );
     }
 }
