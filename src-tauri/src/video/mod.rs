@@ -191,6 +191,8 @@ fn load_packets(
     };
     video_data.write().unwrap().video_cache =
         Some(VideoCache::new(video_metadata.clone(), parameters));
+
+    // Caller `spawn_load_packets` can return after this point.
     tx.send(video_metadata)
         .expect("The receiver has been dropped");
 
@@ -200,7 +202,7 @@ fn load_packets(
         .filter(|(stream, _)| stream.index() == video_stream_index)
     {
         // `RwLockWriteGuard` is intentionally holden all the way during
-        // reading *each* frame to avoid busy loop within `read_single_frame`.
+        // reading *each* frame to avoid busy loop within `read_single_frame_base64`.
         let mut video_data = video_data.write().unwrap();
         let video_cache = video_data
             .video_cache
@@ -211,7 +213,7 @@ fn load_packets(
             // previous loading finishes. So we should abort current loading at once.
             // Other threads should be waiting for the lock to read from the latest path
             // at this point.
-            return Ok(());
+            bail!("video path has been changed before finishing loading green2");
         }
         video_cache.packets.push(packet);
         cnt += 1;
