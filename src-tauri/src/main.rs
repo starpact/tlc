@@ -4,7 +4,6 @@
 mod command;
 mod config;
 mod daq;
-mod filter;
 mod interpolation;
 mod plot;
 mod solve;
@@ -25,16 +24,17 @@ fn main() {
 
     ffmpeg::init().expect("Failed to init ffmpeg");
 
-    let global_state: &'static _ = Box::leak(Box::new(RwLock::new(GlobalState::new())));
-    async_runtime::spawn(async {
+    let global_state = RwLock::new(GlobalState::new());
+    async_runtime::block_on(async {
         let mut global_state = global_state.write().await;
-        let _ = global_state.try_load_video().await;
-        let _ = global_state.try_load_daq().await;
+        let _ = global_state.load_video().await;
+        let _ = global_state.load_daq().await;
     });
 
     tauri::Builder::default()
-        .manage(RwLock::new(global_state))
+        .manage(global_state)
         .invoke_handler(tauri::generate_handler![
+            load_config,
             get_video_metadata,
             set_video_path,
             get_daq_metadata,
@@ -46,7 +46,12 @@ fn main() {
             set_start_frame,
             get_start_row,
             set_start_row,
+            build_green2,
             get_build_green2_progress,
+            set_filter_method,
+            filter,
+            filter_single_point,
+            get_filter_green2_progress,
             solve,
         ])
         .run(tauri::generate_context!())

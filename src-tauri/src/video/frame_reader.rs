@@ -17,7 +17,7 @@ pub struct FrameReader {
 }
 
 impl FrameReader {
-    pub fn new() -> Self {
+    pub(super) fn new() -> Self {
         // As thread-local decoders are designed to be kept in just a few threads,
         // so a standalone `rayon` thread pool is used.
         // `spawn` form `rayon`'s global thread pool will block when something like
@@ -36,7 +36,7 @@ impl FrameReader {
         }
     }
 
-    pub async fn read_single_frame_base64(
+    pub(super) async fn read_single_frame_base64(
         &self,
         video_data: Arc<RwLock<VideoData>>,
         frame_index: usize,
@@ -96,8 +96,9 @@ fn read_single_frame_base64(
     frame_index: usize,
 ) -> Result<String> {
     loop {
-        let video_cache = &video_data.read().unwrap().video_cache;
-        let video_cache = video_cache
+        let video_data = video_data.read().unwrap();
+        let video_cache = video_data
+            .video_cache
             .as_ref()
             .ok_or_else(|| anyhow!("uninitialized"))?;
 

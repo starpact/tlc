@@ -6,7 +6,10 @@ use serde::Serialize;
 use tokio::sync::RwLock;
 
 use crate::{
-    daq::DaqMetadata, state::GlobalState, util::progress_bar::Progress, video::VideoMetadata,
+    daq::DaqMetadata,
+    state::GlobalState,
+    util::progress_bar::Progress,
+    video::{FilterMethod, VideoMetadata},
 };
 
 type State<'a> = tauri::State<'a, RwLock<GlobalState>>;
@@ -21,6 +24,11 @@ impl<T: Serialize> IntoTlcResult<T> for Result<T> {
     fn to(self) -> TlcResult<T> {
         self.map_err(|e| format!("{e:?}"))
     }
+}
+
+#[tauri::command]
+pub async fn load_config(config_path: &Path, state: State<'_>) -> TlcResult<()> {
+    state.write().await.load_config(config_path).await.to()
 }
 
 #[tauri::command]
@@ -92,8 +100,33 @@ pub async fn set_start_row(start_row: usize, state: State<'_>) -> TlcResult<()> 
 }
 
 #[tauri::command]
+pub async fn build_green2(state: State<'_>) -> TlcResult<()> {
+    state.read().await.spawn_build_green2().to()
+}
+
+#[tauri::command]
 pub async fn get_build_green2_progress(state: State<'_>) -> TlcResult<Progress> {
     Ok(state.read().await.get_build_green2_progress())
+}
+
+#[tauri::command]
+pub async fn set_filter_method(filter_method: FilterMethod, state: State<'_>) -> TlcResult<()> {
+    state.write().await.set_filter_method(filter_method).to()
+}
+
+#[tauri::command]
+pub async fn filter(state: State<'_>) -> TlcResult<()> {
+    state.write().await.filter().to()
+}
+
+#[tauri::command]
+pub async fn filter_single_point(position: (usize, usize), state: State<'_>) -> TlcResult<Vec<u8>> {
+    state.read().await.filter_single_point(position).await.to()
+}
+
+#[tauri::command]
+pub async fn get_filter_green2_progress(state: State<'_>) -> TlcResult<Progress> {
+    Ok(state.read().await.get_filter_green2_progress())
 }
 
 #[tauri::command]

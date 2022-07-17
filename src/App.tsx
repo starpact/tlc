@@ -5,7 +5,7 @@ import { invoke } from "@tauri-apps/api/tauri";
 // TODO: Migrate FE code from old version.
 function App() {
   function load_config() {
-    invoke<string>("load_config")
+    invoke<string>("load_config", { configPath: "../src-tauri/config/default.toml" })
       .then((msg) => console.log(msg))
       .catch(console.error);
   }

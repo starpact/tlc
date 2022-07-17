@@ -42,5 +42,4 @@ default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
 
 [profile.dev]
-debug = false
 opt-level = 3

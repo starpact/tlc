@@ -1,14 +1,13 @@
-use std::sync::atomic::{AtomicI64, Ordering};
-
+use anyhow::Result;
 use dwt::{transform, wavelet::Wavelet, Operation};
 use median::Filter;
-use ndarray::{parallel::prelude::*, prelude::*};
+use ndarray::{parallel::prelude::*, prelude::*, ArcArray2};
 use serde::{Deserialize, Serialize};
 use tracing::debug;
 
-use crate::util::timing;
+use crate::util::{progress_bar::ProgressBar, timing};
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone, Copy)]
 pub enum FilterMethod {
     No,
     Median(usize),
@@ -21,53 +20,54 @@ impl Default for FilterMethod {
     }
 }
 
-pub fn filter_all(
+pub(super) fn filter_all(
+    green2: ArcArray2<u8>,
     filter_method: FilterMethod,
-    progress: &AtomicI64,
-    green2: ArrayView2<u8>,
-) -> Option<Array2<u8>> {
+    progress_bar: ProgressBar,
+) -> Result<ArcArray2<u8>> {
     let _timing = timing::start("filtering gmat");
     debug!("filter method: {:?}", filter_method);
+
+    let total = green2.dim().1;
+    progress_bar.start(total as u32);
 
     use FilterMethod::*;
     match filter_method {
         No => {
-            progress.fetch_add(green2.dim().1 as i64, Ordering::SeqCst);
-            None
+            progress_bar.add(total as i64).unwrap();
+            Ok(green2)
         }
-        Median(window_size) => Some(cal(progress, green2, move |g1| median(g1, window_size))),
-        Wavelet(threshold) => Some(cal(progress, green2, move |g1| wavelet(g1, threshold))),
+        Median(window_size) => apply(green2, progress_bar, move |g1| median(g1, window_size)),
+        Wavelet(threshold) => apply(green2, progress_bar, move |g1| wavelet(g1, threshold)),
     }
 }
 
-pub fn filter_single_point(filter_method: FilterMethod, green1: ArrayView1<u8>) -> Option<Vec<u8>> {
+pub(super) fn filter_single_point(filter_method: FilterMethod, green1: ArrayView1<u8>) -> Vec<u8> {
     let mut green1 = green1.to_owned();
 
     use FilterMethod::*;
     match filter_method {
-        No => return None,
+        No => {}
         Median(window_size) => median(green1.view_mut(), window_size),
         Wavelet(threshold_ratio) => wavelet(green1.view_mut(), threshold_ratio),
     };
 
-    Some(green1.to_vec())
+    green1.to_vec()
 }
 
-fn cal<F>(progress: &AtomicI64, green2: ArrayView2<u8>, f: F) -> Array2<u8>
+fn apply<F>(mut green2: ArcArray2<u8>, progress_bar: ProgressBar, f: F) -> Result<ArcArray2<u8>>
 where
     F: Fn(ArrayViewMut1<u8>) + Send + Sync,
 {
-    let mut green2_filtered = green2.to_owned();
-    green2_filtered
-        .view_mut()
-        .axis_iter_mut(Axis(1)) // per point
+    green2
+        .axis_iter_mut(Axis(1)) // clone here
         .into_par_iter()
         .try_for_each(|green_history| {
             f(green_history);
-            (progress.fetch_add(1, Ordering::SeqCst) > 0).then_some(())
-        });
+            progress_bar.add(1)
+        })?;
 
-    green2_filtered
+    Ok(green2)
 }
 
 fn median(mut green1: ArrayViewMut1<u8>, window_size: usize) {

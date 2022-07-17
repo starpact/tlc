@@ -1,11 +1,14 @@
 use anyhow::{bail, Result};
 use serde::Serialize;
-use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::{
+    atomic::{AtomicI64, Ordering},
+    Arc,
+};
 use tracing::debug;
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct ProgressBar {
-    inner: AtomicI64,
+    inner: Arc<AtomicI64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -55,6 +58,14 @@ impl ProgressBar {
                 debug!("Interrupted after {} checks", i);
                 break;
             }
+        }
+    }
+}
+
+impl Clone for ProgressBar {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
         }
     }
 }

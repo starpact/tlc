@@ -1,18 +1,15 @@
-use std::{
-    fs,
-    io::Read,
-    path::{Path, PathBuf},
-};
+use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, bail, Result};
 use serde::{Deserialize, Serialize};
+use tauri::async_runtime;
+use tokio::io::AsyncReadExt;
 
 use crate::{
     daq::{DaqMetadata, Thermocouple},
-    filter::FilterMethod,
     interpolation::InterpMethod,
     solve::{IterationMethod, PhysicalParam},
-    video::{Green2Param, VideoMetadata},
+    video::{FilterMethod, Green2Param, VideoMetadata},
 };
 
 #[derive(Debug, Default, Deserialize, Serialize)]
@@ -72,17 +69,18 @@ impl Config {
 
     /// Automatically called on startup.
     pub fn from_default_path() -> Result<Self> {
-        Self::from_path(Self::DEFAULT_CONFIG_PATH)
+        async_runtime::block_on(async { Self::from_path(Self::DEFAULT_CONFIG_PATH).await })
     }
 
-    pub fn from_path<P: AsRef<Path>>(path: P) -> Result<Self> {
-        let mut file = fs::OpenOptions::new()
+    pub async fn from_path<P: AsRef<Path>>(path: P) -> Result<Self> {
+        let mut file = tokio::fs::OpenOptions::new()
             .read(true)
             .write(true)
             .create(true)
-            .open(path)?;
+            .open(path)
+            .await?;
         let mut buf = Vec::new();
-        file.read_to_end(&mut buf)?;
+        file.read_to_end(&mut buf).await?;
         let cfg = toml::from_slice(&buf)?;
 
         Ok(cfg)
@@ -96,7 +94,7 @@ impl Config {
         let video_metadata = match video_metadata {
             Some(video_metadata) => video_metadata,
             None => {
-                // Clear current video related config, probably because error has
+                // Clear current video related config, probably because some error has
                 // occurred and the config should be invalid.
                 self.video_metadata = None;
                 self.start_index = None;
@@ -163,11 +161,11 @@ impl Config {
     ) -> Result<()> {
         let nframes = self.nframes().ok_or_else(|| anyhow!("video path unset"))?;
         if start_frame >= nframes {
-            bail!("frame_index({}) out of range({})", start_frame, nframes);
+            bail!("frame_index({start_frame}) out of range({nframes})");
         }
         let nrows = self.nrows().ok_or_else(|| anyhow!("daq path unset"))?;
         if start_row >= nrows {
-            bail!("row_index({}) out of range({})", start_row, nrows);
+            bail!("row_index({start_row}) out of range({nrows})");
         }
 
         self.start_index = Some(StartIndex {
@@ -181,7 +179,7 @@ impl Config {
     pub fn set_start_frame(&mut self, start_frame: usize) -> Result<()> {
         let nframes = self.nframes().ok_or_else(|| anyhow!("video path unset"))?;
         if start_frame >= nframes {
-            bail!("frame_index({}) out of range({})", start_frame, nframes);
+            bail!("frame_index({start_frame}) out of range({nframes})");
         }
 
         let StartIndex {
@@ -196,7 +194,7 @@ impl Config {
         }
         let start_row = old_start_row + start_frame - old_start_frame;
         if start_row >= nrows {
-            bail!("row_index({}) out of range({})", start_row, nrows);
+            bail!("row_index({start_row}) out of range({nrows})");
         }
 
         self.start_index = Some(StartIndex {
@@ -210,7 +208,7 @@ impl Config {
     pub fn set_start_row(&mut self, start_row: usize) -> Result<()> {
         let nrows = self.nrows().ok_or_else(|| anyhow!("daq path unset"))?;
         if start_row >= nrows {
-            bail!("row_index({}) out of range({})", start_row, nrows);
+            bail!("row_index({start_row}) out of range({nrows})");
         }
 
         let StartIndex {
@@ -225,7 +223,7 @@ impl Config {
         }
         let start_frame = old_start_frame + start_row - old_start_row;
         if start_frame >= nframes {
-            bail!("frames_index({}) out of range({})", start_frame, nframes);
+            bail!("frames_index({start_frame}) out of range({nframes})");
         }
 
         self.start_index = Some(StartIndex {
@@ -262,6 +260,14 @@ impl Config {
         })
     }
 
+    pub fn filter_method(&self) -> FilterMethod {
+        self.filter_method
+    }
+
+    pub fn set_filter_method(&mut self, filter_method: FilterMethod) {
+        self.filter_method = filter_method;
+    }
+
     pub fn iteration_method(&self) -> IterationMethod {
         self.iteration_method
     }
@@ -277,7 +283,7 @@ mod tests {
 
     #[test]
     fn read_from_file() {
-        let cfg = Config::from_path("config/default.toml").unwrap();
+        let cfg = Config::from_default_path().unwrap();
         println!("{cfg:#?}");
     }
 }

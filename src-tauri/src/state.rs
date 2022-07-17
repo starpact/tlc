@@ -9,7 +9,7 @@ use crate::{
     daq::{DaqDataManager, DaqMetadata},
     solve,
     util::progress_bar::Progress,
-    video::{VideoDataManager, VideoMetadata},
+    video::{FilterMethod, VideoDataManager, VideoMetadata},
 };
 
 pub struct GlobalState {
@@ -27,7 +27,18 @@ impl GlobalState {
         }
     }
 
-    pub async fn try_load_video(&mut self) -> Result<()> {
+    pub async fn load_config<P: AsRef<Path>>(&mut self, config_path: P) -> Result<()> {
+        self.config = Config::from_path(config_path).await?;
+        self.video_data_manager = VideoDataManager::new();
+        self.daq_data_manager = DaqDataManager::default();
+
+        self.load_video().await?;
+        self.load_daq().await?;
+
+        Ok(())
+    }
+
+    pub async fn load_video(&mut self) -> Result<()> {
         let video_path = &self
             .config
             .video_metadata()
@@ -44,7 +55,7 @@ impl GlobalState {
         Ok(())
     }
 
-    pub async fn try_load_daq(&mut self) -> Result<()> {
+    pub async fn load_daq(&mut self) -> Result<()> {
         let daq_path = &self
             .config
             .daq_metadata()
@@ -144,7 +155,7 @@ impl GlobalState {
 
     pub fn set_start_frame(&mut self, start_frame: usize) -> Result<()> {
         self.config.set_start_frame(start_frame)?;
-        if let Err(e) = self.try_spawn_build_green2() {
+        if let Err(e) = self.spawn_build_green2() {
             debug!("Not ready to build green2 yet: {}", e);
         }
 
@@ -159,14 +170,14 @@ impl GlobalState {
 
     pub fn set_start_row(&mut self, start_row: usize) -> Result<()> {
         self.config.set_start_row(start_row)?;
-        if let Err(e) = self.try_spawn_build_green2() {
+        if let Err(e) = self.spawn_build_green2() {
             debug!("Not ready to build green2 yet: {}", e);
         }
 
         Ok(())
     }
 
-    fn try_spawn_build_green2(&self) -> Result<()> {
+    pub fn spawn_build_green2(&self) -> Result<()> {
         let green2_param = self.config.green2_param()?;
         debug!("Start building green2: {:?}", green2_param);
         self.video_data_manager.spawn_build_green2(green2_param);
@@ -175,7 +186,28 @@ impl GlobalState {
     }
 
     pub fn get_build_green2_progress(&self) -> Progress {
-        self.video_data_manager.progress()
+        self.video_data_manager.get_build_progress()
+    }
+
+    pub fn get_filter_green2_progress(&self) -> Progress {
+        self.video_data_manager.get_filter_progress()
+    }
+
+    pub fn set_filter_method(&mut self, filter_method: FilterMethod) -> Result<()> {
+        self.config.set_filter_method(filter_method);
+        self.video_data_manager.spawn_filter_green2(filter_method)
+    }
+
+    pub fn filter(&self) -> Result<()> {
+        let filter_method = self.config.filter_method();
+        self.video_data_manager.spawn_filter_green2(filter_method)
+    }
+
+    pub async fn filter_single_point(&self, position: (usize, usize)) -> Result<Vec<u8>> {
+        let filter_method = self.config.filter_method();
+        self.video_data_manager
+            .filter_single_point(filter_method, position)
+            .await
     }
 
     pub async fn solve(&mut self) -> Result<()> {
@@ -188,13 +220,13 @@ impl GlobalState {
             .video_metadata()
             .ok_or_else(|| anyhow!("video not loaded"))?
             .frame_rate;
+        let green2 = self
+            .video_data_manager
+            .filtered_green2()
+            .ok_or_else(|| anyhow!("green2 not built yet"))?;
+        let iteration_method = self.config.iteration_method();
 
-        solve::solve(
-            self.video_data_manager.data(),
-            physical_param,
-            self.config.iteration_method(),
-            frame_rate,
-        );
+        solve::solve(green2, physical_param, iteration_method, frame_rate);
 
         todo!()
     }
@@ -210,7 +242,7 @@ mod tests {
     async fn test_trigger_try_spawn_build_green2() {
         util::log::init();
         let mut global_state = GlobalState::new();
-        global_state.try_load_video().await.unwrap();
+        global_state.load_video().await.unwrap();
         println!("{:#?}", global_state.config);
         let video_metadata = global_state
             .set_video_path("/home/yhj/Documents/2021yhj/EXP/imp/videos/imp_50000_1_up.avi")
@@ -221,15 +253,6 @@ mod tests {
         global_state.synchronize_video_and_daq(10, 20).unwrap();
         global_state.set_start_frame(10).unwrap();
         tokio::time::sleep(std::time::Duration::from_secs(6)).await;
-        println!(
-            "{:?}",
-            global_state
-                .video_data_manager
-                .data()
-                .read()
-                .unwrap()
-                .green2()
-                .unwrap()
-        );
+        println!("{:?}", global_state.video_data_manager.green2().unwrap());
     }
 }
