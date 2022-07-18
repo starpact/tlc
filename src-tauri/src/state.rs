@@ -86,10 +86,9 @@ impl GlobalState {
     }
 
     pub async fn set_video_path<P: AsRef<Path>>(&mut self, video_path: P) -> Result<VideoMetadata> {
-        if let Some(video_metadata) = self.config.video_metadata() {
-            if video_metadata.path == video_path.as_ref() {
-                return Ok(video_metadata.clone());
-            }
+        if let Some(video_metadata) = self.config.video_metadata()
+            && video_metadata.path == video_path.as_ref() {
+            return Ok(video_metadata.clone());
         }
 
         let video_metadata = self
@@ -110,10 +109,9 @@ impl GlobalState {
     }
 
     pub async fn set_daq_path<P: AsRef<Path>>(&mut self, daq_path: P) -> Result<DaqMetadata> {
-        if let Some(daq_metadata) = self.config.daq_metadata() {
-            if daq_metadata.path == daq_path.as_ref() {
-                return Ok(daq_metadata.clone());
-            }
+        if let Some(daq_metadata) = self.config.daq_metadata()
+            && daq_metadata.path == daq_path.as_ref() {
+            return Ok(daq_metadata.clone());
         }
 
         let daq_data = self.daq_data_manager.read_daq(&daq_path).await?;

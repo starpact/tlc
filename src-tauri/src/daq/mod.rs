@@ -1,3 +1,5 @@
+mod interpolation;
+
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, bail, Result};
@@ -7,12 +9,13 @@ use serde::{Deserialize, Serialize};
 use tauri::async_runtime;
 use tracing::{debug, info};
 
-use crate::{interpolation::Interpolator, util};
+use crate::util;
+pub use interpolation::{InterpMethod, Temperature2};
 
 #[derive(Default)]
 pub struct DaqDataManager {
     daq_data: Option<ArcArray2<f64>>,
-    temperature2: Option<Interpolator>,
+    temperature2: Option<Temperature2>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]

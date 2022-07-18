@@ -6,8 +6,7 @@ use tauri::async_runtime;
 use tokio::io::AsyncReadExt;
 
 use crate::{
-    daq::{DaqMetadata, Thermocouple},
-    interpolation::InterpMethod,
+    daq::{DaqMetadata, InterpMethod, Thermocouple},
     solve::{IterationMethod, PhysicalParam},
     video::{FilterMethod, Green2Param, VideoMetadata},
 };

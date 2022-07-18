@@ -185,7 +185,7 @@ impl Default for IterationMethod {
 }
 
 pub fn solve(
-    green2: ArcArray2<u8>,
+    _green2: ArcArray2<u8>,
     physical_param: PhysicalParam,
     iteration_method: IterationMethod,
     frame_rate: usize,

@@ -4,7 +4,6 @@
 mod command;
 mod config;
 mod daq;
-mod interpolation;
 mod plot;
 mod solve;
 mod state;

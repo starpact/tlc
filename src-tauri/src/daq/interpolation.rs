@@ -6,7 +6,7 @@ use crate::daq::Thermocouple;
 
 use InterpMethod::*;
 
-pub struct Interpolator {
+pub struct Temperature2 {
     interp_method: InterpMethod,
 
     shape: (usize, usize),
@@ -14,7 +14,7 @@ pub struct Interpolator {
     /// horizontal: (cal_w, cal_num)
     /// vertical: (cal_h, cal_num)
     /// bilinear: (cal_h * cal_w, cal_num)
-    interped_temperature2: Array2<f64>,
+    inner: Array2<f64>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -27,7 +27,7 @@ pub enum InterpMethod {
     BilinearExtra(usize, usize),
 }
 
-impl Interpolator {
+impl Temperature2 {
     pub fn new(
         daq_data: ArrayView2<f64>,
         interp_method: InterpMethod,
@@ -36,19 +36,19 @@ impl Interpolator {
     ) -> Self {
         match interp_method {
             Bilinear(_, _) | BilinearExtra(_, _) => {
-                build_interpolator2(daq_data, interp_method, area, thermocouples)
+                interpolator2(daq_data, interp_method, area, thermocouples)
             }
-            _ => build_interpolator1(daq_data, interp_method, area, thermocouples),
+            _ => interpolator1(daq_data, interp_method, area, thermocouples),
         }
     }
 }
 
-fn build_interpolator1(
+fn interpolator1(
     daq_data: ArrayView2<f64>,
     interp_method: InterpMethod,
     area: (usize, usize, usize, usize),
     thermocouples: &[Thermocouple],
-) -> Interpolator {
+) -> Temperature2 {
     let (tl_y, tl_x, cal_h, cal_w) = area;
     let frame_num = daq_data.ncols();
 
@@ -71,9 +71,9 @@ fn build_interpolator1(
     };
 
     let do_extra = matches!(interp_method, HorizontalExtra | VerticalExtra);
-    let mut interped_temperature2 = Array2::zeros((interp_len, frame_num));
+    let mut temperature2 = Array2::zeros((interp_len, frame_num));
 
-    interped_temperature2
+    temperature2
         .axis_iter_mut(Axis(0))
         .into_par_iter()
         .zip(0..interp_len)
@@ -107,19 +107,19 @@ fn build_interpolator1(
             }
         });
 
-    Interpolator {
+    Temperature2 {
         interp_method,
         shape: (cal_h, cal_w),
-        interped_temperature2,
+        inner: temperature2,
     }
 }
 
-fn build_interpolator2(
+fn interpolator2(
     daq_data: ArrayView2<f64>,
     interp_method: InterpMethod,
     area: (usize, usize, usize, usize),
     thermocouples: &[Thermocouple],
-) -> Interpolator {
+) -> Temperature2 {
     let (tc_h, tc_w, do_extra) = match interp_method {
         Bilinear(tc_h, tc_w) => (tc_h, tc_w, false),
         BilinearExtra(tc_h, tc_w) => (tc_h, tc_w, true),
@@ -140,9 +140,9 @@ fn build_interpolator2(
 
     let frame_num = daq_data.ncols();
     let pix_num = cal_h * cal_w;
-    let mut interped_temperature2 = Array2::zeros((pix_num, frame_num));
+    let mut temperature2 = Array2::zeros((pix_num, frame_num));
 
-    interped_temperature2
+    temperature2
         .axis_iter_mut(Axis(0))
         .into_par_iter()
         .zip(0..pix_num)
@@ -203,10 +203,10 @@ fn build_interpolator2(
             }
         });
 
-    Interpolator {
+    Temperature2 {
         interp_method,
         shape: (cal_h, cal_w),
-        interped_temperature2,
+        inner: temperature2,
     }
 }
 
@@ -229,7 +229,7 @@ mod test {
                 .collect();
         let area = (8, 8, 14, 14);
 
-        let _interpolator = Interpolator::new(daq_data.view(), interp_method, area, &thermocouples);
+        let _interpolator = Temperature2::new(daq_data.view(), interp_method, area, &thermocouples);
         todo!()
     }
 }
