@@ -12,7 +12,7 @@ use ffmpeg::{codec, codec::packet::Packet};
 use ffmpeg_next as ffmpeg;
 use ndarray::{parallel::prelude::*, prelude::*, ArcArray2};
 use serde::{Deserialize, Serialize};
-use tauri::async_runtime;
+use tauri::{api::path::video_dir, async_runtime};
 use tokio::sync::oneshot;
 use tracing::{debug, error, info};
 
@@ -101,13 +101,25 @@ impl VideoDataManager {
         let path = video_path.as_ref().to_owned();
         info!("video_path: {:?}", path);
         let (tx, rx) = oneshot::channel();
-        let join_handle = async_runtime::spawn_blocking(move || load_packets(video_data, path, tx));
+        let join_handle = async_runtime::spawn_blocking(move || {
+            load_packets(video_data.clone(), path.clone(), tx).map_err(|e| {
+                // Error after send can not be returned, so log here.
+                // `video_cache` is set to `None` to tell all waiters that `load_packets` failed
+                // so should stop waiting.
+                error!("failed to load video from {:?}: {}", path, e);
+                video_data.write().unwrap().reset();
+                e
+            })
+        });
 
         match rx.await {
-            Ok(t) => Ok(t),
+            Ok(video_metadata) => Ok(video_metadata),
+            // `RecvError` only means sender has been dropped which means error occurred before
+            // send, so it is ignored. Task should have already failed so we can get the error
+            // from the `join_handle` immediately.
             Err(_) => Err(join_handle
                 .await?
-                .map_err(|e| anyhow!("failed to read video from {:?}: {}", video_path.as_ref(), e))
+                .map_err(|e| anyhow!("failed to load video from {:?}: {}", video_path.as_ref(), e))
                 .unwrap_err()),
         }
     }
@@ -212,6 +224,12 @@ impl VideoData {
             filtered_green2: None,
         }
     }
+
+    fn reset(&mut self) {
+        self.video_cache = None;
+        self.green2 = None;
+        self.filtered_green2 = None;
+    }
 }
 
 struct VideoCache {
@@ -294,12 +312,13 @@ fn load_packets(
         .filter(|(stream, _)| stream.index() == video_stream_index)
     {
         // `RwLockWriteGuard` is intentionally holden all the way during
-        // reading *each* frame to avoid busy loop within `read_single_frame_base64`.
+        // reading *each* frame to avoid busy loop within `read_single_frame_base64`
+        // and `build_green2`.
         let mut video_data = video_data.write().unwrap();
         let video_cache = video_data
             .video_cache
             .as_mut()
-            .expect("should have already been initialized");
+            .ok_or_else(|| anyhow!("video has not been loaded"))?;
         if video_cache.target_changed(&path) {
             // Video path has been changed, which means user changed the path before
             // previous loading finishes. So we should abort current loading at once.
@@ -338,7 +357,7 @@ fn build_green2(
         let video_cache = video_data
             .video_cache
             .as_ref()
-            .ok_or_else(|| anyhow!("uninitilized"))?;
+            .ok_or_else(|| anyhow!("video has not been loaded"))?;
         if video_cache.target_changed(&path) {
             bail!("video path has been changed before starting building green2");
         }

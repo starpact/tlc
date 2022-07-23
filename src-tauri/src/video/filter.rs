@@ -7,17 +7,12 @@ use tracing::debug;
 
 use crate::util::{progress_bar::ProgressBar, timing};
 
-#[derive(Debug, Deserialize, Serialize, Clone, Copy)]
+#[derive(Debug, Default, Deserialize, Serialize, Clone, Copy)]
 pub enum FilterMethod {
+    #[default]
     No,
     Median(usize),
     Wavelet(f64),
-}
-
-impl Default for FilterMethod {
-    fn default() -> Self {
-        Self::No
-    }
 }
 
 pub(super) fn filter_all(

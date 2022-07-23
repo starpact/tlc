@@ -104,7 +104,7 @@ impl GlobalState {
         Ok(self
             .config
             .daq_metadata()
-            .ok_or_else(|| anyhow!(""))?
+            .ok_or_else(|| anyhow!("daq path unset"))?
             .clone())
     }
 
