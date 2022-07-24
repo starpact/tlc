@@ -42,7 +42,7 @@ impl GlobalState {
         let video_path = &self
             .config
             .video_metadata()
-            .ok_or_else(|| anyhow!("videop path unset"))?
+            .ok_or_else(|| anyhow!("video path unset"))?
             .path;
         match self.video_data_manager.spawn_load_packets(video_path).await {
             Ok(video_metadata) => self.config.set_video_metadata(Some(video_metadata)),

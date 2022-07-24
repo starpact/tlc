@@ -3,6 +3,7 @@ mod filter;
 mod frame_reader;
 
 use std::{
+    assert_matches::debug_assert_matches,
     path::{Path, PathBuf},
     sync::{Arc, RwLock},
 };
@@ -12,14 +13,11 @@ use ffmpeg::{codec, codec::packet::Packet};
 use ffmpeg_next as ffmpeg;
 use ndarray::{parallel::prelude::*, prelude::*, ArcArray2};
 use serde::{Deserialize, Serialize};
-use tauri::{api::path::video_dir, async_runtime};
+use tauri::async_runtime;
 use tokio::sync::oneshot;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, instrument, trace_span};
 
-use crate::util::{
-    progress_bar::{Progress, ProgressBar},
-    timing,
-};
+use crate::util::progress_bar::{Progress, ProgressBar};
 use decode::DecoderManager;
 pub use filter::FilterMethod;
 use frame_reader::FrameReader;
@@ -272,13 +270,13 @@ impl VideoCache {
     }
 }
 
+#[instrument(skip(video_data, tx))]
 fn load_packets(
     video_data: Arc<RwLock<VideoData>>,
     path: PathBuf,
     tx: oneshot::Sender<VideoMetadata>,
 ) -> Result<()> {
-    let mut timer = timing::start("loading packets");
-
+    let _span1 = trace_span!("load_metadata").entered();
     let mut input = ffmpeg::format::input(&path)?;
     let video_stream = input
         .streams()
@@ -305,7 +303,9 @@ fn load_packets(
     // Caller `spawn_load_packets` can return after this point.
     tx.send(video_metadata)
         .expect("The receiver has been dropped");
+    drop(_span1);
 
+    let _span2 = trace_span!("load_packets_core").entered();
     let mut cnt = 0;
     for (_, packet) in input
         .packets()
@@ -330,20 +330,18 @@ fn load_packets(
         cnt += 1;
     }
 
-    timer.finish();
     debug_assert!(cnt == nframes);
     debug!("total_frames: {}", nframes);
 
     Ok(())
 }
 
+#[instrument(skip(video_data))]
 fn build_green2(
     video_data: Arc<RwLock<VideoData>>,
     progress_bar: ProgressBar,
     green2_param: Green2Param,
 ) -> Result<Array2<u8>> {
-    let mut timer = timing::start("building green2");
-
     let Green2Param {
         path,
         start_frame,
@@ -352,6 +350,7 @@ fn build_green2(
     } = green2_param;
 
     // Wait until all packets have been loaded.
+    let _span1 = trace_span!("spin_wait_for_loading_packets").entered();
     let video_data = loop {
         let video_data = video_data.read().unwrap();
         let video_cache = video_data
@@ -365,15 +364,19 @@ fn build_green2(
             break video_data;
         }
     };
-    let video_cache = video_data.video_cache.as_ref().unwrap();
+    drop(_span1);
 
+    let video_cache = video_data.video_cache.as_ref().unwrap();
     progress_bar.start(cal_num as u32);
 
+    let _span2 = trace_span!("alloc_green2_matrix").entered();
     let byte_w = video_cache.video_metadata.shape.1 as usize * 3;
     let (tl_y, tl_x, h, w) = area;
     let (tl_y, tl_x, h, w) = (tl_y as usize, tl_x as usize, h as usize, w as usize);
     let mut green2 = Array2::zeros((cal_num, h * w));
+    drop(_span2);
 
+    let _span3 = trace_span!("decode_in_parallel").entered();
     video_cache
         .packets
         .par_iter()
@@ -403,12 +406,11 @@ fn build_green2(
 
             Ok(())
         })?;
-    timer.finish();
 
-    debug_assert!(matches!(
+    debug_assert_matches!(
         progress_bar.get(),
         Progress::Finished { total } if total == cal_num as u32,
-    ));
+    );
 
     Ok(green2)
 }

@@ -4,6 +4,7 @@ use anyhow::{anyhow, bail, Result};
 use serde::{Deserialize, Serialize};
 use tauri::async_runtime;
 use tokio::io::AsyncReadExt;
+use tracing::{debug, instrument};
 
 use crate::{
     daq::{DaqMetadata, InterpMethod, Thermocouple},
@@ -71,15 +72,17 @@ impl Config {
         async_runtime::block_on(async { Self::from_path(Self::DEFAULT_CONFIG_PATH).await })
     }
 
-    pub async fn from_path<P: AsRef<Path>>(path: P) -> Result<Self> {
+    #[instrument(fields(config_path = config_path.as_ref().to_str()))]
+    pub async fn from_path<P: AsRef<Path>>(config_path: P) -> Result<Self> {
         let mut file = tokio::fs::OpenOptions::new()
             .read(true)
             .write(true)
             .create(true)
-            .open(path)
+            .open(config_path)
             .await?;
         let mut buf = Vec::new();
         file.read_to_end(&mut buf).await?;
+        debug!("\n{}", std::str::from_utf8(&buf)?);
         let cfg = toml::from_slice(&buf)?;
 
         Ok(cfg)
@@ -273,16 +276,5 @@ impl Config {
 
     pub fn physical_param(&self) -> Option<PhysicalParam> {
         self.physical_param
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn read_from_file() {
-        let cfg = Config::from_default_path().unwrap();
-        println!("{cfg:#?}");
     }
 }

@@ -3,9 +3,9 @@ use dwt::{transform, wavelet::Wavelet, Operation};
 use median::Filter;
 use ndarray::{parallel::prelude::*, prelude::*, ArcArray2};
 use serde::{Deserialize, Serialize};
-use tracing::debug;
+use tracing::{debug, instrument};
 
-use crate::util::{progress_bar::ProgressBar, timing};
+use crate::util::progress_bar::ProgressBar;
 
 #[derive(Debug, Default, Deserialize, Serialize, Clone, Copy)]
 pub enum FilterMethod {
@@ -15,12 +15,12 @@ pub enum FilterMethod {
     Wavelet(f64),
 }
 
+#[instrument(ret)]
 pub(super) fn filter_all(
     green2: ArcArray2<u8>,
     filter_method: FilterMethod,
     progress_bar: ProgressBar,
 ) -> Result<ArcArray2<u8>> {
-    let _timing = timing::start("filtering gmat");
     debug!("filter method: {:?}", filter_method);
 
     let total = green2.dim().1;

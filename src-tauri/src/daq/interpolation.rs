@@ -6,6 +6,7 @@ use crate::daq::Thermocouple;
 
 use InterpMethod::*;
 
+#[derive(Debug)]
 pub struct Temperature2 {
     interp_method: InterpMethod,
 

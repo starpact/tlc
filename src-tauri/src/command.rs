@@ -1,4 +1,4 @@
-use std::{path::Path, sync::Arc};
+use std::path::Path;
 
 use anyhow::Result;
 use ndarray::ArcArray2;
@@ -12,7 +12,7 @@ use crate::{
     video::{FilterMethod, VideoMetadata},
 };
 
-type State<'a> = tauri::State<'a, Arc<RwLock<GlobalState>>>;
+type State<'a> = tauri::State<'a, &'static RwLock<GlobalState>>;
 
 type TlcResult<T> = Result<T, String>;
 

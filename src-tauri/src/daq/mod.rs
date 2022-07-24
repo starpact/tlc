@@ -7,9 +7,8 @@ use calamine::{open_workbook, Reader, Xlsx};
 use ndarray::{ArcArray2, Array2};
 use serde::{Deserialize, Serialize};
 use tauri::async_runtime;
-use tracing::{debug, info};
+use tracing::instrument;
 
-use crate::util;
 pub use interpolation::{InterpMethod, Temperature2};
 
 #[derive(Default)]
@@ -39,12 +38,10 @@ pub struct Thermocouple {
 }
 
 impl DaqDataManager {
+    #[instrument(skip(self), fields(daq_path = daq_path.as_ref().to_str()), ret)]
     pub async fn read_daq<P: AsRef<Path>>(&mut self, daq_path: P) -> Result<ArcArray2<f64>> {
         let daq_path = daq_path.as_ref().to_owned();
         let daq_data = async_runtime::spawn_blocking(move || {
-            info!("daq_path: {:?}", daq_path);
-            let mut timer = util::timing::start("reading daq");
-
             let daq = match daq_path
                 .extension()
                 .ok_or_else(|| anyhow!("invalid daq path: {:?}", daq_path))?
@@ -54,9 +51,6 @@ impl DaqDataManager {
                 Some("xlsx") => read_daq_excel(&daq_path),
                 _ => bail!("only .lvm and .xlsx are supported"),
             }?;
-
-            timer.finish();
-            debug!("daq:\n{:?}", daq);
 
             Ok(daq)
         })
@@ -127,6 +121,8 @@ fn read_daq_excel<P: AsRef<Path>>(daq_path: P) -> Result<Array2<f64>> {
 
 #[cfg(test)]
 mod tests {
+    use crate::util;
+
     use super::*;
 
     #[tokio::test]

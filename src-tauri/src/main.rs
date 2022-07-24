@@ -1,5 +1,6 @@
 #![feature(test)]
 #![feature(array_windows)]
+#![feature(assert_matches)]
 
 mod command;
 mod config;
@@ -9,8 +10,6 @@ mod solve;
 mod state;
 mod util;
 mod video;
-
-use std::sync::Arc;
 
 use ffmpeg_next as ffmpeg;
 use tauri::async_runtime;
@@ -25,15 +24,13 @@ fn main() {
 
     ffmpeg::init().expect("Failed to init ffmpeg");
 
-    let global_state = Arc::new(RwLock::new(GlobalState::new()));
-    {
-        let global_state = global_state.clone();
-        async_runtime::spawn(async move {
-            let mut global_state = global_state.write().await;
-            let _ = global_state.load_video().await;
-            let _ = global_state.load_daq().await;
-        });
-    }
+    let global_state: &'static _ = Box::leak(Box::new(RwLock::new(GlobalState::new())));
+
+    async_runtime::spawn(async {
+        let mut global_state = global_state.write().await;
+        let _ = global_state.load_video().await;
+        let _ = global_state.load_daq().await;
+    });
 
     tauri::Builder::default()
         .manage(global_state)

@@ -7,6 +7,7 @@ use anyhow::{anyhow, bail, Result};
 use image::{codecs::jpeg::JpegEncoder, ColorType::Rgb8};
 use rayon::{ThreadPool, ThreadPoolBuilder};
 use tokio::sync::{oneshot, Semaphore};
+use tracing::{instrument, trace_span};
 
 use super::VideoData;
 
@@ -91,6 +92,7 @@ impl FrameReader {
     }
 }
 
+#[instrument(level = "trace", skip(video_data))]
 fn read_single_frame_base64(
     video_data: Arc<RwLock<VideoData>>,
     frame_index: usize,
@@ -110,6 +112,8 @@ fn read_single_frame_base64(
         }
 
         if let Some(packet) = video_cache.packets.get(frame_index) {
+            let _span = trace_span!("decode_single_frame").entered();
+
             let mut decoder = video_cache.decoder_manager.get()?;
             let (h, w) = video_cache.video_metadata.shape;
             let mut buf = Vec::new();
