@@ -4,7 +4,7 @@ use anyhow::{anyhow, bail, Result};
 use serde::{Deserialize, Serialize};
 use tauri::async_runtime;
 use tokio::io::AsyncReadExt;
-use tracing::{debug, instrument};
+use tracing::{info, instrument};
 
 use crate::{
     daq::{DaqMetadata, InterpMethod, Thermocouple},
@@ -82,7 +82,7 @@ impl Config {
             .await?;
         let mut buf = Vec::new();
         file.read_to_end(&mut buf).await?;
-        debug!("\n{}", std::str::from_utf8(&buf)?);
+        info!("\n{}", std::str::from_utf8(&buf)?);
         let cfg = toml::from_slice(&buf)?;
 
         Ok(cfg)

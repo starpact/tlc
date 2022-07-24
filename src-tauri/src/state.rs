@@ -2,7 +2,7 @@ use std::path::Path;
 
 use anyhow::{anyhow, Result};
 use ndarray::ArcArray2;
-use tracing::{debug, error};
+use tracing::{debug, error, info};
 
 use crate::{
     config::Config,
@@ -154,7 +154,7 @@ impl GlobalState {
     pub fn set_start_frame(&mut self, start_frame: usize) -> Result<()> {
         self.config.set_start_frame(start_frame)?;
         if let Err(e) = self.spawn_build_green2() {
-            debug!("Not ready to build green2 yet: {}", e);
+            info!("Not ready to build green2 yet: {e}");
         }
 
         Ok(())
@@ -169,7 +169,7 @@ impl GlobalState {
     pub fn set_start_row(&mut self, start_row: usize) -> Result<()> {
         self.config.set_start_row(start_row)?;
         if let Err(e) = self.spawn_build_green2() {
-            debug!("Not ready to build green2 yet: {}", e);
+            info!("Not ready to build green2 yet: {e}");
         }
 
         Ok(())
@@ -177,7 +177,6 @@ impl GlobalState {
 
     pub fn spawn_build_green2(&self) -> Result<()> {
         let green2_param = self.config.green2_param()?;
-        debug!("Start building green2: {:?}", green2_param);
         self.video_data_manager.spawn_build_green2(green2_param);
 
         Ok(())

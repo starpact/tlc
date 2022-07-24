@@ -55,7 +55,7 @@ impl ProgressBar {
             std::thread::sleep(std::time::Duration::from_millis(1));
             let progress = to_progress(self.inner.load(Ordering::Relaxed));
             if matches!(progress, Progress::Uninitialized) {
-                debug!("Interrupted after {} checks", i);
+                debug!("Interrupted after {i} checks");
                 break;
             }
         }

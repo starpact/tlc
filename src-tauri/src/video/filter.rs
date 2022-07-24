@@ -3,7 +3,7 @@ use dwt::{transform, wavelet::Wavelet, Operation};
 use median::Filter;
 use ndarray::{parallel::prelude::*, prelude::*, ArcArray2};
 use serde::{Deserialize, Serialize};
-use tracing::{debug, instrument};
+use tracing::instrument;
 
 use crate::util::progress_bar::ProgressBar;
 
@@ -21,8 +21,6 @@ pub(super) fn filter_all(
     filter_method: FilterMethod,
     progress_bar: ProgressBar,
 ) -> Result<ArcArray2<u8>> {
-    debug!("filter method: {:?}", filter_method);
-
     let total = green2.dim().1;
     progress_bar.start(total as u32);
 

@@ -15,7 +15,7 @@ use ndarray::{parallel::prelude::*, prelude::*, ArcArray2};
 use serde::{Deserialize, Serialize};
 use tauri::async_runtime;
 use tokio::sync::oneshot;
-use tracing::{debug, error, info, instrument, trace_span};
+use tracing::{debug, error, instrument, trace_span};
 
 use crate::util::progress_bar::{Progress, ProgressBar};
 use decode::DecoderManager;
@@ -97,14 +97,13 @@ impl VideoDataManager {
     pub async fn spawn_load_packets<P: AsRef<Path>>(&self, video_path: P) -> Result<VideoMetadata> {
         let video_data = self.video_data.clone();
         let path = video_path.as_ref().to_owned();
-        info!("video_path: {:?}", path);
         let (tx, rx) = oneshot::channel();
         let join_handle = async_runtime::spawn_blocking(move || {
             load_packets(video_data.clone(), path.clone(), tx).map_err(|e| {
                 // Error after send can not be returned, so log here.
                 // `video_cache` is set to `None` to tell all waiters that `load_packets` failed
                 // so should stop waiting.
-                error!("failed to load video from {:?}: {}", path, e);
+                error!("Failed to load video from {:?}: {}", path, e);
                 video_data.write().unwrap().reset();
                 e
             })
@@ -331,7 +330,7 @@ fn load_packets(
     }
 
     debug_assert!(cnt == nframes);
-    debug!("total_frames: {}", nframes);
+    debug!(nframes);
 
     Ok(())
 }
