@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use tauri::async_runtime;
 use tracing::instrument;
 
-pub use interpolation::{InterpMethod, Temperature2};
+pub use interpolation::{InterpolationMethod, Temperature2};
 
 #[derive(Default)]
 pub struct DaqDataManager {
@@ -27,7 +27,7 @@ pub struct DaqMetadata {
     pub nrows: usize,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone, Copy)]
 pub struct Thermocouple {
     /// Column index of this thermocouple in the DAQ file.
     pub column_index: usize,

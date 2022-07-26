@@ -1,8 +1,8 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
 use ndarray::ArcArray2;
-use tracing::{debug, error, info};
+use tracing::{error, info};
 
 use crate::{
     config::Config,
@@ -34,6 +34,24 @@ impl GlobalState {
 
         self.load_video().await?;
         self.load_daq().await?;
+
+        Ok(())
+    }
+
+    pub fn get_save_root_dir(&self) -> Result<PathBuf> {
+        self.config
+            .save_root_dir()
+            .cloned()
+            .ok_or_else(|| anyhow!("save dir unset"))
+    }
+
+    pub fn set_save_root_dir<P: AsRef<Path>>(&mut self, save_root_dir: P) -> Result<()> {
+        let save_root_dir = save_root_dir.as_ref();
+        if !save_root_dir.is_dir() {
+            bail!("{save_root_dir:?} is not a valid directory");
+        }
+
+        self.config.set_save_root_dir(save_root_dir.to_owned());
 
         Ok(())
     }
@@ -175,6 +193,12 @@ impl GlobalState {
         Ok(())
     }
 
+    pub fn get_area(&self) -> Result<(usize, usize, usize, usize)> {
+        self.config
+            .area()
+            .ok_or_else(|| anyhow!("video not loaded yet"))
+    }
+
     pub fn spawn_build_green2(&self) -> Result<()> {
         let green2_param = self.config.green2_param()?;
         self.video_data_manager.spawn_build_green2(green2_param);
@@ -195,16 +219,16 @@ impl GlobalState {
         self.video_data_manager.spawn_filter_green2(filter_method)
     }
 
-    pub fn filter(&self) -> Result<()> {
-        let filter_method = self.config.filter_method();
-        self.video_data_manager.spawn_filter_green2(filter_method)
-    }
-
     pub async fn filter_single_point(&self, position: (usize, usize)) -> Result<Vec<u8>> {
         let filter_method = self.config.filter_method();
         self.video_data_manager
             .filter_single_point(filter_method, position)
             .await
+    }
+
+    pub fn filter(&self) -> Result<()> {
+        let filter_method = self.config.filter_method();
+        self.video_data_manager.spawn_filter_green2(filter_method)
     }
 
     pub async fn solve(&mut self) -> Result<()> {

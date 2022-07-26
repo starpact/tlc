@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use ndarray::ArcArray2;
@@ -29,6 +29,16 @@ impl<T: Serialize> IntoTlcResult<T> for Result<T> {
 #[tauri::command]
 pub async fn load_config(config_path: &Path, state: State<'_>) -> TlcResult<()> {
     state.write().await.load_config(config_path).await.to()
+}
+
+#[tauri::command]
+pub async fn get_save_root_dir(state: State<'_>) -> TlcResult<PathBuf> {
+    state.read().await.get_save_root_dir().to()
+}
+
+#[tauri::command]
+pub async fn set_save_root_dir(save_root_dir: &Path, state: State<'_>) -> TlcResult<()> {
+    state.write().await.set_save_root_dir(save_root_dir).to()
 }
 
 #[tauri::command]
@@ -100,6 +110,21 @@ pub async fn set_start_row(start_row: usize, state: State<'_>) -> TlcResult<()> 
 }
 
 #[tauri::command]
+pub async fn get_area(state: State<'_>) -> TlcResult<(usize, usize, usize, usize)> {
+    state.read().await.get_area().to()
+}
+
+#[tauri::command]
+pub fn set_area() -> TlcResult<()> {
+    todo!()
+}
+
+#[tauri::command]
+pub fn set_thermocouples() -> TlcResult<()> {
+    todo!()
+}
+
+#[tauri::command]
 pub async fn build_green2(state: State<'_>) -> TlcResult<()> {
     state.read().await.spawn_build_green2().to()
 }
@@ -115,18 +140,38 @@ pub async fn set_filter_method(filter_method: FilterMethod, state: State<'_>) ->
 }
 
 #[tauri::command]
-pub async fn filter(state: State<'_>) -> TlcResult<()> {
-    state.write().await.filter().to()
-}
-
-#[tauri::command]
 pub async fn filter_single_point(position: (usize, usize), state: State<'_>) -> TlcResult<Vec<u8>> {
     state.read().await.filter_single_point(position).await.to()
 }
 
 #[tauri::command]
+pub async fn filter(state: State<'_>) -> TlcResult<()> {
+    state.write().await.filter().to()
+}
+
+#[tauri::command]
 pub async fn get_filter_green2_progress(state: State<'_>) -> TlcResult<Progress> {
     Ok(state.read().await.get_filter_green2_progress())
+}
+
+#[tauri::command]
+pub fn set_interpolation_method() -> TlcResult<()> {
+    todo!()
+}
+
+#[tauri::command]
+pub fn interpolate_single_point() -> TlcResult<()> {
+    todo!()
+}
+
+#[tauri::command]
+pub fn interpolate() -> TlcResult<()> {
+    todo!()
+}
+
+#[tauri::command]
+pub fn set_iteration_method() -> TlcResult<()> {
+    todo!()
 }
 
 #[tauri::command]

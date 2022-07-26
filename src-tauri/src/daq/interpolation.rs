@@ -4,11 +4,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::daq::Thermocouple;
 
-use InterpMethod::*;
+use InterpolationMethod::*;
 
 #[derive(Debug)]
 pub struct Temperature2 {
-    interp_method: InterpMethod,
+    interpolation_method: InterpolationMethod,
 
     shape: (usize, usize),
 
@@ -19,7 +19,7 @@ pub struct Temperature2 {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub enum InterpMethod {
+pub enum InterpolationMethod {
     Horizontal,
     HorizontalExtra,
     Vertical,
@@ -31,7 +31,7 @@ pub enum InterpMethod {
 impl Temperature2 {
     pub fn new(
         daq_data: ArrayView2<f64>,
-        interp_method: InterpMethod,
+        interp_method: InterpolationMethod,
         area: (usize, usize, usize, usize),
         thermocouples: &[Thermocouple],
     ) -> Self {
@@ -46,7 +46,7 @@ impl Temperature2 {
 
 fn interpolator1(
     daq_data: ArrayView2<f64>,
-    interp_method: InterpMethod,
+    interp_method: InterpolationMethod,
     area: (usize, usize, usize, usize),
     thermocouples: &[Thermocouple],
 ) -> Temperature2 {
@@ -54,14 +54,14 @@ fn interpolator1(
     let frame_num = daq_data.ncols();
 
     let (interp_len, tc_pos): (_, Vec<_>) = match interp_method {
-        InterpMethod::Horizontal | InterpMethod::HorizontalExtra => (
+        InterpolationMethod::Horizontal | InterpolationMethod::HorizontalExtra => (
             cal_w,
             thermocouples
                 .iter()
                 .map(|tc| tc.position.1 - tl_x as i32)
                 .collect(),
         ),
-        InterpMethod::Vertical | InterpMethod::VerticalExtra => (
+        InterpolationMethod::Vertical | InterpolationMethod::VerticalExtra => (
             cal_h,
             thermocouples
                 .iter()
@@ -109,7 +109,7 @@ fn interpolator1(
         });
 
     Temperature2 {
-        interp_method,
+        interpolation_method: interp_method,
         shape: (cal_h, cal_w),
         inner: temperature2,
     }
@@ -117,7 +117,7 @@ fn interpolator1(
 
 fn interpolator2(
     daq_data: ArrayView2<f64>,
-    interp_method: InterpMethod,
+    interp_method: InterpolationMethod,
     area: (usize, usize, usize, usize),
     thermocouples: &[Thermocouple],
 ) -> Temperature2 {
@@ -205,7 +205,7 @@ fn interpolator2(
         });
 
     Temperature2 {
-        interp_method,
+        interpolation_method: interp_method,
         shape: (cal_h, cal_w),
         inner: temperature2,
     }

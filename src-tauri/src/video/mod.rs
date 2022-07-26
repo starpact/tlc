@@ -348,34 +348,33 @@ fn build_green2(
         area,
     } = green2_param;
 
-    // Wait until all packets have been loaded.
-    let _span1 = trace_span!("spin_wait_for_loading_packets").entered();
-    let video_data = loop {
-        let video_data = video_data.read().unwrap();
-        let video_cache = video_data
-            .video_cache
-            .as_ref()
-            .ok_or_else(|| anyhow!("video has not been loaded"))?;
-        if video_cache.target_changed(&path) {
-            bail!("video path has been changed before starting building green2");
-        }
-        if video_cache.finished() {
-            break video_data;
+    let video_data = {
+        let _span1 = trace_span!("spin_wait_for_loading_packets").entered();
+        // Wait until all packets have been loaded.
+        loop {
+            let video_data = video_data.read().unwrap();
+            let video_cache = video_data
+                .video_cache
+                .as_ref()
+                .ok_or_else(|| anyhow!("video has not been loaded"))?;
+            if video_cache.target_changed(&path) {
+                bail!("video path has been changed before starting building green2");
+            }
+            if video_cache.finished() {
+                break video_data;
+            }
         }
     };
-    drop(_span1);
 
     let video_cache = video_data.video_cache.as_ref().unwrap();
     progress_bar.start(cal_num as u32);
 
-    let _span2 = trace_span!("alloc_green2_matrix").entered();
     let byte_w = video_cache.video_metadata.shape.1 as usize * 3;
     let (tl_y, tl_x, h, w) = area;
     let (tl_y, tl_x, h, w) = (tl_y as usize, tl_x as usize, h as usize, w as usize);
     let mut green2 = Array2::zeros((cal_num, h * w));
-    drop(_span2);
 
-    let _span3 = trace_span!("decode_in_parallel").entered();
+    let _span2 = trace_span!("decode_in_parallel").entered();
     video_cache
         .packets
         .par_iter()

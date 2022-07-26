@@ -7,14 +7,14 @@ use tokio::io::AsyncReadExt;
 use tracing::{info, instrument};
 
 use crate::{
-    daq::{DaqMetadata, InterpMethod, Thermocouple},
+    daq::{DaqMetadata, InterpolationMethod, Thermocouple},
     solve::{IterationMethod, PhysicalParam},
     video::{FilterMethod, Green2Param, VideoMetadata},
 };
 
 #[derive(Debug, Default, Deserialize, Serialize)]
 pub struct Config {
-    /// Directory in which you save your data.
+    /// Directory in which you save your data of a series of experiments.
     /// As the `video_path` is unique, we can use its file stem as `case_name`.
     /// * config_path: {root_dir}/config/{case_name}.toml
     /// * nu_matrix_path: {root_dir}/nu_matrix/{case_name}.csv
@@ -42,7 +42,7 @@ pub struct Config {
     filter_method: FilterMethod,
 
     /// Interpolation method of thermocouple temperature distribution.
-    interp_method: Option<InterpMethod>,
+    interpolation_method: Option<InterpolationMethod>,
 
     /// Iteration method used when solving heat transfer equation.
     #[serde(default)]
@@ -50,18 +50,6 @@ pub struct Config {
 
     /// All physical parameters used when solving heat transfer equation.
     physical_param: Option<PhysicalParam>,
-}
-
-/// StartIndex combines `start_frame` and `start_row` together because
-/// they are only meaningful after synchronization and should be updated
-/// simultaneously.
-#[derive(Debug, Deserialize, Serialize, Clone, Copy)]
-struct StartIndex {
-    /// Start frame of video involved in the calculation.
-    start_frame: usize,
-
-    /// Start row of DAQ data involved in the calculation.
-    start_row: usize,
 }
 
 impl Config {
@@ -86,6 +74,14 @@ impl Config {
         let cfg = toml::from_slice(&buf)?;
 
         Ok(cfg)
+    }
+
+    pub fn save_root_dir(&self) -> Option<&PathBuf> {
+        self.save_root_dir.as_ref()
+    }
+
+    pub fn set_save_root_dir(&mut self, save_root_dir: PathBuf) {
+        self.save_root_dir = Some(save_root_dir)
     }
 
     pub fn video_metadata(&self) -> Option<&VideoMetadata> {
@@ -236,6 +232,10 @@ impl Config {
         Ok(())
     }
 
+    pub fn area(&self) -> Option<(usize, usize, usize, usize)> {
+        self.area
+    }
+
     pub fn green2_param(&self) -> Result<Green2Param> {
         let video_metadata = self
             .video_metadata
@@ -262,6 +262,10 @@ impl Config {
         })
     }
 
+    pub fn thermocouples(&self) -> Vec<Thermocouple> {
+        self.thermocouples.clone()
+    }
+
     pub fn filter_method(&self) -> FilterMethod {
         self.filter_method
     }
@@ -277,4 +281,16 @@ impl Config {
     pub fn physical_param(&self) -> Option<PhysicalParam> {
         self.physical_param
     }
+}
+
+/// StartIndex combines `start_frame` and `start_row` together because
+/// they are only meaningful after synchronization and should be updated
+/// simultaneously.
+#[derive(Debug, Deserialize, Serialize, Clone, Copy)]
+struct StartIndex {
+    /// Start frame of video involved in the calculation.
+    start_frame: usize,
+
+    /// Start row of DAQ data involved in the calculation.
+    start_row: usize,
 }
