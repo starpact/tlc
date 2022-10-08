@@ -13,7 +13,7 @@ use ffmpeg::{codec, codec::packet::Packet};
 use ffmpeg_next as ffmpeg;
 use ndarray::{parallel::prelude::*, prelude::*, ArcArray2};
 use serde::{Deserialize, Serialize};
-use tauri::async_runtime;
+use tauri::async_runtime::spawn_blocking;
 use tokio::sync::oneshot;
 use tracing::{debug, error, instrument, trace_span};
 
@@ -22,33 +22,21 @@ use decode::DecoderManager;
 pub use filter::FilterMethod;
 use frame_reader::FrameReader;
 
-pub struct VideoDataManager {
+pub struct VideoManager {
     video_data: Arc<RwLock<VideoData>>,
     frame_reader: FrameReader,
     build_progress_bar: ProgressBar,
     filter_progress_bar: ProgressBar,
 }
 
-/// `frame_rate`, `total_frames`, `shape` is determined once the video(path)
-/// is determined, so we do not deserialize them from the config file but
-/// always directly get them from video stat. However, they are still recorded
-/// in the config file because they might be useful information for users.
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct VideoMetadata {
-    /// Path of TLC video file.
     pub path: PathBuf,
-
-    /// Frame rate of video.
-    #[serde(skip_deserializing)]
     pub frame_rate: usize,
-
-    /// Total frames of video.
-    #[serde(skip_deserializing)]
     pub nframes: usize,
-
     /// (video_height, video_width)
-    #[serde(skip_deserializing)]
     pub shape: (usize, usize),
+    pub fingerprint: String,
 }
 
 #[derive(Debug, Clone)]
@@ -59,7 +47,7 @@ pub struct Green2Param {
     pub area: (usize, usize, usize, usize),
 }
 
-impl VideoDataManager {
+impl VideoManager {
     pub fn new() -> Self {
         Self {
             video_data: Arc::new(RwLock::new(VideoData::default())),
@@ -98,7 +86,7 @@ impl VideoDataManager {
         let video_data = self.video_data.clone();
         let path = video_path.as_ref().to_owned();
         let (tx, rx) = oneshot::channel();
-        let join_handle = async_runtime::spawn_blocking(move || {
+        let join_handle = spawn_blocking(move || {
             load_packets(video_data.clone(), path.clone(), tx).map_err(|e| {
                 // Error after send can not be returned, so log here.
                 // `video_cache` is set to `None` to tell all waiters that `load_packets` failed
@@ -171,7 +159,7 @@ impl VideoDataManager {
         (y, x): (usize, usize),
     ) -> Result<Vec<u8>> {
         let video_data = self.video_data.clone();
-        async_runtime::spawn_blocking(move || {
+        spawn_blocking(move || {
             let video_data = video_data.read().unwrap();
             let (h, w) = video_data
                 .video_cache
@@ -295,6 +283,7 @@ fn load_packets(
         frame_rate,
         nframes,
         shape: (decoder.height() as usize, decoder.width() as usize),
+        fingerprint: todo!(),
     };
 
     *video_data.write().unwrap() = VideoData::new(video_metadata.clone(), parameters);
@@ -370,9 +359,9 @@ fn build_green2(
     progress_bar.start(cal_num as u32);
 
     let byte_w = video_cache.video_metadata.shape.1 as usize * 3;
-    let (tl_y, tl_x, h, w) = area;
-    let (tl_y, tl_x, h, w) = (tl_y as usize, tl_x as usize, h as usize, w as usize);
-    let mut green2 = Array2::zeros((cal_num, h * w));
+    let (tl_y, tl_x, cal_h, cal_w) = area;
+    let (tl_y, tl_x, cal_h, cal_w) = (tl_y as usize, tl_x as usize, cal_h as usize, cal_w as usize);
+    let mut green2 = Array2::zeros((cal_num, cal_h * cal_w));
 
     let _span2 = trace_span!("decode_in_parallel").entered();
     video_cache
@@ -390,8 +379,8 @@ fn build_green2(
             let rgb = dst_frame.data(0);
             let mut row_iter = row.iter_mut();
 
-            for i in (0..).step_by(byte_w).skip(tl_y).take(h) {
-                for j in (i..).skip(1).step_by(3).skip(tl_x).take(w) {
+            for i in (0..).step_by(byte_w).skip(tl_y).take(cal_h) {
+                for j in (i..).skip(1).step_by(3).skip(tl_x).take(cal_w) {
                     // Bounds check can be removed by optimization so no need to use unsafe.
                     // Same performance as `unwrap_unchecked` + `get_unchecked`.
                     if let Some(b) = row_iter.next() {
@@ -421,7 +410,7 @@ mod tests {
     #[tokio::test]
     async fn test_load_packets() {
         log::init();
-        let video_data_manager = VideoDataManager::new();
+        let video_data_manager = VideoManager::new();
         let video_metadata = video_data_manager
             .spawn_load_packets("/home/yhj/Documents/2021yhj/EXP/imp/videos/imp_50000_1_up.avi")
             .await
@@ -433,7 +422,7 @@ mod tests {
     #[tokio::test]
     async fn test_read_single_frame_pending_until_available() {
         log::init();
-        let video_data_manager = VideoDataManager::new();
+        let video_data_manager = VideoManager::new();
         let video_metadata = video_data_manager
             .spawn_load_packets("/home/yhj/Documents/2021yhj/EXP/imp/videos/imp_50000_1_up.avi")
             .await
@@ -463,7 +452,7 @@ mod tests {
     #[tokio::test]
     async fn test_build_green2() {
         log::init();
-        let video_data_manager = VideoDataManager::new();
+        let video_data_manager = VideoManager::new();
         let video_path =
             PathBuf::from("/home/yhj/Documents/2021yhj/EXP/imp/videos/imp_50000_1_up.avi");
         video_data_manager

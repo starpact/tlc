@@ -1,18 +1,19 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use anyhow::Result;
 use ndarray::ArcArray2;
 use serde::Serialize;
-use tokio::sync::RwLock;
 
 use crate::{
     daq::DaqMetadata,
+    setting::StartIndex,
+    solve::IterationMethod,
     state::GlobalState,
     util::progress_bar::Progress,
     video::{FilterMethod, VideoMetadata},
 };
 
-type State<'a> = tauri::State<'a, &'static RwLock<GlobalState>>;
+type State<'a> = tauri::State<'a, GlobalState>;
 
 type TlcResult<T> = Result<T, String>;
 
@@ -27,53 +28,43 @@ impl<T: Serialize> IntoTlcResult<T> for Result<T> {
 }
 
 #[tauri::command]
-pub async fn load_config(config_path: &Path, state: State<'_>) -> TlcResult<()> {
-    state.write().await.load_config(config_path).await.to()
+pub async fn get_save_root_dir(state: State<'_>) -> TlcResult<String> {
+    state.get_save_root_dir().await.to()
 }
 
 #[tauri::command]
-pub async fn get_save_root_dir(state: State<'_>) -> TlcResult<PathBuf> {
-    state.read().await.get_save_root_dir().to()
-}
-
-#[tauri::command]
-pub async fn set_save_root_dir(save_root_dir: &Path, state: State<'_>) -> TlcResult<()> {
-    state.write().await.set_save_root_dir(save_root_dir).to()
+pub async fn set_save_root_dir(save_root_dir: String, state: State<'_>) -> TlcResult<()> {
+    state.set_save_root_dir(save_root_dir).await.to()
 }
 
 #[tauri::command]
 pub async fn get_video_metadata(state: State<'_>) -> TlcResult<VideoMetadata> {
-    state.read().await.get_video_metadata().to()
+    state.get_video_metadata().await.to()
 }
 
 #[tauri::command]
-pub async fn set_video_path(video_path: &Path, state: State<'_>) -> TlcResult<VideoMetadata> {
-    state.write().await.set_video_path(video_path).await.to()
+pub async fn set_video_path(video_path: &Path, state: State<'_>) -> TlcResult<()> {
+    state.set_video_path(&video_path).await.to()
 }
 
 #[tauri::command]
 pub async fn get_daq_metadata(state: State<'_>) -> TlcResult<DaqMetadata> {
-    state.read().await.get_daq_metadata().to()
+    state.get_daq_metadata().await.to()
 }
 
 #[tauri::command]
-pub async fn set_daq_path(daq_path: &Path, state: State<'_>) -> TlcResult<DaqMetadata> {
-    state.write().await.set_daq_path(daq_path).await.to()
+pub async fn set_daq_path(daq_path: String, state: State<'_>) -> TlcResult<()> {
+    state.set_daq_path(daq_path).await.to()
 }
 
 #[tauri::command]
 pub async fn read_single_frame_base64(frame_index: usize, state: State<'_>) -> TlcResult<String> {
-    state
-        .read()
-        .await
-        .read_single_frame_base64(frame_index)
-        .await
-        .to()
+    state.read_single_frame_base64(frame_index).await.to()
 }
 
 #[tauri::command]
 pub async fn get_daq_data(state: State<'_>) -> TlcResult<ArcArray2<f64>> {
-    state.read().await.get_daq_data().to()
+    state.get_daq_data().await.to()
 }
 
 #[tauri::command]
@@ -83,40 +74,34 @@ pub async fn synchronize_video_and_daq(
     state: State<'_>,
 ) -> TlcResult<()> {
     state
-        .write()
-        .await
         .synchronize_video_and_daq(start_frame, start_row)
+        .await
         .to()
 }
 
 #[tauri::command]
-pub async fn get_start_frame(state: State<'_>) -> TlcResult<usize> {
-    state.read().await.get_start_frame().to()
+pub async fn get_start_index(state: State<'_>) -> TlcResult<StartIndex> {
+    state.get_start_index().await.to()
 }
 
 #[tauri::command]
 pub async fn set_start_frame(start_frame: usize, state: State<'_>) -> TlcResult<()> {
-    state.write().await.set_start_frame(start_frame).to()
-}
-
-#[tauri::command]
-pub async fn get_start_row(state: State<'_>) -> TlcResult<usize> {
-    state.read().await.get_start_row().to()
+    state.set_start_frame(start_frame).await.to()
 }
 
 #[tauri::command]
 pub async fn set_start_row(start_row: usize, state: State<'_>) -> TlcResult<()> {
-    state.write().await.set_start_row(start_row).to()
+    state.set_start_row(start_row).await.to()
 }
 
 #[tauri::command]
 pub async fn get_area(state: State<'_>) -> TlcResult<(usize, usize, usize, usize)> {
-    state.read().await.get_area().to()
+    state.get_area().await.to()
 }
 
 #[tauri::command]
-pub fn set_area() -> TlcResult<()> {
-    todo!()
+pub async fn set_area(state: State<'_>, area: (usize, usize, usize, usize)) -> TlcResult<()> {
+    state.set_area(area).await.to()
 }
 
 #[tauri::command]
@@ -126,32 +111,37 @@ pub fn set_thermocouples() -> TlcResult<()> {
 
 #[tauri::command]
 pub async fn build_green2(state: State<'_>) -> TlcResult<()> {
-    state.read().await.spawn_build_green2().to()
+    state.spawn_build_green2().to()
 }
 
 #[tauri::command]
 pub async fn get_build_green2_progress(state: State<'_>) -> TlcResult<Progress> {
-    Ok(state.read().await.get_build_green2_progress())
+    Ok(state.get_build_green2_progress())
 }
 
 #[tauri::command]
 pub async fn set_filter_method(filter_method: FilterMethod, state: State<'_>) -> TlcResult<()> {
-    state.write().await.set_filter_method(filter_method).to()
+    state.set_filter_method(filter_method).await.to()
 }
 
 #[tauri::command]
 pub async fn filter_single_point(position: (usize, usize), state: State<'_>) -> TlcResult<Vec<u8>> {
-    state.read().await.filter_single_point(position).await.to()
+    state.filter_single_point(position).await.to()
 }
 
 #[tauri::command]
 pub async fn filter(state: State<'_>) -> TlcResult<()> {
-    state.write().await.filter().to()
+    state.filter().await.to()
 }
 
 #[tauri::command]
 pub async fn get_filter_green2_progress(state: State<'_>) -> TlcResult<Progress> {
-    Ok(state.read().await.get_filter_green2_progress())
+    Ok(state.get_filter_green2_progress())
+}
+
+#[tauri::command]
+pub async fn get_iteration_method(state: State<'_>) -> TlcResult<IterationMethod> {
+    state.get_iteration_method().await.to()
 }
 
 #[tauri::command]
@@ -170,11 +160,14 @@ pub fn interpolate() -> TlcResult<()> {
 }
 
 #[tauri::command]
-pub fn set_iteration_method() -> TlcResult<()> {
-    todo!()
+pub async fn set_iteration_method(
+    state: State<'_>,
+    iteration_method: IterationMethod,
+) -> TlcResult<()> {
+    state.set_iteration_method(iteration_method).await.to()
 }
 
 #[tauri::command]
 pub async fn solve(state: State<'_>) -> TlcResult<()> {
-    state.write().await.solve().await.to()
+    state.solve().await.to()
 }

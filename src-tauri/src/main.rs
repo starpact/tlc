@@ -8,17 +8,17 @@
 #![feature(let_chains)]
 
 mod command;
-mod config;
 mod daq;
+mod db;
+mod error;
 mod plot;
+mod setting;
 mod solve;
 mod state;
 mod util;
 mod video;
 
 use ffmpeg_next as ffmpeg;
-use tauri::async_runtime;
-use tokio::sync::RwLock;
 use tracing::error;
 
 use command::*;
@@ -29,23 +29,9 @@ fn main() {
 
     ffmpeg::init().expect("Failed to init ffmpeg");
 
-    // Try to read config from default location where we store the last used config.
-    let global_state: &'static _ = Box::leak(Box::new(RwLock::new(GlobalState::new())));
-
-    // Spawn a task to do this so that UI startup is not blocked.
-    async_runtime::spawn(async {
-        let mut global_state = global_state.write().await;
-        // Load video if the default config has valid `video_path`.
-        let _ = global_state.load_video().await;
-        // Load daq if the default config has valid `daq_path`.
-        let _ = global_state.load_daq().await;
-    });
-
     tauri::Builder::default()
-        .manage(global_state)
+        .manage(GlobalState::new())
         .invoke_handler(tauri::generate_handler![
-            // May load config from elsewhere.
-            load_config,
             //
             // First decide where to store the data.
             get_save_root_dir,
@@ -69,15 +55,14 @@ fn main() {
             //
             // Now we can synchronize video and daq.
             synchronize_video_and_daq,
+            get_start_index,
             //
             // Adjust the start frame.
             // Start row will change correspondingly.
-            get_start_frame,
             set_start_frame,
             //
             // Adjust the start row.
             // Start frame will change correspondingly.
-            get_start_row,
             set_start_row,
             //
             // Choose the area that we want to calculate.
@@ -105,6 +90,9 @@ fn main() {
             interpolate_single_point,
             // Interpolate all.
             interpolate,
+            //
+            get_iteration_method,
+            set_iteration_method,
             //
             // Solve.
             set_iteration_method,

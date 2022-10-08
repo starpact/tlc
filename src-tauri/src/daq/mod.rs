@@ -6,64 +6,60 @@ use anyhow::{anyhow, bail, Result};
 use calamine::{open_workbook, Reader, Xlsx};
 use ndarray::{ArcArray2, Array2};
 use serde::{Deserialize, Serialize};
-use tauri::async_runtime;
 use tracing::instrument;
 
 pub use interpolation::{InterpolationMethod, Temperature2};
 
 #[derive(Default)]
-pub struct DaqDataManager {
+pub struct DaqManager {
     daq_data: Option<ArcArray2<f64>>,
     temperature2: Option<Temperature2>,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct DaqMetadata {
-    /// Path of TLC data acquisition file.
     pub path: PathBuf,
-
-    /// Total raws of DAQ data.
-    #[serde(skip_deserializing)]
     pub nrows: usize,
+    pub ncols: usize,
+    pub fingerprint: String,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Copy)]
 pub struct Thermocouple {
     /// Column index of this thermocouple in the DAQ file.
     pub column_index: usize,
-
     /// Position of this thermocouple(y, x). Thermocouples
     /// may not be in the video area, so coordinate can be negative.
     pub position: (i32, i32),
 }
 
-impl DaqDataManager {
-    #[instrument(skip(self), fields(daq_path = daq_path.as_ref().to_str()), ret)]
-    pub async fn read_daq<P: AsRef<Path>>(&mut self, daq_path: P) -> Result<ArcArray2<f64>> {
-        let daq_path = daq_path.as_ref().to_owned();
-        let daq_data = async_runtime::spawn_blocking(move || {
-            let daq = match daq_path
-                .extension()
-                .ok_or_else(|| anyhow!("invalid daq path: {:?}", daq_path))?
-                .to_str()
-            {
-                Some("lvm") => read_daq_lvm(&daq_path),
-                Some("xlsx") => read_daq_excel(&daq_path),
-                _ => bail!("only .lvm and .xlsx are supported"),
-            }?;
+impl DaqManager {
+    #[instrument(skip_all, ret)]
+    pub fn read_daq<P: AsRef<Path>>(&mut self, daq_path: P) -> Result<DaqMetadata> {
+        let daq_path = daq_path.as_ref();
+        let daq_data = match daq_path
+            .extension()
+            .ok_or_else(|| anyhow!("invalid daq path: {:?}", daq_path))?
+            .to_str()
+        {
+            Some("lvm") => read_daq_lvm(&daq_path),
+            Some("xlsx") => read_daq_excel(&daq_path),
+            _ => bail!("only .lvm and .xlsx are supported"),
+        }?;
 
-            Ok(daq)
-        })
-        .await??;
+        let daq_metadata = DaqMetadata {
+            path: daq_path.to_owned(),
+            nrows: daq_data.nrows(),
+            ncols: daq_data.ncols(),
+            fingerprint: todo!(),
+        };
+        self.daq_data = Some(daq_data.into_shared());
 
-        let daq_data = daq_data.into_shared();
-        self.daq_data = Some(daq_data.clone());
-
-        Ok(daq_data)
+        Ok(daq_metadata)
     }
 
-    pub fn get_daq_data(&self) -> Option<ArcArray2<f64>> {
-        Some(self.daq_data.as_ref()?.clone())
+    pub fn daq_data(&self) -> Option<ArcArray2<f64>> {
+        self.daq_data.clone()
     }
 }
 
@@ -129,16 +125,16 @@ mod tests {
     async fn test_read_daq() {
         util::log::init();
 
-        let mut daq_data_manager = DaqDataManager::default();
+        let mut daq_data_manager = DaqManager::default();
         assert_eq!(
             daq_data_manager
                 .read_daq("/home/yhj/Documents/2021yhj/EXP/imp/daq/imp_20000_1.lvm")
-                .await
-                .unwrap(),
+                .unwrap()
+                .fingerprint,
             daq_data_manager
                 .read_daq("/home/yhj/Documents/2021yhj/EXP/imp/daq/imp_20000_1.xlsx")
-                .await
                 .unwrap()
+                .fingerprint
         );
     }
 }

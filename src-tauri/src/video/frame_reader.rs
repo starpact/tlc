@@ -82,7 +82,7 @@ impl FrameReader {
         let (tx, rx) = oneshot::channel();
 
         // It will never be synchronously blocked here because we have used semaphore to
-        // ensure that there is idel thread in the pool when we reach here.
+        // ensure that there is idle thread in the pool when we reach here.
         self.thread_pool.spawn(move || {
             let ret = read_single_frame_base64(video_data, frame_index);
             let _ = tx.send(ret);

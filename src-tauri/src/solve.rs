@@ -7,11 +7,11 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize, Serialize, Clone, Copy)]
 pub struct PhysicalParam {
-    peak_temperature: f64,
-    solid_thermal_conductivity: f64,
-    solid_thermal_diffusivity: f64,
-    characteristic_length: f64,
-    air_thermal_conductivity: f64,
+    pub peak_temperature: f64,
+    pub solid_thermal_conductivity: f64,
+    pub solid_thermal_diffusivity: f64,
+    pub characteristic_length: f64,
+    pub air_thermal_conductivity: f64,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
@@ -220,7 +220,7 @@ fn solve_core<S: SolveSinglePoint>(_solver: S) {
 #[cfg(test)]
 mod tests {
     extern crate test;
-    use crate::daq::DaqDataManager;
+    use crate::daq::DaqManager;
 
     use super::*;
     use approx::assert_relative_eq;
@@ -286,12 +286,11 @@ mod tests {
 
     fn new_temps() -> Array1<f64> {
         async_runtime::block_on(async {
-            DaqDataManager::default()
+            let mut daq_manager = DaqManager::default();
+            daq_manager
                 .read_daq("/home/yhj/Documents/2021yhj/EXP/imp/daq/imp_20000_1.lvm")
-                .await
-                .unwrap()
-                .column(3)
-                .to_owned()
+                .unwrap();
+            daq_manager.daq_data().unwrap().column(3).to_owned()
         })
     }
 
