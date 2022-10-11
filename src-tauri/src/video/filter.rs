@@ -16,10 +16,10 @@ pub enum FilterMethod {
 }
 
 #[instrument(ret)]
-pub(super) fn filter_all(
+pub fn filter_all(
     green2: ArcArray2<u8>,
     filter_method: FilterMethod,
-    progress_bar: ProgressBar,
+    progress_bar: &ProgressBar,
 ) -> Result<ArcArray2<u8>> {
     let total = green2.dim().1;
     progress_bar.start(total as u32);
@@ -35,7 +35,7 @@ pub(super) fn filter_all(
     }
 }
 
-pub(super) fn filter_single_point(filter_method: FilterMethod, green1: ArrayView1<u8>) -> Vec<u8> {
+pub fn filter_single_point(filter_method: FilterMethod, green1: ArrayView1<u8>) -> Vec<u8> {
     let mut green1 = green1.to_owned();
 
     use FilterMethod::*;
@@ -48,7 +48,7 @@ pub(super) fn filter_single_point(filter_method: FilterMethod, green1: ArrayView
     green1.to_vec()
 }
 
-fn apply<F>(mut green2: ArcArray2<u8>, progress_bar: ProgressBar, f: F) -> Result<ArcArray2<u8>>
+fn apply<F>(mut green2: ArcArray2<u8>, progress_bar: &ProgressBar, f: F) -> Result<ArcArray2<u8>>
 where
     F: Fn(ArrayViewMut1<u8>) + Send + Sync,
 {

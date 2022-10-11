@@ -14,7 +14,7 @@ use crate::{
     error::Error,
     solve::{IterationMethod, PhysicalParam},
     util,
-    video::{FilterMethod, Green2Param, VideoMetadata},
+    video::{FilterMethod, Green2Metadata, VideoMetadata},
 };
 
 #[derive(Debug)]
@@ -157,9 +157,7 @@ impl SettingStorage {
                             created_at,
                             updated_at
                         )
-                        VALUES (
-                            ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14
-                        )
+                        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
                         ",
                     )?
                     .insert(params![
@@ -201,7 +199,7 @@ impl SettingStorage {
         }
     }
 
-    pub fn get_save_root_dir(&self) -> Result<String> {
+    pub fn save_root_dir(&self) -> Result<String> {
         let id = self.setting_id()?;
         let save_root_dir = self.conn.query_row(
             "SELECT save_root_dir FROM settings WHERE id = ?1",
@@ -223,7 +221,7 @@ impl SettingStorage {
         Ok(())
     }
 
-    pub fn get_video_metadata(&self) -> Result<Option<VideoMetadata>> {
+    pub fn video_metadata(&self) -> Result<Option<VideoMetadata>> {
         let id = self.setting_id()?;
         let ret: Option<String> = self.conn.query_row(
             "SELECT video_metadata FROM settings WHERE id = ?1",
@@ -239,7 +237,7 @@ impl SettingStorage {
 
     pub fn set_video_metadata(&self, video_metadata: VideoMetadata) -> Result<()> {
         let id = self.setting_id()?;
-        match self.get_video_metadata()? {
+        match self.video_metadata()? {
             Some(old_video_metadata)
                 if old_video_metadata.fingerprint == video_metadata.fingerprint =>
             {
@@ -269,8 +267,7 @@ impl SettingStorage {
                         start_frame = NULL,
                         start_row = NULL,
                         updated_at = ?2
-                    WHERE
-                        id = ?3
+                    WHERE id = ?3
                     ",
                     params![video_metadata_str, updated_at, id],
                 )?;
@@ -295,8 +292,7 @@ impl SettingStorage {
                         area = ?2,
                         thermocouples = NULL,
                         updated_at = ?3
-                    WHERE
-                        id = ?4
+                    WHERE id = ?4
                     ",
                     params![video_metadata_str, area_str, updated_at, id],
                 )?;
@@ -305,7 +301,7 @@ impl SettingStorage {
         }
     }
 
-    pub fn get_daq_metadata(&self) -> Result<Option<DaqMetadata>> {
+    pub fn daq_metadata(&self) -> Result<Option<DaqMetadata>> {
         let id = self.setting_id()?;
         let ret: Option<String> = self.conn.query_row(
             "SELECT daq_metadata FROM settings WHERE id = ?1",
@@ -321,7 +317,7 @@ impl SettingStorage {
 
     pub fn set_daq_metadata(&self, daq_metadata: DaqMetadata) -> Result<()> {
         let id = self.setting_id()?;
-        match self.get_daq_metadata()? {
+        match self.daq_metadata()? {
             Some(old_daq_metadata) if old_daq_metadata.fingerprint == daq_metadata.fingerprint => {
                 if old_daq_metadata.path != daq_metadata.path {
                     let daq_metadata_str = serde_json::to_string(&daq_metadata)?;
@@ -334,7 +330,7 @@ impl SettingStorage {
                 Ok(())
             }
             _ => {
-                let thermocouples = self.get_thermocouples()?;
+                let thermocouples = self.thermocouples()?;
                 let daq_metadata_str = serde_json::to_string(&daq_metadata)?;
                 let updated_at = util::time::now_as_secs();
 
@@ -345,15 +341,14 @@ impl SettingStorage {
                     {
                         self.conn.execute(
                             "
-                    UPDATE settings SET
-                        daq_metadata = ?1,
-                        start_frame = NULL,
-                        start_row = NULL,
-                        thermocouples = NULL,
-                        updated_at = ?2
-                    WHERE
-                        id = ?3
-                    ",
+                            UPDATE settings SET
+                                daq_metadata = ?1,
+                                start_frame = NULL,
+                                start_row = NULL,
+                                thermocouples = NULL,
+                                updated_at = ?2
+                            WHERE id = ?3
+                            ",
                             params![daq_metadata_str, updated_at, id],
                         )?;
                     }
@@ -367,8 +362,7 @@ impl SettingStorage {
                         start_frame = NULL,
                         start_row = NULL,
                         updated_at = ?2
-                    WHERE
-                        id = ?3
+                    WHERE id = ?3
                     ",
                     params![daq_metadata_str, updated_at, id],
                 )?;
@@ -377,7 +371,7 @@ impl SettingStorage {
         }
     }
 
-    pub fn get_start_index(&self) -> Result<Option<StartIndex>> {
+    pub fn start_index(&self) -> Result<Option<StartIndex>> {
         let id = self.setting_id()?;
         let ret: (Option<usize>, Option<usize>) = self.conn.query_row(
             "SELECT (start_frame, start_row) FROM settings WHERE id = ?1",
@@ -396,14 +390,14 @@ impl SettingStorage {
 
     pub fn synchronize_video_and_daq(&self, start_frame: usize, start_row: usize) -> Result<()> {
         let nframes = self
-            .get_video_metadata()?
+            .video_metadata()?
             .ok_or_else(|| anyhow!("video path unset"))?
             .nframes;
         if start_frame >= nframes {
             bail!("frame_index({start_frame}) out of range({nframes})");
         }
         let nrows = self
-            .get_daq_metadata()?
+            .daq_metadata()?
             .ok_or_else(|| anyhow!("daq  path unset"))?
             .nrows;
         if start_row >= nrows {
@@ -415,7 +409,7 @@ impl SettingStorage {
 
     pub fn set_start_frame(&self, start_frame: usize) -> Result<()> {
         let nframes = self
-            .get_video_metadata()?
+            .video_metadata()?
             .ok_or_else(|| anyhow!("video path unset"))?
             .nframes;
         if start_frame >= nframes {
@@ -426,11 +420,11 @@ impl SettingStorage {
             start_frame: old_start_frame,
             start_row: old_start_row,
         } = self
-            .get_start_index()?
+            .start_index()?
             .ok_or_else(|| anyhow!("not synchronized yet"))?;
 
         let nrows = self
-            .get_daq_metadata()?
+            .daq_metadata()?
             .ok_or_else(|| anyhow!("daq  path unset"))?
             .nrows;
         if old_start_row + start_frame < old_start_frame {
@@ -447,7 +441,7 @@ impl SettingStorage {
 
     pub fn set_start_row(&self, start_row: usize) -> Result<()> {
         let nrows = self
-            .get_daq_metadata()?
+            .daq_metadata()?
             .ok_or_else(|| anyhow!("daq  path unset"))?
             .nrows;
         if start_row >= nrows {
@@ -458,11 +452,11 @@ impl SettingStorage {
             start_frame: old_start_frame,
             start_row: old_start_row,
         } = self
-            .get_start_index()?
+            .start_index()?
             .ok_or_else(|| anyhow!("not synchronized yet"))?;
 
         let nframes = self
-            .get_video_metadata()?
+            .video_metadata()?
             .ok_or_else(|| anyhow!("video path unset"))?
             .nframes;
         if old_start_frame + start_row < old_start_row {
@@ -476,7 +470,7 @@ impl SettingStorage {
         self.set_start_index(start_frame, start_row)
     }
 
-    pub fn get_area(&self) -> Result<Option<(usize, usize, usize, usize)>> {
+    pub fn area(&self) -> Result<Option<(usize, usize, usize, usize)>> {
         let id = self.setting_id()?;
         let ret: Option<String> =
             self.conn
@@ -493,7 +487,7 @@ impl SettingStorage {
     pub fn set_area(&self, area: (usize, usize, usize, usize)) -> Result<()> {
         let id = self.setting_id()?;
         let (h, w) = self
-            .get_video_metadata()?
+            .video_metadata()?
             .ok_or_else(|| anyhow!("video path unset"))?
             .shape;
         let (tl_y, tl_x, cal_h, cal_w) = area;
@@ -514,34 +508,34 @@ impl SettingStorage {
         Ok(())
     }
 
-    pub fn get_green2_param(&self) -> Result<Green2Param> {
+    pub fn green2_metadata(&self) -> Result<Green2Metadata> {
         let video_metadata = self
-            .get_video_metadata()?
+            .video_metadata()?
             .ok_or_else(|| anyhow!("video path unset"))?;
         let nrows = self
-            .get_daq_metadata()?
+            .daq_metadata()?
             .ok_or_else(|| anyhow!("daq  path unset"))?
             .nrows;
         let StartIndex {
             start_frame,
             start_row,
         } = self
-            .get_start_index()?
+            .start_index()?
             .ok_or_else(|| anyhow!("not synchronized yet"))?;
-        let area = self.get_area()?.ok_or_else(|| anyhow!("area unset"))?;
+        let area = self.area()?.ok_or_else(|| anyhow!("area unset"))?;
 
         let nframes = video_metadata.nframes;
         let cal_num = (nframes - start_frame).min(nrows - start_row);
 
-        Ok(Green2Param {
-            path: video_metadata.path,
+        Ok(Green2Metadata {
             start_frame,
             cal_num,
             area,
+            video_fingerprint: video_metadata.fingerprint,
         })
     }
 
-    pub fn get_thermocouples(&self) -> Result<Option<Vec<Thermocouple>>> {
+    pub fn thermocouples(&self) -> Result<Option<Vec<Thermocouple>>> {
         let id = self.setting_id()?;
         let ret: Option<String> = self.conn.query_row(
             "SELECT thermocouples FROM settings WHERE id = ?1",
@@ -555,7 +549,7 @@ impl SettingStorage {
         }
     }
 
-    pub fn get_filter_method(&self) -> Result<FilterMethod> {
+    pub fn filter_method(&self) -> Result<FilterMethod> {
         let id = self.setting_id()?;
         let s: String = self.conn.query_row(
             "SELECT filter_method FROM settings WHERE id = ?1",
@@ -578,7 +572,7 @@ impl SettingStorage {
         Ok(())
     }
 
-    pub fn get_iteration_method(&self) -> Result<IterationMethod> {
+    pub fn iteration_method(&self) -> Result<IterationMethod> {
         let id = self.setting_id()?;
         let s: String = self.conn.query_row(
             "SELECT iteration_method FROM settings WHERE id = ?1",
@@ -601,7 +595,7 @@ impl SettingStorage {
         Ok(())
     }
 
-    pub fn get_physical_param(&self) -> Result<PhysicalParam> {
+    pub fn physical_param(&self) -> Result<PhysicalParam> {
         let id = self.setting_id()?;
         let physical_param = self.conn.query_row(
             "
@@ -612,10 +606,8 @@ impl SettingStorage {
                 characteristic_length,
                 air_thermal_conductivity,
             ) 
-            FROM 
-                settings 
-            WHERE
-                id = ?1
+            FROM settings 
+            WHERE id = ?1
             ",
             [id],
             |row| {

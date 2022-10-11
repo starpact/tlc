@@ -26,14 +26,14 @@ impl GlobalState {
     pub fn new() -> Self {
         GlobalState {
             setting_storage: Arc::new(Mutex::new(SettingStorage::new())),
-            video_manager: VideoManager::new(),
+            video_manager: Default::default(),
             daq_manager: Default::default(),
         }
     }
 
     pub async fn get_save_root_dir(&self) -> Result<String> {
         let setting_storage = self.setting_storage.clone();
-        spawn_blocking(move || setting_storage.lock().unwrap().get_save_root_dir()).await?
+        spawn_blocking(move || setting_storage.lock().unwrap().save_root_dir()).await?
     }
 
     pub async fn set_save_root_dir<P: AsRef<Path>>(&self, save_root_dir: P) -> Result<()> {
@@ -62,7 +62,7 @@ impl GlobalState {
             setting_storage
                 .lock()
                 .unwrap()
-                .get_video_metadata()?
+                .video_metadata()?
                 .ok_or_else(|| anyhow!("video path unset"))
         })
         .await?
@@ -86,7 +86,7 @@ impl GlobalState {
             setting_storage
                 .lock()
                 .unwrap()
-                .get_daq_metadata()?
+                .daq_metadata()?
                 .ok_or_else(|| anyhow!("daq path unset"))
         })
         .await?
@@ -143,7 +143,7 @@ impl GlobalState {
             setting_storage
                 .lock()
                 .unwrap()
-                .get_start_index()?
+                .start_index()?
                 .ok_or_else(|| anyhow!("video and daq not synchronized yet"))
         })
         .await?
@@ -151,15 +151,15 @@ impl GlobalState {
 
     pub async fn set_start_frame(&self, start_frame: usize) -> Result<()> {
         let setting_storage = self.setting_storage.clone();
-        let green2_param = spawn_blocking(move || {
+        let green2_metadata = spawn_blocking(move || {
             let setting_storage = setting_storage.lock().unwrap();
             setting_storage.set_start_frame(start_frame)?;
-            setting_storage.get_green2_param()
+            setting_storage.green2_metadata()
         })
         .await?;
 
-        match green2_param {
-            Ok(green2_param) => self.video_manager.spawn_build_green2(green2_param),
+        match green2_metadata {
+            Ok(green2_param) => self.video_manager.spawn_build_green2(green2_param).await?,
             Err(e) => info!("Not ready to build green2 yet: {e}"),
         }
 
@@ -168,15 +168,15 @@ impl GlobalState {
 
     pub async fn set_start_row(&self, start_row: usize) -> Result<()> {
         let setting_storage = self.setting_storage.clone();
-        let green2_param = spawn_blocking(move || {
+        let green2_metadata = spawn_blocking(move || {
             let setting_storage = setting_storage.lock().unwrap();
             setting_storage.set_start_row(start_row)?;
-            setting_storage.get_green2_param()
+            setting_storage.green2_metadata()
         })
         .await?;
 
-        match green2_param {
-            Ok(green2_param) => self.video_manager.spawn_build_green2(green2_param),
+        match green2_metadata {
+            Ok(green2_param) => self.video_manager.spawn_build_green2(green2_param).await?,
             Err(e) => info!("Not ready to build green2 yet: {e}"),
         }
 
@@ -189,7 +189,7 @@ impl GlobalState {
             setting_storage
                 .lock()
                 .unwrap()
-                .get_area()?
+                .area()?
                 .ok_or_else(|| anyhow!("area not selected yet"))
         })
         .await?
@@ -197,29 +197,34 @@ impl GlobalState {
 
     pub async fn set_area(&self, area: (usize, usize, usize, usize)) -> Result<()> {
         let setting_storage = self.setting_storage.clone();
-        let green2_param = spawn_blocking(move || {
+        let green2_metadata = spawn_blocking(move || {
             let setting_storage = setting_storage.lock().unwrap();
             setting_storage.set_area(area)?;
-            setting_storage.get_green2_param()
+            setting_storage.green2_metadata()
         })
         .await?;
 
-        match green2_param {
-            Ok(green2_param) => self.video_manager.spawn_build_green2(green2_param),
+        match green2_metadata {
+            Ok(green2_metadata) => {
+                self.video_manager
+                    .spawn_build_green2(green2_metadata)
+                    .await?
+            }
             Err(e) => info!("Not ready to build green2 yet: {e}"),
         }
 
         Ok(())
     }
 
-    pub fn spawn_build_green2(&self) -> Result<()> {
-        let green2_param = self.setting_storage.lock().unwrap().get_green2_param()?;
-        self.video_manager.spawn_build_green2(green2_param);
-        Ok(())
+    pub async fn spawn_build_green2(&self) -> Result<()> {
+        let setting_storage = self.setting_storage.clone();
+        let green2_metadata =
+            spawn_blocking(move || setting_storage.lock().unwrap().green2_metadata()).await??;
+        self.video_manager.spawn_build_green2(green2_metadata).await
     }
 
     pub fn get_build_green2_progress(&self) -> Progress {
-        self.video_manager.get_build_progress()
+        self.video_manager.build_progress()
     }
 
     pub async fn set_filter_method(&self, filter_method: FilterMethod) -> Result<()> {
@@ -232,13 +237,13 @@ impl GlobalState {
         })
         .await??;
 
-        self.video_manager.spawn_filter_green2(filter_method)
+        self.video_manager.spawn_filter_green2(filter_method).await
     }
 
     pub async fn filter_single_point(&self, position: (usize, usize)) -> Result<Vec<u8>> {
         let setting_storage = self.setting_storage.clone();
         let filter_method =
-            spawn_blocking(move || setting_storage.lock().unwrap().get_filter_method()).await??;
+            spawn_blocking(move || setting_storage.lock().unwrap().filter_method()).await??;
         self.video_manager
             .filter_single_point(filter_method, position)
             .await
@@ -247,18 +252,18 @@ impl GlobalState {
     pub async fn filter(&self) -> Result<()> {
         let setting_storage = self.setting_storage.clone();
         let filter_method =
-            spawn_blocking(move || setting_storage.lock().unwrap().get_filter_method()).await??;
+            spawn_blocking(move || setting_storage.lock().unwrap().filter_method()).await??;
 
-        self.video_manager.spawn_filter_green2(filter_method)
+        self.video_manager.spawn_filter_green2(filter_method).await
     }
 
     pub fn get_filter_green2_progress(&self) -> Progress {
-        self.video_manager.get_filter_progress()
+        self.video_manager.filter_progress()
     }
 
     pub async fn get_iteration_method(&self) -> Result<IterationMethod> {
         let setting_storage = self.setting_storage.clone();
-        spawn_blocking(move || setting_storage.lock().unwrap().get_iteration_method()).await?
+        spawn_blocking(move || setting_storage.lock().unwrap().iteration_method()).await?
     }
 
     pub async fn set_iteration_method(&self, iteration_method: IterationMethod) -> Result<()> {
@@ -282,12 +287,12 @@ impl GlobalState {
         spawn_blocking(move || -> Result<()> {
             let setting_storage = setting_storage.lock().unwrap();
 
-            let physical_param = setting_storage.get_physical_param()?;
+            let physical_param = setting_storage.physical_param()?;
             let frame_rate = setting_storage
-                .get_video_metadata()?
+                .video_metadata()?
                 .ok_or_else(|| anyhow!("video path unset"))?
                 .frame_rate;
-            let iteration_method = setting_storage.get_iteration_method()?;
+            let iteration_method = setting_storage.iteration_method()?;
 
             solve::solve(
                 filtered_green2,
@@ -326,6 +331,5 @@ mod tests {
             .unwrap();
         global_state.set_start_frame(10).await.unwrap();
         tokio::time::sleep(std::time::Duration::from_secs(6)).await;
-        println!("{:?}", global_state.video_manager.green2().unwrap());
     }
 }

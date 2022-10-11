@@ -1,6 +1,6 @@
 mod decode;
 mod filter;
-mod frame_reader;
+mod spawn_handle;
 
 use std::{
     assert_matches::debug_assert_matches,
@@ -11,7 +11,9 @@ use std::{
 use anyhow::{anyhow, bail, Result};
 use ffmpeg::{codec, codec::packet::Packet};
 use ffmpeg_next as ffmpeg;
-use ndarray::{parallel::prelude::*, prelude::*, ArcArray2};
+use image::{codecs::jpeg::JpegEncoder, ColorType::Rgb8};
+use ndarray::{ArcArray2, Array2, Axis};
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use tauri::async_runtime::spawn_blocking;
 use tokio::sync::oneshot;
@@ -20,13 +22,42 @@ use tracing::{debug, error, instrument, trace_span};
 use crate::util::progress_bar::{Progress, ProgressBar};
 use decode::DecoderManager;
 pub use filter::FilterMethod;
-use frame_reader::FrameReader;
 
+use self::spawn_handle::SpawnHandle;
+
+#[derive(Clone, Default)]
 pub struct VideoManager {
-    video_data: Arc<RwLock<VideoData>>,
-    frame_reader: FrameReader,
+    inner: Arc<VideoManagerInner>,
+}
+
+#[derive(Default)]
+struct VideoManagerInner {
+    /// Video data including raw packets, `green2` matrix and `filtered_green2` matrix.
+    video_data: RwLock<VideoData>,
+
+    /// Progree bar for building green2.
     build_progress_bar: ProgressBar,
+
+    /// Progree bar for filtering green2.
     filter_progress_bar: ProgressBar,
+
+    /// Frame graber controller.
+    spawn_handle: SpawnHandle,
+}
+
+/// `VideoData` contains all video related data, built in the following order:
+/// video_cache -> green2 -> filtered_green2.
+#[derive(Default)]
+struct VideoData {
+    /// Raw video data.
+    video_cache: Option<VideoCache>,
+
+    /// Green value 2d matrix(cal_num, pix_num).
+    green2: Option<ArcArray2<u8>>,
+
+    /// Use `ArcArray2` for copy on write because `filtered_green2` can
+    /// share the same data with `green2` if we choose not to filter.
+    filtered_green2: Option<ArcArray2<u8>>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -40,59 +71,26 @@ pub struct VideoMetadata {
 }
 
 #[derive(Debug, Clone)]
-pub struct Green2Param {
-    pub path: PathBuf,
+pub struct Green2Metadata {
     pub start_frame: usize,
     pub cal_num: usize,
     pub area: (usize, usize, usize, usize),
+    pub video_fingerprint: String,
 }
 
 impl VideoManager {
-    pub fn new() -> Self {
-        Self {
-            video_data: Arc::new(RwLock::new(VideoData::default())),
-            frame_reader: FrameReader::new(),
-            build_progress_bar: ProgressBar::default(),
-            filter_progress_bar: ProgressBar::default(),
-        }
-    }
-
-    pub fn get_build_progress(&self) -> Progress {
-        self.build_progress_bar.get()
-    }
-
-    pub fn get_filter_progress(&self) -> Progress {
-        self.filter_progress_bar.get()
-    }
-
-    #[allow(dead_code)]
-    pub fn green2(&self) -> Option<ArcArray2<u8>> {
-        Some(self.video_data.read().unwrap().green2.as_ref()?.clone())
-    }
-
-    pub fn filtered_green2(&self) -> Option<ArcArray2<u8>> {
-        Some(
-            self.video_data
-                .read()
-                .unwrap()
-                .filtered_green2
-                .as_ref()?
-                .clone(),
-        )
-    }
-
     /// Spawn a thread to load all video packets into memory.
     pub async fn spawn_load_packets<P: AsRef<Path>>(&self, video_path: P) -> Result<VideoMetadata> {
-        let video_data = self.video_data.clone();
+        let video_manager = self.clone();
         let path = video_path.as_ref().to_owned();
         let (tx, rx) = oneshot::channel();
         let join_handle = spawn_blocking(move || {
-            load_packets(video_data.clone(), path.clone(), tx).map_err(|e| {
+            let video_manager = video_manager.inner;
+            video_manager.load_packets(path.clone(), tx).map_err(|e| {
                 // Error after send can not be returned, so log here.
                 // `video_cache` is set to `None` to tell all waiters that `load_packets` failed
                 // so should stop waiting.
                 error!("Failed to load video from {:?}: {}", path, e);
-                video_data.write().unwrap().reset();
                 e
             })
         });
@@ -110,47 +108,101 @@ impl VideoManager {
     }
 
     pub async fn read_single_frame_base64(&self, frame_index: usize) -> Result<String> {
-        self.frame_reader
-            .read_single_frame_base64(self.video_data.clone(), frame_index)
-            .await
+        let spawner = self.inner.spawn_handle.get_spwaner(frame_index).await?;
+        let video_manager = self.clone();
+        let (tx, rx) = oneshot::channel();
+        spawner.spawn(move || {
+            let ret = video_manager.inner.read_single_frame_base64(frame_index);
+            tx.send(ret).unwrap();
+        });
+
+        rx.await?
     }
 
-    pub fn spawn_build_green2(&self, green2_param: Green2Param) {
-        let video_data = self.video_data.clone();
-        let progress_bar = self.build_progress_bar.clone();
+    pub async fn spawn_build_green2(&self, green2_metadata: Green2Metadata) -> Result<()> {
+        let video_manager = self.clone();
+        let (tx, rx) = oneshot::channel();
+
+        // Interrupt if needed the current build process and init the progress bar.
+        video_manager
+            .inner
+            .build_progress_bar
+            .start(green2_metadata.cal_num as u32);
+
         rayon::spawn(move || {
-            match build_green2(video_data.clone(), progress_bar.clone(), green2_param) {
-                Ok(green2) => video_data.write().unwrap().green2 = Some(green2.into_shared()),
+            let video_manager = video_manager.inner;
+            let mut video_data = {
+                let _span1 = trace_span!("spin_wait_for_loading_packets").entered();
+                // Wait until all packets have been loaded.
+                loop {
+                    let video_data = video_manager.video_data.write().unwrap();
+                    let Some(video_cache) = video_data.video_cache.as_ref() else {
+                        tx.send(Err(anyhow!("video not loaded yet"))).unwrap();
+                        return;
+                    };
+                    if video_cache.target_changed(&green2_metadata.video_fingerprint) {
+                        tx.send(Err(anyhow!(
+                            "video has been changed before start building green2, so aborted"
+                        )))
+                        .unwrap();
+                        return;
+                    }
+                    if video_cache.finished() {
+                        break video_data;
+                    }
+                }
+            };
+
+            // Tell outside that building actually started.
+            tx.send(Ok(())).unwrap();
+
+            match video_data
+                .video_cache
+                .as_ref()
+                .unwrap() // cannot be none according to previous logic
+                .build_green2(&green2_metadata, &video_manager.build_progress_bar)
+            {
+                Ok(green2) => video_data.green2 = Some(green2.into_shared()),
                 Err(e) => {
-                    progress_bar.reset();
+                    video_manager.build_progress_bar.reset();
                     error!("Failed to build green2: {}", e);
                 }
             }
         });
+
+        rx.await?
     }
 
-    pub fn spawn_filter_green2(&self, filter_method: FilterMethod) -> Result<()> {
-        let video_data = self.video_data.clone();
-        if video_data.read().unwrap().green2.is_none() {
-            bail!("green2 not built yet");
-        }
-
-        let progress_bar = self.filter_progress_bar.clone();
+    pub async fn spawn_filter_green2(&self, filter_method: FilterMethod) -> Result<()> {
+        let video_manager = self.clone();
+        let (tx, rx) = oneshot::channel();
         rayon::spawn(move || {
-            if let Some(green2) = video_data.read().unwrap().green2.clone() {
-                match filter::filter_all(green2, filter_method, progress_bar.clone()) {
+            let video_manager = video_manager.inner;
+            // Hold the read lock.
+            let video_data = video_manager.video_data.read().unwrap();
+            if let Some(green2) = video_data.green2.as_ref() {
+                // Tell outside that filtering actually started.
+                tx.send(Ok(())).unwrap();
+
+                match filter::filter_all(
+                    green2.clone(),
+                    filter_method,
+                    &video_manager.filter_progress_bar,
+                ) {
                     Ok(filtered_green2) => {
-                        video_data.write().unwrap().filtered_green2 = Some(filtered_green2);
+                        video_manager.video_data.write().unwrap().filtered_green2 =
+                            Some(filtered_green2);
                     }
                     Err(e) => {
-                        progress_bar.reset();
+                        video_manager.filter_progress_bar.reset();
                         error!("Failed to filter green2: {}", e);
                     }
                 }
             }
+            // tx dropped without any send. rx.await will be `RecvError`.
         });
 
-        Ok(())
+        rx.await.map_err(|_| anyhow!("green2 not built yet"))?
     }
 
     pub async fn filter_single_point(
@@ -158,9 +210,10 @@ impl VideoManager {
         filter_method: FilterMethod,
         (y, x): (usize, usize),
     ) -> Result<Vec<u8>> {
-        let video_data = self.video_data.clone();
+        let video_manager = self.clone();
         spawn_blocking(move || {
-            let video_data = video_data.read().unwrap();
+            // Hold the read lock.
+            let video_data = video_manager.inner.video_data.read().unwrap();
             let (h, w) = video_data
                 .video_cache
                 .as_ref()
@@ -184,21 +237,26 @@ impl VideoManager {
         })
         .await?
     }
-}
 
-/// `VideoData` contains all video related data, built in the following order:
-/// video_cache -> green2 -> filtered_green2.
-#[derive(Default)]
-struct VideoData {
-    /// Raw video data.
-    video_cache: Option<VideoCache>,
+    pub fn build_progress(&self) -> Progress {
+        self.inner.build_progress_bar.get()
+    }
 
-    /// Green value 2d matrix(cal_num, pix_num).
-    green2: Option<ArcArray2<u8>>,
+    pub fn filter_progress(&self) -> Progress {
+        self.inner.filter_progress_bar.get()
+    }
 
-    /// Use `ArcArray2` for copy on write because `filtered_green2` can
-    /// share the same data with `green2` if we choose not to filter.
-    filtered_green2: Option<ArcArray2<u8>>,
+    pub fn filtered_green2(&self) -> Option<ArcArray2<u8>> {
+        Some(
+            self.inner
+                .video_data
+                .read()
+                .unwrap()
+                .filtered_green2
+                .as_ref()?
+                .clone(),
+        )
+    }
 }
 
 impl VideoData {
@@ -208,12 +266,6 @@ impl VideoData {
             green2: None,
             filtered_green2: None,
         }
-    }
-
-    fn reset(&mut self) {
-        self.video_cache = None;
-        self.green2 = None;
-        self.filtered_green2 = None;
     }
 }
 
@@ -248,158 +300,160 @@ impl VideoCache {
         }
     }
 
-    fn target_changed<P: AsRef<Path>>(&self, original_path: P) -> bool {
-        self.video_metadata.path != original_path.as_ref()
+    fn target_changed(&self, fingerprint: &str) -> bool {
+        self.video_metadata.fingerprint != fingerprint
     }
 
     fn finished(&self) -> bool {
         self.video_metadata.nframes == self.packets.len()
     }
+
+    #[instrument(skip(self))]
+    fn build_green2(
+        &self,
+        green2_metadata: &Green2Metadata,
+        progress_bar: &ProgressBar,
+    ) -> Result<Array2<u8>> {
+        let cal_num = green2_metadata.cal_num;
+
+        let byte_w = self.video_metadata.shape.1 as usize * 3;
+        let (tl_y, tl_x, cal_h, cal_w) = green2_metadata.area;
+        let (tl_y, tl_x, cal_h, cal_w) =
+            (tl_y as usize, tl_x as usize, cal_h as usize, cal_w as usize);
+        let mut green2 = Array2::zeros((cal_num, cal_h * cal_w));
+
+        let _span2 = trace_span!("decode_in_parallel").entered();
+        self.packets
+            .par_iter()
+            .skip(green2_metadata.start_frame)
+            .zip(green2.axis_iter_mut(Axis(0)).into_iter())
+            .try_for_each(|(packet, mut row)| -> Result<()> {
+                let mut decoder = self.decoder_manager.get()?;
+                let dst_frame = decoder.decode(packet)?;
+
+                // each frame is stored in a u8 array:
+                // |r g b r g b...r g b|r g b r g b...r g b|......|r g b r g b...r g b|
+                // |.......row_0.......|.......row_1.......|......|.......row_n.......|
+                let rgb = dst_frame.data(0);
+                let mut row_iter = row.iter_mut();
+
+                for i in (0..).step_by(byte_w).skip(tl_y).take(cal_h) {
+                    for j in (i..).skip(1).step_by(3).skip(tl_x).take(cal_w) {
+                        // Bounds check can be removed by optimization so no need to use unsafe.
+                        // Same performance as `unwrap_unchecked` + `get_unchecked`.
+                        if let Some(b) = row_iter.next() {
+                            *b = rgb[j];
+                        }
+                    }
+                }
+
+                progress_bar.add(1)?;
+
+                Ok(())
+            })?;
+
+        debug_assert_matches!(
+            progress_bar.get(),
+            Progress::Finished { total } if total == cal_num as u32,
+        );
+
+        Ok(green2)
+    }
 }
 
-#[instrument(skip(video_data, tx))]
-fn load_packets(
-    video_data: Arc<RwLock<VideoData>>,
-    path: PathBuf,
-    tx: oneshot::Sender<VideoMetadata>,
-) -> Result<()> {
-    let _span1 = trace_span!("load_metadata").entered();
-    let mut input = ffmpeg::format::input(&path)?;
-    let video_stream = input
-        .streams()
-        .best(ffmpeg::media::Type::Video)
-        .ok_or_else(|| anyhow!("video stream not found"))?;
+impl VideoManagerInner {
+    #[instrument(skip(self, tx))]
+    fn load_packets(&self, path: PathBuf, tx: oneshot::Sender<VideoMetadata>) -> Result<()> {
+        let _span1 = trace_span!("load_metadata").entered();
+        let mut input = ffmpeg::format::input(&path)?;
+        let video_stream = input
+            .streams()
+            .best(ffmpeg::media::Type::Video)
+            .ok_or_else(|| anyhow!("video stream not found"))?;
 
-    let video_stream_index = video_stream.index();
-    let parameters = video_stream.parameters();
-    let codec_ctx = codec::Context::from_parameters(parameters.clone())?;
-    let rational = video_stream.avg_frame_rate();
-    let frame_rate = (rational.0 as f64 / rational.1 as f64).round() as usize;
-    let nframes = video_stream.frames() as usize;
-    let decoder = codec_ctx.decoder().video()?;
+        let video_stream_index = video_stream.index();
+        let parameters = video_stream.parameters();
+        let codec_ctx = codec::Context::from_parameters(parameters.clone())?;
+        let rational = video_stream.avg_frame_rate();
+        let frame_rate = (rational.0 as f64 / rational.1 as f64).round() as usize;
+        let nframes = video_stream.frames() as usize;
+        let decoder = codec_ctx.decoder().video()?;
 
-    let video_metadata = VideoMetadata {
-        path: path.clone(),
-        frame_rate,
-        nframes,
-        shape: (decoder.height() as usize, decoder.width() as usize),
-        fingerprint: todo!(),
-    };
+        let fingerprint = "TODO".to_owned();
+        let video_metadata = VideoMetadata {
+            path,
+            frame_rate,
+            nframes,
+            shape: (decoder.height() as usize, decoder.width() as usize),
+            fingerprint: fingerprint.clone(),
+        };
 
-    *video_data.write().unwrap() = VideoData::new(video_metadata.clone(), parameters);
+        *self.video_data.write().unwrap() = VideoData::new(video_metadata.clone(), parameters);
 
-    // Caller `spawn_load_packets` can return after this point.
-    tx.send(video_metadata)
-        .expect("The receiver has been dropped");
-    drop(_span1);
+        // Caller `spawn_load_packets` can return after this point.
+        tx.send(video_metadata).unwrap();
+        drop(_span1);
 
-    let _span2 = trace_span!("load_packets_core").entered();
-    let mut cnt = 0;
-    for (_, packet) in input
-        .packets()
-        .filter(|(stream, _)| stream.index() == video_stream_index)
-    {
-        // `RwLockWriteGuard` is intentionally holden all the way during
-        // reading *each* frame to avoid busy loop within `read_single_frame_base64`
-        // and `build_green2`.
-        let mut video_data = video_data.write().unwrap();
-        let video_cache = video_data
-            .video_cache
-            .as_mut()
-            .ok_or_else(|| anyhow!("video has not been loaded"))?;
-        if video_cache.target_changed(&path) {
-            // Video path has been changed, which means user changed the path before
-            // previous loading finishes. So we should abort current loading at once.
-            // Other threads should be waiting for the lock to read from the latest path
-            // at this point.
-            bail!("video path has been changed before finishing loading green2");
+        let _span2 = trace_span!("load_packets_core").entered();
+        let mut cnt = 0;
+        for (_, packet) in input
+            .packets()
+            .filter(|(stream, _)| stream.index() == video_stream_index)
+        {
+            // `RwLockWriteGuard` is intentionally holden all the way during
+            // reading *each* frame to avoid busy loop within `read_single_frame_base64`
+            // and `build_green2`.
+            let mut video_data = self.video_data.write().unwrap();
+            let video_cache = video_data
+                .video_cache
+                .as_mut()
+                .ok_or_else(|| anyhow!("video has not been loaded"))?;
+            if video_cache.target_changed(&fingerprint) {
+                // Video path has been changed, which means user changed the path before
+                // previous loading finishes. So we should abort current loading at once.
+                // Other threads should be waiting for the lock to read from the latest path
+                // at this point.
+                bail!("video path has been changed before finishing loading green2");
+            }
+            video_cache.packets.push(packet);
+            cnt += 1;
         }
-        video_cache.packets.push(packet);
-        cnt += 1;
+
+        debug_assert!(cnt == nframes);
+        debug!(nframes);
+
+        Ok(())
     }
 
-    debug_assert!(cnt == nframes);
-    debug!(nframes);
-
-    Ok(())
-}
-
-#[instrument(skip(video_data))]
-fn build_green2(
-    video_data: Arc<RwLock<VideoData>>,
-    progress_bar: ProgressBar,
-    green2_param: Green2Param,
-) -> Result<Array2<u8>> {
-    let Green2Param {
-        path,
-        start_frame,
-        cal_num,
-        area,
-    } = green2_param;
-
-    let video_data = {
-        let _span1 = trace_span!("spin_wait_for_loading_packets").entered();
-        // Wait until all packets have been loaded.
+    #[instrument(level = "trace", skip(self))]
+    fn read_single_frame_base64(&self, frame_index: usize) -> Result<String> {
         loop {
-            let video_data = video_data.read().unwrap();
+            let video_data = self.video_data.read().unwrap();
             let video_cache = video_data
                 .video_cache
                 .as_ref()
-                .ok_or_else(|| anyhow!("video has not been loaded"))?;
-            if video_cache.target_changed(&path) {
-                bail!("video path has been changed before starting building green2");
+                .ok_or_else(|| anyhow!("uninitialized"))?;
+
+            let nframes = video_cache.video_metadata.nframes;
+            if frame_index >= nframes {
+                // This is an invalid `frame_index` from frontend and will never get the frame.
+                // So directly abort it.
+                bail!("frame_index({}) out of range({})", frame_index, nframes);
             }
-            if video_cache.finished() {
-                break video_data;
+
+            if let Some(packet) = video_cache.packets.get(frame_index) {
+                let _span = trace_span!("decode_single_frame").entered();
+
+                let mut decoder = video_cache.decoder_manager.get()?;
+                let (h, w) = video_cache.video_metadata.shape;
+                let mut buf = Vec::new();
+                let mut jpeg_encoder = JpegEncoder::new_with_quality(&mut buf, 100);
+                jpeg_encoder.encode(decoder.decode(packet)?.data(0), w as u32, h as u32, Rgb8)?;
+
+                break Ok(base64::encode(buf));
             }
         }
-    };
-
-    let video_cache = video_data.video_cache.as_ref().unwrap();
-    progress_bar.start(cal_num as u32);
-
-    let byte_w = video_cache.video_metadata.shape.1 as usize * 3;
-    let (tl_y, tl_x, cal_h, cal_w) = area;
-    let (tl_y, tl_x, cal_h, cal_w) = (tl_y as usize, tl_x as usize, cal_h as usize, cal_w as usize);
-    let mut green2 = Array2::zeros((cal_num, cal_h * cal_w));
-
-    let _span2 = trace_span!("decode_in_parallel").entered();
-    video_cache
-        .packets
-        .par_iter()
-        .skip(start_frame)
-        .zip(green2.axis_iter_mut(Axis(0)).into_iter())
-        .try_for_each(|(packet, mut row)| -> Result<()> {
-            let mut decoder = video_cache.decoder_manager.get()?;
-            let dst_frame = decoder.decode(packet)?;
-
-            // each frame is stored in a u8 array:
-            // |r g b r g b...r g b|r g b r g b...r g b|......|r g b r g b...r g b|
-            // |.......row_0.......|.......row_1.......|......|.......row_n.......|
-            let rgb = dst_frame.data(0);
-            let mut row_iter = row.iter_mut();
-
-            for i in (0..).step_by(byte_w).skip(tl_y).take(cal_h) {
-                for j in (i..).skip(1).step_by(3).skip(tl_x).take(cal_w) {
-                    // Bounds check can be removed by optimization so no need to use unsafe.
-                    // Same performance as `unwrap_unchecked` + `get_unchecked`.
-                    if let Some(b) = row_iter.next() {
-                        *b = rgb[j];
-                    }
-                }
-            }
-
-            progress_bar.add(1)?;
-
-            Ok(())
-        })?;
-
-    debug_assert_matches!(
-        progress_bar.get(),
-        Progress::Finished { total } if total == cal_num as u32,
-    );
-
-    Ok(green2)
+    }
 }
 
 #[cfg(test)]
@@ -410,7 +464,7 @@ mod tests {
     #[tokio::test]
     async fn test_load_packets() {
         log::init();
-        let video_data_manager = VideoManager::new();
+        let video_data_manager = VideoManager::default();
         let video_metadata = video_data_manager
             .spawn_load_packets("/home/yhj/Documents/2021yhj/EXP/imp/videos/imp_50000_1_up.avi")
             .await
@@ -422,7 +476,7 @@ mod tests {
     #[tokio::test]
     async fn test_read_single_frame_pending_until_available() {
         log::init();
-        let video_data_manager = VideoManager::new();
+        let video_data_manager = VideoManager::default();
         let video_metadata = video_data_manager
             .spawn_load_packets("/home/yhj/Documents/2021yhj/EXP/imp/videos/imp_50000_1_up.avi")
             .await
@@ -452,28 +506,34 @@ mod tests {
     #[tokio::test]
     async fn test_build_green2() {
         log::init();
-        let video_data_manager = VideoManager::new();
+        let video_data_manager = VideoManager::default();
         let video_path =
             PathBuf::from("/home/yhj/Documents/2021yhj/EXP/imp/videos/imp_50000_1_up.avi");
         video_data_manager
             .spawn_load_packets(video_path.clone())
             .await
             .unwrap();
-        video_data_manager.spawn_build_green2(Green2Param {
-            path: video_path,
-            start_frame: 0,
-            cal_num: 2000,
-            area: (0, 0, 1000, 800),
-        });
+        video_data_manager
+            .spawn_build_green2(Green2Metadata {
+                start_frame: 0,
+                cal_num: 2000,
+                area: (0, 0, 1000, 800),
+                video_fingerprint: todo!(),
+            })
+            .await
+            .unwrap();
 
         loop {
-            let progress = video_data_manager.get_build_progress();
+            let progress = video_data_manager.build_progress();
             if matches!(progress, Progress::Finished { .. }) {
                 break;
             }
             std::thread::sleep(std::time::Duration::from_millis(1));
         }
 
-        println!("{:?}", video_data_manager.video_data.read().unwrap().green2);
+        println!(
+            "{:?}",
+            video_data_manager.inner.video_data.read().unwrap().green2
+        );
     }
 }

@@ -111,7 +111,7 @@ pub fn set_thermocouples() -> TlcResult<()> {
 
 #[tauri::command]
 pub async fn build_green2(state: State<'_>) -> TlcResult<()> {
-    state.spawn_build_green2().to()
+    state.spawn_build_green2().await.to()
 }
 
 #[tauri::command]

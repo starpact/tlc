@@ -42,8 +42,8 @@ impl DaqManager {
             .ok_or_else(|| anyhow!("invalid daq path: {:?}", daq_path))?
             .to_str()
         {
-            Some("lvm") => read_daq_lvm(&daq_path),
-            Some("xlsx") => read_daq_excel(&daq_path),
+            Some("lvm") => read_daq_lvm(daq_path),
+            Some("xlsx") => read_daq_excel(daq_path),
             _ => bail!("only .lvm and .xlsx are supported"),
         }?;
 
