@@ -220,7 +220,12 @@ fn solve_core<S: SolveSinglePoint>(_solver: S) {
 #[cfg(test)]
 mod tests {
     extern crate test;
-    use crate::daq::DaqManager;
+    use std::{
+        path::Path,
+        sync::{Arc, Mutex},
+    };
+
+    use crate::{daq::DaqManager, setting::SettingStorageSqlite};
 
     use super::*;
     use approx::assert_relative_eq;
@@ -286,9 +291,13 @@ mod tests {
 
     fn new_temps() -> Array1<f64> {
         async_runtime::block_on(async {
-            let mut daq_manager = DaqManager::default();
+            let mut daq_manager =
+                DaqManager::new(Arc::new(Mutex::new(SettingStorageSqlite::new())));
             daq_manager
-                .read_daq("/home/yhj/Documents/2021yhj/EXP/imp/daq/imp_20000_1.lvm")
+                .read_daq(
+                    Path::new("/home/yhj/Documents/2021yhj/EXP/imp/daq/imp_20000_1.lvm").to_owned(),
+                )
+                .await
                 .unwrap();
             daq_manager.daq_data().unwrap().column(3).to_owned()
         })

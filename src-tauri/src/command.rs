@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::PathBuf;
 
 use anyhow::Result;
 use ndarray::ArcArray2;
@@ -6,14 +6,13 @@ use serde::Serialize;
 
 use crate::{
     daq::DaqMetadata,
-    setting::StartIndex,
+    setting::{SettingStorageSqlite, StartIndex},
     solve::IterationMethod,
     state::GlobalState,
-    util::progress_bar::Progress,
-    video::{FilterMethod, VideoMetadata},
+    video::{FilterMethod, Progress, VideoMetadata},
 };
 
-type State<'a> = tauri::State<'a, GlobalState>;
+type State<'a> = tauri::State<'a, GlobalState<SettingStorageSqlite>>;
 
 type TlcResult<T> = Result<T, String>;
 
@@ -43,8 +42,8 @@ pub async fn get_video_metadata(state: State<'_>) -> TlcResult<VideoMetadata> {
 }
 
 #[tauri::command]
-pub async fn set_video_path(video_path: &Path, state: State<'_>) -> TlcResult<()> {
-    state.set_video_path(&video_path).await.to()
+pub async fn set_video_path(video_path: PathBuf, state: State<'_>) -> TlcResult<()> {
+    state.set_video_path(video_path).await.to()
 }
 
 #[tauri::command]
@@ -53,7 +52,7 @@ pub async fn get_daq_metadata(state: State<'_>) -> TlcResult<DaqMetadata> {
 }
 
 #[tauri::command]
-pub async fn set_daq_path(daq_path: String, state: State<'_>) -> TlcResult<()> {
+pub async fn set_daq_path(daq_path: PathBuf, state: State<'_>) -> TlcResult<()> {
     state.set_daq_path(daq_path).await.to()
 }
 
@@ -120,6 +119,11 @@ pub async fn get_build_green2_progress(state: State<'_>) -> TlcResult<Progress> 
 }
 
 #[tauri::command]
+pub async fn filter_method(state: State<'_>) -> TlcResult<FilterMethod> {
+    state.filter_method().await.to()
+}
+
+#[tauri::command]
 pub async fn set_filter_method(filter_method: FilterMethod, state: State<'_>) -> TlcResult<()> {
     state.set_filter_method(filter_method).await.to()
 }
@@ -130,8 +134,8 @@ pub async fn filter_single_point(position: (usize, usize), state: State<'_>) -> 
 }
 
 #[tauri::command]
-pub async fn filter(state: State<'_>) -> TlcResult<()> {
-    state.filter().await.to()
+pub async fn filter_green2(state: State<'_>) -> TlcResult<()> {
+    state.spawn_filter_green2().await.to()
 }
 
 #[tauri::command]

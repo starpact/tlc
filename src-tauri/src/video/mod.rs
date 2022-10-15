@@ -1,15 +1,20 @@
 mod decode;
 mod filter;
-mod spawn_handle;
+mod pool;
+mod progress_bar;
 
 use std::{
     assert_matches::debug_assert_matches,
-    path::{Path, PathBuf},
-    sync::{Arc, RwLock},
+    path::PathBuf,
+    sync::{Arc, Mutex, RwLock},
+    time::Duration,
 };
 
 use anyhow::{anyhow, bail, Result};
-use ffmpeg::{codec, codec::packet::Packet};
+use ffmpeg::{
+    codec,
+    codec::{packet::Packet, Parameters},
+};
 use ffmpeg_next as ffmpeg;
 use image::{codecs::jpeg::JpegEncoder, ColorType::Rgb8};
 use ndarray::{ArcArray2, Array2, Axis};
@@ -19,20 +24,31 @@ use tauri::async_runtime::spawn_blocking;
 use tokio::sync::oneshot;
 use tracing::{debug, error, instrument, trace_span};
 
-use crate::util::progress_bar::{Progress, ProgressBar};
+use crate::setting::SettingStorage;
 use decode::DecoderManager;
-pub use filter::FilterMethod;
+pub use filter::{FilterMetadata, FilterMethod};
+use pool::SpawnHandle;
+pub use progress_bar::Progress;
+use progress_bar::ProgressBar;
 
-use self::spawn_handle::SpawnHandle;
-
-#[derive(Clone, Default)]
-pub struct VideoManager {
-    inner: Arc<VideoManagerInner>,
+pub struct VideoManager<S: SettingStorage> {
+    inner: Arc<VideoManagerInner<S>>,
 }
 
-#[derive(Default)]
-struct VideoManagerInner {
-    /// Video data including raw packets, `green2` matrix and `filtered_green2` matrix.
+impl<S: SettingStorage> Clone for VideoManager<S> {
+    fn clone(&self) -> Self {
+        VideoManager {
+            inner: self.inner.clone(),
+        }
+    }
+}
+
+struct VideoManagerInner<S: SettingStorage> {
+    /// The db connection is needed in order to keep the in-memory data in sync with db.
+    /// Generally db write operation happens when video_data lock is holden.
+    setting_storage: Arc<Mutex<S>>,
+
+    /// Video data including raw packets, decoder cache, `green2` and `filtered_green2` matrix.
     video_data: RwLock<VideoData>,
 
     /// Progree bar for building green2.
@@ -49,8 +65,22 @@ struct VideoManagerInner {
 /// video_cache -> green2 -> filtered_green2.
 #[derive(Default)]
 struct VideoData {
-    /// Raw video data.
-    video_cache: Option<VideoCache>,
+    /// > [For video, one packet should typically contain one compressed frame](
+    /// https://libav.org/documentation/doxygen/master/structAVPacket.html).
+    ///
+    /// There are two key points:
+    /// 1. Will *one* packet contain more than *one* frame? As videos used
+    /// in TLC experiments are lossless and have high-resolution, we can assert
+    /// that one packet only contains one frame, which make multi-threaded
+    /// decoding [much easier](https://www.cnblogs.com/TaigaCon/p/10220356.html).
+    /// 2. Why not cache the frame data, which should be more straight forward?
+    /// This is because packet is *compressed*. Specifically, a typical video
+    /// in our experiments of 1.9GB will expend to 9.1GB if decoded to rgb byte
+    /// array, which may cause some trouble on PC.
+    packets: Vec<Packet>,
+
+    /// Manage thread-local decoders.
+    decoder_manager: DecoderManager,
 
     /// Green value 2d matrix(cal_num, pix_num).
     green2: Option<ArcArray2<u8>>,
@@ -70,7 +100,7 @@ pub struct VideoMetadata {
     pub fingerprint: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Green2Metadata {
     pub start_frame: usize,
     pub cal_num: usize,
@@ -78,37 +108,114 @@ pub struct Green2Metadata {
     pub video_fingerprint: String,
 }
 
-impl VideoManager {
+impl<S: SettingStorage> VideoManager<S> {
+    pub fn new(setting_storage: Arc<Mutex<S>>) -> Self {
+        Self {
+            inner: Arc::new(VideoManagerInner {
+                setting_storage,
+                video_data: Default::default(),
+                build_progress_bar: Default::default(),
+                filter_progress_bar: Default::default(),
+                spawn_handle: Default::default(),
+            }),
+        }
+    }
+
     /// Spawn a thread to load all video packets into memory.
-    pub async fn spawn_load_packets<P: AsRef<Path>>(&self, video_path: P) -> Result<VideoMetadata> {
+    #[instrument(skip(self), fields(video_path))]
+    pub async fn spawn_load_packets(&self, video_path: PathBuf) -> Result<()> {
         let video_manager = self.clone();
-        let path = video_path.as_ref().to_owned();
         let (tx, rx) = oneshot::channel();
-        let join_handle = spawn_blocking(move || {
+
+        let f = move || {
             let video_manager = video_manager.inner;
-            video_manager.load_packets(path.clone(), tx).map_err(|e| {
-                // Error after send can not be returned, so log here.
-                // `video_cache` is set to `None` to tell all waiters that `load_packets` failed
-                // so should stop waiting.
-                error!("Failed to load video from {:?}: {}", path, e);
-                e
-            })
+            // Stop current building and filtering process.
+            video_manager.build_progress_bar.reset();
+            video_manager.filter_progress_bar.reset();
+
+            let _span1 = trace_span!("read_video_metadata").entered();
+            let mut input = ffmpeg::format::input(&video_path)?;
+            let video_stream = input
+                .streams()
+                .best(ffmpeg::media::Type::Video)
+                .ok_or_else(|| anyhow!("video stream not found"))?;
+            let video_stream_index = video_stream.index();
+            let parameters = video_stream.parameters();
+            let codec_ctx = codec::Context::from_parameters(parameters.clone())?;
+            let rational = video_stream.avg_frame_rate();
+            let frame_rate = (rational.0 as f64 / rational.1 as f64).round() as usize;
+            let nframes = video_stream.frames() as usize;
+            let decoder = codec_ctx.decoder().video()?;
+            let fingerprint = "TODO".to_owned();
+
+            let video_metadata = VideoMetadata {
+                path: video_path,
+                frame_rate,
+                nframes,
+                shape: (decoder.height() as usize, decoder.width() as usize),
+                fingerprint: fingerprint.clone(),
+            };
+
+            // Update db and video data.
+            {
+                let mut video_data = video_manager.video_data.write().unwrap();
+                video_manager
+                    .setting_storage
+                    .lock()
+                    .unwrap()
+                    .set_video_metadata(video_metadata)?;
+                // Even if video has not changed, we will still reset all video data.
+                video_data.reset(parameters);
+            }
+
+            // The outer `spawn_load_packets` will return after this.
+            tx.send(()).unwrap();
+            drop(_span1);
+
+            let _span2 = trace_span!("load_packets").entered();
+            let mut cnt = 0;
+            for (_, packet) in input
+                .packets()
+                .filter(|(stream, _)| stream.index() == video_stream_index)
+            {
+                let mut video_data = video_manager.video_data.write().unwrap();
+                if fingerprint
+                    != video_manager
+                        .setting_storage
+                        .lock()
+                        .unwrap()
+                        .video_metadata()?
+                        .fingerprint
+                {
+                    // Video has been changed, which means user changed the video before previous
+                    // loading finishes. So we should abort current loading at once. Other threads
+                    // should be waiting for the lock to read from the latest path at this point.
+                    bail!("video has been changed before finishing loading packets");
+                }
+                video_data.packets.push(packet);
+                cnt += 1;
+            }
+
+            debug_assert!(cnt == nframes);
+            debug!(nframes);
+
+            Ok(())
+        };
+
+        let join_handle = spawn_blocking(|| {
+            if let Err(e) = f() {
+                error!("Failed to load packets: {e}");
+            }
         });
 
         match rx.await {
-            Ok(video_metadata) => Ok(video_metadata),
-            // `RecvError` only means sender has been dropped which means error occurred before
-            // send, so it is ignored. Task should have already failed so we can get the error
-            // from the `join_handle` immediately.
-            Err(_) => Err(join_handle
-                .await?
-                .map_err(|e| anyhow!("failed to load video from {:?}: {}", video_path.as_ref(), e))
-                .unwrap_err()),
+            Ok(()) => Ok(()),
+            Err(_) => Err(join_handle.await.unwrap_err().into()),
         }
     }
 
     pub async fn read_single_frame_base64(&self, frame_index: usize) -> Result<String> {
-        let spawner = self.inner.spawn_handle.get_spwaner(frame_index).await?;
+        let spawner = self.inner.spawn_handle.spawner(frame_index).await?;
         let video_manager = self.clone();
         let (tx, rx) = oneshot::channel();
         spawner.spawn(move || {
@@ -119,106 +226,134 @@ impl VideoManager {
         rx.await?
     }
 
-    pub async fn spawn_build_green2(&self, green2_metadata: Green2Metadata) -> Result<()> {
+    pub async fn spawn_build_green2(&self) -> Result<()> {
         let video_manager = self.clone();
         let (tx, rx) = oneshot::channel();
 
-        // Interrupt if needed the current build process and init the progress bar.
-        video_manager
-            .inner
-            .build_progress_bar
-            .start(green2_metadata.cal_num as u32);
-
-        rayon::spawn(move || {
+        let f = move || {
             let video_manager = video_manager.inner;
-            let mut video_data = {
-                let _span1 = trace_span!("spin_wait_for_loading_packets").entered();
-                // Wait until all packets have been loaded.
-                loop {
-                    let video_data = video_manager.video_data.write().unwrap();
-                    let Some(video_cache) = video_data.video_cache.as_ref() else {
-                        tx.send(Err(anyhow!("video not loaded yet"))).unwrap();
-                        return;
-                    };
-                    if video_cache.target_changed(&green2_metadata.video_fingerprint) {
-                        tx.send(Err(anyhow!(
-                            "video has been changed before start building green2, so aborted"
-                        )))
-                        .unwrap();
-                        return;
-                    }
-                    if video_cache.finished() {
-                        break video_data;
-                    }
+
+            let (green2_metadata, green2) = {
+                let video_data = video_manager.video_data.read().unwrap();
+
+                let setting_storage = video_manager.setting_storage.lock().unwrap();
+                let video_metadata = setting_storage.video_metadata()?;
+                let green2_metadata = setting_storage.green2_metadata()?;
+                drop(setting_storage);
+
+                if video_data.packets.len() < video_metadata.nframes {
+                    bail!("video not loaded yet");
                 }
+                // Tell outside that building actually started.
+                tx.send(()).unwrap();
+
+                let green2 = video_data.build_green2(
+                    &video_metadata,
+                    &green2_metadata,
+                    &video_manager.build_progress_bar,
+                )?;
+
+                (green2_metadata, green2)
             };
 
-            // Tell outside that building actually started.
-            tx.send(Ok(())).unwrap();
-
-            match video_data
-                .video_cache
-                .as_ref()
-                .unwrap() // cannot be none according to previous logic
-                .build_green2(&green2_metadata, &video_manager.build_progress_bar)
+            // Acquire write lock.
+            let mut video_data = video_manager.video_data.write().unwrap();
+            // Check metadata before write.
+            if video_manager
+                .setting_storage
+                .lock()
+                .unwrap()
+                .green2_metadata()?
+                != green2_metadata
             {
-                Ok(green2) => video_data.green2 = Some(green2.into_shared()),
-                Err(e) => {
-                    video_manager.build_progress_bar.reset();
-                    error!("Failed to build green2: {}", e);
-                }
+                bail!("setting has been changed while building green2");
+            }
+            video_data.green2 = Some(green2.into_shared());
+
+            Ok(())
+        };
+
+        // `rayon::spawn` will block here when there is already a parallel computation, so use
+        // `spawn_blocking` instead.
+        let join_handle = spawn_blocking(|| {
+            if let Err(e) = f() {
+                error!("Failed to build green2: {e}");
             }
         });
 
-        rx.await?
+        match rx.await {
+            Ok(()) => Ok(()),
+            Err(_) => Err(join_handle.await.unwrap_err().into()),
+        }
     }
 
-    pub async fn spawn_filter_green2(&self, filter_method: FilterMethod) -> Result<()> {
+    pub async fn spawn_filter_green2(&self) -> Result<()> {
         let video_manager = self.clone();
         let (tx, rx) = oneshot::channel();
-        rayon::spawn(move || {
-            let video_manager = video_manager.inner;
-            // Hold the read lock.
-            let video_data = video_manager.video_data.read().unwrap();
-            if let Some(green2) = video_data.green2.as_ref() {
-                // Tell outside that filtering actually started.
-                tx.send(Ok(())).unwrap();
 
-                match filter::filter_all(
-                    green2.clone(),
-                    filter_method,
+        let f = move || -> Result<()> {
+            let video_manager = video_manager.inner;
+
+            let (filter_metadata, filtered_green2) = {
+                let video_data = video_manager.video_data.read().unwrap();
+                let green2 = video_data
+                    .green2
+                    .clone()
+                    .ok_or_else(|| anyhow!("green2 not built yet"))?;
+                let filter_metadata = video_manager
+                    .setting_storage
+                    .lock()
+                    .unwrap()
+                    .filter_metadata()?;
+                // Tell outside that filtering actually started.
+                tx.send(()).unwrap();
+                let filtered_green2 = filter::filter_all(
+                    green2,
+                    filter_metadata.filter_method,
                     &video_manager.filter_progress_bar,
-                ) {
-                    Ok(filtered_green2) => {
-                        video_manager.video_data.write().unwrap().filtered_green2 =
-                            Some(filtered_green2);
-                    }
-                    Err(e) => {
-                        video_manager.filter_progress_bar.reset();
-                        error!("Failed to filter green2: {}", e);
-                    }
-                }
+                )?;
+
+                (filter_metadata, filtered_green2)
+            };
+
+            let mut video_data = video_manager.video_data.write().unwrap();
+            if video_manager
+                .setting_storage
+                .lock()
+                .unwrap()
+                .filter_metadata()?
+                != filter_metadata
+            {
+                bail!("setting has been changed while filtering green2");
             }
-            // tx dropped without any send. rx.await will be `RecvError`.
+            video_data.filtered_green2 = Some(filtered_green2);
+
+            Ok(())
+        };
+
+        let join_handle = spawn_blocking(|| {
+            if let Err(e) = f() {
+                error!("Failed to filter green2: {e}");
+            }
         });
 
-        rx.await.map_err(|_| anyhow!("green2 not built yet"))?
+        match rx.await {
+            Ok(()) => Ok(()),
+            Err(_) => Err(join_handle.await.unwrap_err().into()),
+        }
     }
 
-    pub async fn filter_single_point(
-        &self,
-        filter_method: FilterMethod,
-        (y, x): (usize, usize),
-    ) -> Result<Vec<u8>> {
+    pub async fn filter_single_point(&self, (y, x): (usize, usize)) -> Result<Vec<u8>> {
         let video_manager = self.clone();
         spawn_blocking(move || {
             // Hold the read lock.
-            let video_data = video_manager.inner.video_data.read().unwrap();
-            let (h, w) = video_data
-                .video_cache
-                .as_ref()
-                .ok_or_else(|| anyhow!("video not loaded yet"))?
-                .video_metadata
+            let video_manager = video_manager.inner;
+            let video_data = video_manager.video_data.read().unwrap();
+            let (h, w) = video_manager
+                .setting_storage
+                .lock()
+                .unwrap()
+                .video_metadata()?
                 .shape;
             if y >= h {
                 bail!("y({y}) out of range({h})");
@@ -232,6 +367,12 @@ impl VideoManager {
                 .as_ref()
                 .ok_or_else(|| anyhow!("green2 not built yet"))?
                 .row(position);
+            let filter_method = video_manager
+                .setting_storage
+                .lock()
+                .unwrap()
+                .filter_metadata()?
+                .filter_method;
 
             Ok(filter::filter_single_point(filter_method, green1))
         })
@@ -259,76 +400,72 @@ impl VideoManager {
     }
 }
 
+impl<S: SettingStorage> VideoManagerInner<S> {
+    #[instrument(level = "trace", skip(self))]
+    fn read_single_frame_base64(&self, frame_index: usize) -> Result<String> {
+        loop {
+            let video_data = self.video_data.read().unwrap();
+
+            let VideoMetadata {
+                nframes,
+                shape: (h, w),
+                ..
+            } = self.setting_storage.lock().unwrap().video_metadata()?;
+            if frame_index >= nframes {
+                // This is an invalid `frame_index` from frontend and will never get the frame.
+                // So directly abort it.
+                bail!("frame_index({}) out of range({})", frame_index, nframes);
+            }
+
+            if let Some(packet) = video_data.packets.get(frame_index) {
+                let _span = trace_span!("decode_single_frame").entered();
+
+                let mut decoder = video_data.decoder_manager.decoder()?;
+                let mut buf = Vec::new();
+                let mut jpeg_encoder = JpegEncoder::new_with_quality(&mut buf, 100);
+                jpeg_encoder.encode(decoder.decode(packet)?.data(0), w as u32, h as u32, Rgb8)?;
+
+                break Ok(base64::encode(buf));
+            }
+
+            if self.spawn_handle.last_target_frame_index() != frame_index {
+                bail!("aborted, to give priority to newer target frame index");
+            }
+
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+}
+
 impl VideoData {
-    fn new(video_metadata: VideoMetadata, parameters: codec::Parameters) -> Self {
-        Self {
-            video_cache: Some(VideoCache::new(video_metadata, parameters)),
-            green2: None,
-            filtered_green2: None,
-        }
-    }
-}
-
-struct VideoCache {
-    /// As identifier with some basic information of current cached video.
-    video_metadata: VideoMetadata,
-
-    /// Manage thread-local decoders.
-    decoder_manager: DecoderManager,
-
-    /// > [For video, one packet should typically contain one compressed frame](
-    /// https://libav.org/documentation/doxygen/master/structAVPacket.html).
-    ///
-    /// There are two key points:
-    /// 1. Will *one* packet contain more than *one* frame? As videos used
-    /// in TLC experiments are lossless and have high-resolution, we can assert
-    /// that one packet only contains one frame, which make multi-threaded
-    /// decoding [much easier](https://www.cnblogs.com/TaigaCon/p/10220356.html).
-    /// 2. Why not cache the frame data, which should be more straight forward?
-    /// This is because packet is *compressed*. Specifically, a typical video
-    /// in our experiments of 1.9GB will expend to 9.1GB if decoded to rgb byte
-    /// array, which may cause some trouble on PC.
-    packets: Vec<Packet>,
-}
-
-impl VideoCache {
-    fn new(video_metadata: VideoMetadata, parameters: codec::Parameters) -> Self {
-        Self {
-            video_metadata,
-            decoder_manager: DecoderManager::new(parameters),
-            packets: Vec::new(),
-        }
-    }
-
-    fn target_changed(&self, fingerprint: &str) -> bool {
-        self.video_metadata.fingerprint != fingerprint
-    }
-
-    fn finished(&self) -> bool {
-        self.video_metadata.nframes == self.packets.len()
+    fn reset(&mut self, parameters: Parameters) {
+        self.packets.clear();
+        self.decoder_manager.reset(parameters);
+        self.green2 = None;
+        self.filtered_green2 = None;
     }
 
     #[instrument(skip(self))]
     fn build_green2(
         &self,
+        video_metadata: &VideoMetadata,
         green2_metadata: &Green2Metadata,
         progress_bar: &ProgressBar,
     ) -> Result<Array2<u8>> {
         let cal_num = green2_metadata.cal_num;
-
-        let byte_w = self.video_metadata.shape.1 as usize * 3;
+        let byte_w = video_metadata.shape.1 * 3;
         let (tl_y, tl_x, cal_h, cal_w) = green2_metadata.area;
-        let (tl_y, tl_x, cal_h, cal_w) =
-            (tl_y as usize, tl_x as usize, cal_h as usize, cal_w as usize);
-        let mut green2 = Array2::zeros((cal_num, cal_h * cal_w));
+
+        let _reset_guard = progress_bar.start(cal_num as u32);
 
         let _span2 = trace_span!("decode_in_parallel").entered();
+        let mut green2 = Array2::zeros((cal_num, cal_h * cal_w));
         self.packets
             .par_iter()
             .skip(green2_metadata.start_frame)
             .zip(green2.axis_iter_mut(Axis(0)).into_iter())
             .try_for_each(|(packet, mut row)| -> Result<()> {
-                let mut decoder = self.decoder_manager.get()?;
+                let mut decoder = self.decoder_manager.decoder()?;
                 let dst_frame = decoder.decode(packet)?;
 
                 // each frame is stored in a u8 array:
@@ -361,130 +498,59 @@ impl VideoCache {
     }
 }
 
-impl VideoManagerInner {
-    #[instrument(skip(self, tx))]
-    fn load_packets(&self, path: PathBuf, tx: oneshot::Sender<VideoMetadata>) -> Result<()> {
-        let _span1 = trace_span!("load_metadata").entered();
-        let mut input = ffmpeg::format::input(&path)?;
-        let video_stream = input
-            .streams()
-            .best(ffmpeg::media::Type::Video)
-            .ok_or_else(|| anyhow!("video stream not found"))?;
-
-        let video_stream_index = video_stream.index();
-        let parameters = video_stream.parameters();
-        let codec_ctx = codec::Context::from_parameters(parameters.clone())?;
-        let rational = video_stream.avg_frame_rate();
-        let frame_rate = (rational.0 as f64 / rational.1 as f64).round() as usize;
-        let nframes = video_stream.frames() as usize;
-        let decoder = codec_ctx.decoder().video()?;
-
-        let fingerprint = "TODO".to_owned();
-        let video_metadata = VideoMetadata {
-            path,
-            frame_rate,
-            nframes,
-            shape: (decoder.height() as usize, decoder.width() as usize),
-            fingerprint: fingerprint.clone(),
-        };
-
-        *self.video_data.write().unwrap() = VideoData::new(video_metadata.clone(), parameters);
-
-        // Caller `spawn_load_packets` can return after this point.
-        tx.send(video_metadata).unwrap();
-        drop(_span1);
-
-        let _span2 = trace_span!("load_packets_core").entered();
-        let mut cnt = 0;
-        for (_, packet) in input
-            .packets()
-            .filter(|(stream, _)| stream.index() == video_stream_index)
-        {
-            // `RwLockWriteGuard` is intentionally holden all the way during
-            // reading *each* frame to avoid busy loop within `read_single_frame_base64`
-            // and `build_green2`.
-            let mut video_data = self.video_data.write().unwrap();
-            let video_cache = video_data
-                .video_cache
-                .as_mut()
-                .ok_or_else(|| anyhow!("video has not been loaded"))?;
-            if video_cache.target_changed(&fingerprint) {
-                // Video path has been changed, which means user changed the path before
-                // previous loading finishes. So we should abort current loading at once.
-                // Other threads should be waiting for the lock to read from the latest path
-                // at this point.
-                bail!("video path has been changed before finishing loading green2");
-            }
-            video_cache.packets.push(packet);
-            cnt += 1;
-        }
-
-        debug_assert!(cnt == nframes);
-        debug!(nframes);
-
-        Ok(())
-    }
-
-    #[instrument(level = "trace", skip(self))]
-    fn read_single_frame_base64(&self, frame_index: usize) -> Result<String> {
-        loop {
-            let video_data = self.video_data.read().unwrap();
-            let video_cache = video_data
-                .video_cache
-                .as_ref()
-                .ok_or_else(|| anyhow!("uninitialized"))?;
-
-            let nframes = video_cache.video_metadata.nframes;
-            if frame_index >= nframes {
-                // This is an invalid `frame_index` from frontend and will never get the frame.
-                // So directly abort it.
-                bail!("frame_index({}) out of range({})", frame_index, nframes);
-            }
-
-            if let Some(packet) = video_cache.packets.get(frame_index) {
-                let _span = trace_span!("decode_single_frame").entered();
-
-                let mut decoder = video_cache.decoder_manager.get()?;
-                let (h, w) = video_cache.video_metadata.shape;
-                let mut buf = Vec::new();
-                let mut jpeg_encoder = JpegEncoder::new_with_quality(&mut buf, 100);
-                jpeg_encoder.encode(decoder.decode(packet)?.data(0), w as u32, h as u32, Rgb8)?;
-
-                break Ok(base64::encode(buf));
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use super::*;
-    use crate::util::log;
+    use crate::{setting::SettingStorageSqlite, util::log};
 
     #[tokio::test]
     async fn test_load_packets() {
         log::init();
-        let video_data_manager = VideoManager::default();
-        let video_metadata = video_data_manager
-            .spawn_load_packets("/home/yhj/Documents/2021yhj/EXP/imp/videos/imp_50000_1_up.avi")
+        let video_manager = VideoManager::new(Arc::new(Mutex::new(SettingStorageSqlite::new())));
+        video_manager
+            .spawn_load_packets(
+                Path::new("/home/yhj/Documents/2021yhj/EXP/imp/videos/imp_50000_1_up.avi")
+                    .to_owned(),
+            )
             .await
             .unwrap();
-        println!("{:#?}", video_metadata);
-        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+        println!(
+            "{:#?}",
+            video_manager
+                .inner
+                .setting_storage
+                .lock()
+                .unwrap()
+                .video_metadata()
+                .unwrap()
+        );
     }
 
     #[tokio::test]
     async fn test_read_single_frame_pending_until_available() {
         log::init();
-        let video_data_manager = VideoManager::default();
-        let video_metadata = video_data_manager
-            .spawn_load_packets("/home/yhj/Documents/2021yhj/EXP/imp/videos/imp_50000_1_up.avi")
+        let video_manager = VideoManager::new(Arc::new(Mutex::new(SettingStorageSqlite::new())));
+        video_manager
+            .spawn_load_packets(
+                Path::new("/home/yhj/Documents/2021yhj/EXP/imp/videos/imp_50000_1_up.avi")
+                    .to_owned(),
+            )
             .await
             .unwrap();
 
-        let last_frame_index = video_metadata.nframes - 1;
+        let nframes = video_manager
+            .inner
+            .setting_storage
+            .lock()
+            .unwrap()
+            .video_metadata()
+            .unwrap()
+            .nframes;
+        let last_frame_index = nframes - 1;
         println!("waiting for frame {}", last_frame_index);
-        let frame_str = video_data_manager
+        let frame_str = video_manager
             .read_single_frame_base64(last_frame_index)
             .await
             .unwrap();
@@ -493,10 +559,10 @@ mod tests {
         assert_eq!(
             format!(
                 "frame_index({nframes}) out of range({nframes})",
-                nframes = video_metadata.nframes
+                nframes = nframes
             ),
-            video_data_manager
-                .read_single_frame_base64(video_metadata.nframes)
+            video_manager
+                .read_single_frame_base64(nframes)
                 .await
                 .unwrap_err()
                 .to_string(),
@@ -506,25 +572,14 @@ mod tests {
     #[tokio::test]
     async fn test_build_green2() {
         log::init();
-        let video_data_manager = VideoManager::default();
+        let video_manager = VideoManager::new(Arc::new(Mutex::new(SettingStorageSqlite::new())));
         let video_path =
             PathBuf::from("/home/yhj/Documents/2021yhj/EXP/imp/videos/imp_50000_1_up.avi");
-        video_data_manager
-            .spawn_load_packets(video_path.clone())
-            .await
-            .unwrap();
-        video_data_manager
-            .spawn_build_green2(Green2Metadata {
-                start_frame: 0,
-                cal_num: 2000,
-                area: (0, 0, 1000, 800),
-                video_fingerprint: todo!(),
-            })
-            .await
-            .unwrap();
+        video_manager.spawn_load_packets(video_path).await.unwrap();
+        video_manager.spawn_build_green2().await.unwrap();
 
         loop {
-            let progress = video_data_manager.build_progress();
+            let progress = video_manager.build_progress();
             if matches!(progress, Progress::Finished { .. }) {
                 break;
             }
@@ -533,7 +588,7 @@ mod tests {
 
         println!(
             "{:?}",
-            video_data_manager.inner.video_data.read().unwrap().green2
+            video_manager.inner.video_data.read().unwrap().green2
         );
     }
 }

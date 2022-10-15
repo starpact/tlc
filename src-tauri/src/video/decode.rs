@@ -56,20 +56,19 @@ impl Decoder {
 /// avoid frequent initialization of decoder.
 /// It should be used with thread pool with a small number of threads
 /// so that all the thread-local decoders can be reused efficiently.
+#[derive(Default)]
 pub struct DecoderManager {
     parameters: Mutex<codec::Parameters>,
     decoders: ThreadLocal<RefCell<Decoder>>,
 }
 
 impl DecoderManager {
-    pub fn new(parameters: codec::Parameters) -> Self {
-        Self {
-            parameters: Mutex::new(parameters),
-            decoders: ThreadLocal::default(),
-        }
+    pub fn reset(&mut self, parameters: codec::Parameters) {
+        *self.parameters.lock().unwrap() = parameters;
+        self.decoders.clear();
     }
 
-    pub fn get(&self) -> Result<RefMut<Decoder>> {
+    pub fn decoder(&self) -> Result<RefMut<Decoder>> {
         let decoder = self.decoders.get_or_try(|| -> Result<RefCell<Decoder>> {
             let decoder = Decoder::new(self.parameters.lock().unwrap().clone())?;
             Ok(RefCell::new(decoder))

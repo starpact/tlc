@@ -90,7 +90,7 @@ fn interpolator1(
             let l_temps = l_temps.as_slice_memory_order().unwrap();
             let r_temps = r_temps.as_slice_memory_order().unwrap();
 
-            let pos = if do_extra { pos } else { pos.max(l).min(r) };
+            let pos = if do_extra { pos } else { pos.clamp(l, r) };
 
             let row = row.as_slice_memory_order_mut().unwrap();
             let mut frame = 0;
@@ -170,8 +170,8 @@ fn interpolator2(
             let t10 = t10.as_slice_memory_order().unwrap();
             let t11 = t11.as_slice_memory_order().unwrap();
 
-            let x = if do_extra { x } else { x.max(x0).min(x1) };
-            let y = if do_extra { y } else { y.max(y0).min(y1) };
+            let x = if do_extra { x } else { x.clamp(x0, x1) };
+            let y = if do_extra { y } else { y.clamp(y0, y1) };
 
             let row = row.as_slice_memory_order_mut().unwrap();
             let mut frame = 0;

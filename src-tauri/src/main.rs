@@ -19,6 +19,7 @@ mod util;
 mod video;
 
 use ffmpeg_next as ffmpeg;
+use setting::SettingStorageSqlite;
 use tracing::error;
 
 use command::*;
@@ -30,7 +31,7 @@ fn main() {
     ffmpeg::init().expect("Failed to init ffmpeg");
 
     tauri::Builder::default()
-        .manage(GlobalState::new())
+        .manage(GlobalState::new(SettingStorageSqlite::new()))
         .invoke_handler(tauri::generate_handler![
             //
             // First decide where to store the data.
@@ -77,11 +78,12 @@ fn main() {
             get_build_green2_progress,
             //
             // Filter.
+            filter_method,
             set_filter_method,
             // See the effect of different filter methods.
             filter_single_point,
             // Filter all.
-            filter,
+            filter_green2,
             get_filter_green2_progress,
             //
             // Interpolate.

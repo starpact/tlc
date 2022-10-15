@@ -5,14 +5,20 @@ use ndarray::{parallel::prelude::*, prelude::*, ArcArray2};
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
 
-use crate::util::progress_bar::ProgressBar;
+use super::progress_bar::ProgressBar;
 
-#[derive(Debug, Default, Deserialize, Serialize, Clone, Copy)]
+#[derive(Debug, Default, Deserialize, Serialize, Clone, Copy, PartialEq)]
 pub enum FilterMethod {
     #[default]
     No,
     Median(usize),
     Wavelet(f64),
+}
+
+#[derive(Debug, PartialEq)]
+pub struct FilterMetadata {
+    pub filter_method: FilterMethod,
+    pub video_fingerprint: String,
 }
 
 #[instrument(ret)]
