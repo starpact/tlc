@@ -6,6 +6,7 @@ use packed_simd::{f64x4, Simd};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize, Serialize, Clone, Copy)]
+#[cfg_attr(test, derive(Default))]
 pub struct PhysicalParam {
     pub peak_temperature: f64,
     pub solid_thermal_conductivity: f64,
@@ -221,11 +222,11 @@ fn solve_core<S: SolveSinglePoint>(_solver: S) {
 mod tests {
     extern crate test;
     use std::{
-        path::Path,
+        path::PathBuf,
         sync::{Arc, Mutex},
     };
 
-    use crate::{daq::DaqManager, setting::SettingStorageSqlite};
+    use crate::{daq::DaqManager, setting::SqliteSettingStorage};
 
     use super::*;
     use approx::assert_relative_eq;
@@ -291,12 +292,11 @@ mod tests {
 
     fn new_temps() -> Array1<f64> {
         async_runtime::block_on(async {
-            let mut daq_manager =
-                DaqManager::new(Arc::new(Mutex::new(SettingStorageSqlite::new())));
+            let daq_manager = DaqManager::new(Arc::new(Mutex::new(SqliteSettingStorage::new())));
             daq_manager
-                .read_daq(
-                    Path::new("/home/yhj/Documents/2021yhj/EXP/imp/daq/imp_20000_1.lvm").to_owned(),
-                )
+                .read_daq(Some(PathBuf::from(
+                    "/home/yhj/Documents/2021yhj/EXP/imp/daq/imp_20000_1.lvm",
+                )))
                 .await
                 .unwrap();
             daq_manager.daq_data().unwrap().column(3).to_owned()
@@ -306,6 +306,7 @@ mod tests {
     const I: (f64, f64, f64, f64, f64) = (100.0, 0.04, 0.19, 1.091e-7, 35.48);
 
     #[test]
+    #[ignore]
     fn test_result_correct() {
         let temps = new_temps();
         let point_data = PointData {
@@ -334,6 +335,7 @@ mod tests {
     // in this case.
 
     #[bench]
+    #[ignore]
     fn bench_simd(b: &mut Bencher) {
         let temps = new_temps();
         let point_data = PointData {
@@ -346,6 +348,7 @@ mod tests {
     }
 
     #[bench]
+    #[ignore]
     fn bench_iter_no_simd(b: &mut Bencher) {
         let temps = new_temps();
         let point_data = PointData {
@@ -358,6 +361,7 @@ mod tests {
     }
 
     #[bench]
+    #[ignore]
     fn bench_no_iter_no_simd(b: &mut Bencher) {
         let temps = new_temps();
         let point_data = PointData {

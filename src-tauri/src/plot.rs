@@ -27,7 +27,7 @@ pub fn draw_area<P: AsRef<Path>>(
                     pix_plotter.draw_pixel((x, y), &WHITE)?;
                     continue;
                 }
-                let color_index = ((nu.max(vmin).min(vmax) - vmin) / delta * 255.) as usize;
+                let color_index = ((nu.clamp(vmin, vmax) - vmin) / delta * 255.) as usize;
                 let [r, g, b] = jet[color_index];
                 pix_plotter.draw_pixel((x, y), &RGBColor(r as u8, g as u8, b as u8))?;
             }

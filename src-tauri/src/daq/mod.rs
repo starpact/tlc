@@ -18,12 +18,16 @@ use crate::setting::SettingStorage;
 
 #[derive(Clone)]
 pub struct DaqManager<S: SettingStorage> {
-    inner: Arc<Mutex<DaqManagerInner<S>>>,
+    inner: Arc<DaqManagerInner<S>>,
 }
 
 struct DaqManagerInner<S: SettingStorage> {
     setting_storage: Arc<Mutex<S>>,
-    daq_data: Option<ArcArray2<f64>>,
+    daq_data: Mutex<DaqData>,
+}
+
+struct DaqData {
+    raw: Option<ArcArray2<f64>>,
     temperature2: Option<Temperature2>,
 }
 
@@ -48,19 +52,33 @@ impl<S: SettingStorage> DaqManager<S> {
     pub fn new(setting_storage: Arc<Mutex<S>>) -> Self {
         let inner = DaqManagerInner {
             setting_storage,
-            daq_data: None,
-            temperature2: None,
+            daq_data: Mutex::new(DaqData {
+                raw: None,
+                temperature2: None,
+            }),
         };
 
         Self {
-            inner: Arc::new(Mutex::new(inner)),
+            inner: Arc::new(inner),
         }
     }
 
-    #[instrument(skip(self))]
-    pub async fn read_daq(&self, daq_path: PathBuf) -> Result<()> {
+    #[instrument(skip(self), err)]
+    pub async fn read_daq(&self, daq_path: Option<PathBuf>) -> Result<()> {
         let daq_manager = self.inner.clone();
         spawn_blocking(move || {
+            let daq_path = match daq_path {
+                Some(daq_path) => daq_path,
+                None => {
+                    daq_manager
+                        .setting_storage
+                        .lock()
+                        .unwrap()
+                        .daq_metadata()?
+                        .path
+                }
+            };
+
             let daq_data = match daq_path
                 .extension()
                 .ok_or_else(|| anyhow!("invalid daq path: {:?}", daq_path))?
@@ -72,20 +90,19 @@ impl<S: SettingStorage> DaqManager<S> {
             }?;
 
             let daq_metadata = DaqMetadata {
-                path: daq_path.to_owned(),
+                path: daq_path,
                 nrows: daq_data.nrows(),
                 ncols: daq_data.ncols(),
                 fingerprint: "TODO".to_owned(),
             };
 
             {
-                let mut daq_manager = daq_manager.lock().unwrap();
                 daq_manager
                     .setting_storage
                     .lock()
                     .unwrap()
                     .set_daq_metadata(daq_metadata)?;
-                daq_manager.daq_data = Some(daq_data.into_shared());
+                daq_manager.daq_data.lock().unwrap().raw = Some(daq_data.into_shared());
             }
 
             Ok(())
@@ -94,7 +111,7 @@ impl<S: SettingStorage> DaqManager<S> {
     }
 
     pub fn daq_data(&self) -> Option<ArcArray2<f64>> {
-        self.inner.lock().unwrap().daq_data.clone()
+        self.inner.daq_data.lock().unwrap().raw.clone()
     }
 }
 
@@ -102,7 +119,7 @@ fn read_daq_lvm(daq_path: &Path) -> Result<Array2<f64>> {
     let mut rdr = csv::ReaderBuilder::new()
         .has_headers(false)
         .delimiter(b'\t')
-        .from_path(&daq_path)
+        .from_path(daq_path)
         .map_err(|e| anyhow!("failed to read daq from {:?}: {}", daq_path, e))?;
 
     let mut h = 0;
@@ -129,7 +146,7 @@ fn read_daq_lvm(daq_path: &Path) -> Result<Array2<f64>> {
 }
 
 fn read_daq_excel(daq_path: &Path) -> Result<Array2<f64>> {
-    let mut excel: Xlsx<_> = open_workbook(&daq_path)?;
+    let mut excel: Xlsx<_> = open_workbook(daq_path)?;
     let sheet = excel
         .worksheet_range_at(0)
         .ok_or_else(|| anyhow!("no worksheet"))??;

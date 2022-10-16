@@ -6,13 +6,13 @@ use serde::Serialize;
 
 use crate::{
     daq::DaqMetadata,
-    setting::{SettingStorageSqlite, StartIndex},
+    setting::{SqliteSettingStorage, StartIndex},
     solve::IterationMethod,
-    state::GlobalState,
+    state::{CreateSettingRequest, GlobalState},
     video::{FilterMethod, Progress, VideoMetadata},
 };
 
-type State<'a> = tauri::State<'a, GlobalState<SettingStorageSqlite>>;
+type State<'a> = tauri::State<'a, GlobalState<SqliteSettingStorage>>;
 
 type TlcResult<T> = Result<T, String>;
 
@@ -27,12 +27,22 @@ impl<T: Serialize> IntoTlcResult<T> for Result<T> {
 }
 
 #[tauri::command]
+pub async fn create_setting(request: CreateSettingRequest, state: State<'_>) -> TlcResult<()> {
+    state.create_setting(request).await.to()
+}
+
+#[tauri::command]
+pub async fn switch_setting(setting_id: i64, state: State<'_>) -> TlcResult<()> {
+    state.switch_setting(setting_id).await.to()
+}
+
+#[tauri::command]
 pub async fn get_save_root_dir(state: State<'_>) -> TlcResult<String> {
     state.get_save_root_dir().await.to()
 }
 
 #[tauri::command]
-pub async fn set_save_root_dir(save_root_dir: String, state: State<'_>) -> TlcResult<()> {
+pub async fn set_save_root_dir(save_root_dir: PathBuf, state: State<'_>) -> TlcResult<()> {
     state.set_save_root_dir(save_root_dir).await.to()
 }
 

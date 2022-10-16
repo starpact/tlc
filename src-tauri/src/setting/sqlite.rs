@@ -1,47 +1,20 @@
-use std::{
-    path::{Path, PathBuf},
-    time::Instant,
-};
+use std::path::PathBuf;
 
 use anyhow::{anyhow, bail, Result};
 use rusqlite::{params, Connection, Error::QueryReturnedNoRows};
-use serde::{Deserialize, Serialize};
-use tokio::io::AsyncWriteExt;
-use tracing::instrument;
 
 use crate::{
-    daq::{DaqMetadata, InterpolationMethod, Thermocouple},
+    daq::{DaqMetadata, Thermocouple},
     error::Error,
     solve::{IterationMethod, PhysicalParam},
     util,
     video::{FilterMetadata, FilterMethod, Green2Metadata, VideoMetadata},
 };
 
-pub trait SettingStorage: Send + 'static {
-    fn switch_setting(&mut self, switch_setting_option: SwitchSettingOption) -> Result<()>;
-    fn save_root_dir(&self) -> Result<String>;
-    fn set_save_root_dir(&self, save_root_dir: String) -> Result<()>;
-    fn video_metadata(&self) -> Result<VideoMetadata>;
-    fn set_video_metadata(&self, video_metadata: VideoMetadata) -> Result<()>;
-    fn daq_metadata(&self) -> Result<DaqMetadata>;
-    fn set_daq_metadata(&self, daq_metadata: DaqMetadata) -> Result<()>;
-    fn start_index(&self) -> Result<Option<StartIndex>>;
-    fn synchronize_video_and_daq(&self, start_frame: usize, start_row: usize) -> Result<()>;
-    fn set_start_frame(&self, start_frame: usize) -> Result<()>;
-    fn set_start_row(&self, start_row: usize) -> Result<()>;
-    fn area(&self) -> Result<Option<(usize, usize, usize, usize)>>;
-    fn set_area(&self, area: (usize, usize, usize, usize)) -> Result<()>;
-    fn green2_metadata(&self) -> Result<Green2Metadata>;
-    fn thermocouples(&self) -> Result<Option<Vec<Thermocouple>>>;
-    fn filter_metadata(&self) -> Result<FilterMetadata>;
-    fn set_filter_method(&self, filter_method: FilterMethod) -> Result<()>;
-    fn iteration_method(&self) -> Result<IterationMethod>;
-    fn set_iteration_method(&self, iteration_method: IterationMethod) -> Result<()>;
-    fn physical_param(&self) -> Result<PhysicalParam>;
-}
+use super::{CreateRequest, SettingStorage, StartIndex};
 
 #[derive(Debug)]
-pub struct SettingStorageSqlite {
+pub struct SqliteSettingStorage {
     conn: Connection,
     /// Setting id of the experiment which is currently being processed.
     /// `setting_id` should be manually updated by the user and will be
@@ -49,159 +22,161 @@ pub struct SettingStorageSqlite {
     setting_id: Option<i64>,
 }
 
-struct Setting {
-    /// Unique id of this experiment setting, opaque to users.
-    id: i64,
-    /// User defined unique name of this experiment setting.
-    name: String,
+impl SqliteSettingStorage {
+    pub fn new() -> Self {
+        const DB_FILEPATH: &str = "./var/db.sqlite3";
+        let conn = Connection::open(DB_FILEPATH)
+            .unwrap_or_else(|e| panic!("Failed to create/open metadata db at {DB_FILEPATH}: {e}"));
+        conn.execute(include_str!("../../db/schema.sql"), ())
+            .expect("Failed to create db");
 
-    /// Directory in which you save your data(parameters and results) of this experiment.
-    /// * setting_path: {root_dir}/{expertiment_name}/setting.toml
-    /// * nu_matrix_path: {root_dir}/{expertiment_name}/nu_matrix.csv
-    /// * plot_matrix_path: {root_dir}/{expertiment_name}/nu_plot.png
-    save_root_dir: String,
+        Self {
+            conn,
+            setting_id: None,
+        }
+    }
 
-    /// Path and some attributes of video.
-    video_metadata: String,
+    fn setting_id(&self) -> Result<i64> {
+        self.setting_id
+            .ok_or_else(|| anyhow!("no experiment setting is selected"))
+    }
 
-    /// Path and some attributes of data acquisition file.
-    daq_metadata: String,
+    fn video_metadata_inner(&self) -> Result<Option<VideoMetadata>> {
+        let id = self.setting_id()?;
+        let ret: Option<String> = self.conn.query_row(
+            "SELECT video_metadata FROM settings WHERE id = ?1",
+            [id],
+            |row| row.get(0),
+        )?;
 
-    /// Start frame of video involved in the calculation.
-    /// Should be updated simultaneously with start_row.
-    start_frame: Option<usize>,
-    /// Start row of DAQ data involved in the calculation.
-    /// Should be updated simultaneously with start_frame.
-    start_row: Option<usize>,
+        match ret {
+            Some(s) => Ok(Some(serde_json::from_str(&s)?)),
+            None => Ok(None),
+        }
+    }
 
-    /// Calculation area(top_left_y, top_left_x, area_height, area_width).
-    area: Option<String>,
+    fn daq_metadata_inner(&self) -> Result<Option<DaqMetadata>> {
+        let id = self.setting_id()?;
+        let ret: Option<String> = self.conn.query_row(
+            "SELECT daq_metadata FROM settings WHERE id = ?1",
+            [id],
+            |row| row.get(0),
+        )?;
 
-    /// Storage info and positions of thermocouples.
-    thermocouples: Option<String>,
+        match ret {
+            Some(s) => Ok(Some(serde_json::from_str(&s)?)),
+            None => Ok(None),
+        }
+    }
 
-    /// Filter method of green matrix along the time axis.
-    filter_method: Option<String>,
+    fn set_start_index(&self, start_frame: usize, start_row: usize) -> Result<()> {
+        let id = self.setting_id()?;
+        let updated_at = util::time::now_as_secs();
+        self.conn.execute(
+            "UPDATE settings SET start_frame = ?1, start_row = ?2 updated_at = ?3 WHERE id = ?4",
+            params![start_frame, start_row, updated_at, id],
+        )?;
 
-    /// Interpolation method of thermocouple temperature distribution.
-    iteration_method: String,
+        Ok(())
+    }
 
-    /// All physical parameters used when solving heat transfer equation.
-    peak_temperature: f64,
-    solid_thermal_conductivity: f64,
-    solid_thermal_diffusivity: f64,
-    characteristic_length: f64,
-    air_thermal_conductivity: f64,
+    fn thermocouples_inner(&self) -> Result<Option<Vec<Thermocouple>>> {
+        let id = self.setting_id()?;
+        let ret: Option<String> = self.conn.query_row(
+            "SELECT thermocouples FROM settings WHERE id = ?1",
+            [id],
+            |row| row.get(0),
+        )?;
 
-    /// If process of current experiment has been completed.
-    completed: bool,
-
-    created_at: Instant,
-    updated_at: Instant,
+        match ret {
+            Some(s) => Ok(Some(serde_json::from_str(&s)?)),
+            None => Ok(None),
+        }
+    }
 }
 
-#[derive(Debug, Deserialize)]
-pub struct CreateSettingRequest {
-    pub name: String,
-    pub save_root_dir: String,
-    pub video_metadata: VideoMetadata,
-    pub filter_method: FilterMethod,
-    pub iteration_method: IterationMethod,
-    pub daq_metadata: DaqMetadata,
-    pub physical_param: PhysicalParam,
-}
-
-#[derive(Debug, Deserialize)]
-pub enum SwitchSettingOption {
-    Create(Box<CreateSettingRequest>),
-    Update(i64),
-}
-
-impl SettingStorage for SettingStorageSqlite {
-    fn switch_setting(&mut self, switch_setting_option: SwitchSettingOption) -> Result<()> {
-        match switch_setting_option {
-            SwitchSettingOption::Create(create_setting_request) => {
-                let CreateSettingRequest {
+impl SettingStorage for SqliteSettingStorage {
+    fn create_setting(&mut self, request: CreateRequest) -> Result<i64> {
+        let CreateRequest {
+            name,
+            save_root_dir,
+            filter_method,
+            iteration_method,
+            physical_param:
+                PhysicalParam {
+                    peak_temperature,
+                    solid_thermal_conductivity,
+                    solid_thermal_diffusivity,
+                    characteristic_length,
+                    air_thermal_conductivity,
+                },
+        } = request;
+        let filter_method_str = serde_json::to_string(&filter_method)?;
+        let iteration_method_str = serde_json::to_string(&iteration_method)?;
+        let created_at = util::time::now_as_secs();
+        let id = self
+            .conn
+            .prepare(
+                "
+                INSERT INTO settings (
                     name,
                     save_root_dir,
-                    video_metadata,
                     filter_method,
                     iteration_method,
-                    daq_metadata,
-                    physical_param:
-                        PhysicalParam {
-                            peak_temperature,
-                            solid_thermal_conductivity,
-                            solid_thermal_diffusivity,
-                            characteristic_length,
-                            air_thermal_conductivity,
-                        },
-                } = *create_setting_request;
-                let video_metadata_str = serde_json::to_string(&video_metadata)?;
-                let daq_metadata_str = serde_json::to_string(&daq_metadata)?;
-                let filter_method_str = serde_json::to_string(&filter_method)?;
-                let iteration_method_str = serde_json::to_string(&iteration_method)?;
-                let created_at = util::time::now_as_secs();
-                let id = self
-                    .conn
-                    .prepare(
-                        "
-                        INSERT INTO settings (
-                            name,
-                            save_root_dir,
-                            video_metadata,
-                            daq_metadata,
-                            filter_method,
-                            iteration_method,
-                            peak_temperature,
-                            solid_thermal_conductivity,
-                            solid_thermal_diffusivity,
-                            characteristic_length,
-                            air_thermal_conductivity,
-                            completed,
-                            created_at,
-                            updated_at
-                        )
-                        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
-                        ",
-                    )?
-                    .insert(params![
-                        name,
-                        save_root_dir,
-                        video_metadata_str,
-                        daq_metadata_str,
-                        filter_method_str,
-                        iteration_method_str,
-                        peak_temperature,
-                        solid_thermal_conductivity,
-                        solid_thermal_diffusivity,
-                        characteristic_length,
-                        air_thermal_conductivity,
-                        false,
-                        created_at,
-                        created_at,
-                    ])?;
-                self.setting_id = Some(id);
-                Ok(())
-            }
-            SwitchSettingOption::Update(id) => {
-                if Some(id) == self.setting_id {
-                    // The caller will reload everything even if the setting id has not changed.
-                    return Ok(());
-                }
-                let id = self
-                    .conn
-                    .query_row("SELECT * FROM settings WHERE id = ?1", [id], |row| {
-                        row.get(0)
-                    })
-                    .map_err::<anyhow::Error, _>(|e| match e {
-                        QueryReturnedNoRows => Error::SettingIdNotFound(id).into(),
-                        _ => e.into(),
-                    })?;
-                self.setting_id = Some(id);
-                Ok(())
-            }
+                    peak_temperature,
+                    solid_thermal_conductivity,
+                    solid_thermal_diffusivity,
+                    characteristic_length,
+                    air_thermal_conductivity,
+                    completed,
+                    created_at,
+                    updated_at
+                )
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+                ",
+            )?
+            .insert(params![
+                name,
+                save_root_dir,
+                filter_method_str,
+                iteration_method_str,
+                peak_temperature,
+                solid_thermal_conductivity,
+                solid_thermal_diffusivity,
+                characteristic_length,
+                air_thermal_conductivity,
+                false,
+                created_at,
+                created_at,
+            ])?;
+        self.setting_id = Some(id);
+
+        Ok(id)
+    }
+
+    fn switch_setting(&mut self, setting_id: i64) -> Result<()> {
+        if Some(setting_id) == self.setting_id {
+            // The caller will reload everything even if the setting id has not changed.
+            return Ok(());
         }
+        let _: i32 = self
+            .conn
+            .query_row(
+                "SELECT 1 FROM settings WHERE id = ?1",
+                [setting_id],
+                |row| row.get(0),
+            )
+            .map_err::<anyhow::Error, _>(|e| match e {
+                QueryReturnedNoRows => Error::SettingIdNotFound(setting_id).into(),
+                _ => e.into(),
+            })?;
+        self.setting_id = Some(setting_id);
+
+        Ok(())
+    }
+
+    fn delete_setting(&mut self, setting_id: i64) -> Result<()> {
+        unimplemented!()
     }
 
     fn save_root_dir(&self) -> Result<String> {
@@ -215,8 +190,11 @@ impl SettingStorage for SettingStorageSqlite {
         Ok(save_root_dir)
     }
 
-    fn set_save_root_dir(&self, save_root_dir: String) -> Result<()> {
+    fn set_save_root_dir(&self, save_root_dir: PathBuf) -> Result<()> {
         let id = self.setting_id()?;
+        let save_root_dir = save_root_dir
+            .to_str()
+            .ok_or_else(|| anyhow!("invalid save_root_dir: {save_root_dir:?}"))?;
         let updated_at = util::time::now_as_secs();
         self.conn.execute(
             "UPDATE settings SET save_root_dir = ?1, updated_at = ?2 WHERE id = ?3",
@@ -318,7 +296,7 @@ impl SettingStorage for SettingStorageSqlite {
                 Ok(())
             }
             _ => {
-                let thermocouples = self.thermocouples()?;
+                let thermocouples = self.thermocouples_inner()?;
                 let daq_metadata_str = serde_json::to_string(&daq_metadata)?;
                 let updated_at = util::time::now_as_secs();
 
@@ -359,7 +337,7 @@ impl SettingStorage for SettingStorageSqlite {
         }
     }
 
-    fn start_index(&self) -> Result<Option<StartIndex>> {
+    fn start_index(&self) -> Result<StartIndex> {
         let id = self.setting_id()?;
         let ret: (Option<usize>, Option<usize>) = self.conn.query_row(
             "SELECT (start_frame, start_row) FROM settings WHERE id = ?1",
@@ -367,11 +345,11 @@ impl SettingStorage for SettingStorageSqlite {
             |row| Ok((row.get(0)?, row.get(1)?)),
         )?;
         match ret {
-            (None, None) => Ok(None),
-            (Some(start_frame), Some(start_row)) => Ok(Some(StartIndex {
+            (None, None) => bail!("video and daq not synchronized yet"),
+            (Some(start_frame), Some(start_row)) => Ok(StartIndex {
                 start_frame,
                 start_row,
-            })),
+            }),
             _ => unreachable!("start_frame and start_row are not consistent"),
         }
     }
@@ -407,9 +385,7 @@ impl SettingStorage for SettingStorageSqlite {
         let StartIndex {
             start_frame: old_start_frame,
             start_row: old_start_row,
-        } = self
-            .start_index()?
-            .ok_or_else(|| anyhow!("not synchronized yet"))?;
+        } = self.start_index()?;
 
         let nrows = self
             .daq_metadata_inner()?
@@ -439,9 +415,7 @@ impl SettingStorage for SettingStorageSqlite {
         let StartIndex {
             start_frame: old_start_frame,
             start_row: old_start_row,
-        } = self
-            .start_index()?
-            .ok_or_else(|| anyhow!("not synchronized yet"))?;
+        } = self.start_index()?;
 
         let nframes = self
             .video_metadata_inner()?
@@ -458,7 +432,7 @@ impl SettingStorage for SettingStorageSqlite {
         self.set_start_index(start_frame, start_row)
     }
 
-    fn area(&self) -> Result<Option<(usize, usize, usize, usize)>> {
+    fn area(&self) -> Result<(usize, usize, usize, usize)> {
         let id = self.setting_id()?;
         let ret: Option<String> =
             self.conn
@@ -467,8 +441,8 @@ impl SettingStorage for SettingStorageSqlite {
                 })?;
 
         match ret {
-            Some(s) => Ok(Some(serde_json::from_str(&s)?)),
-            None => Ok(None),
+            Some(s) => Ok(serde_json::from_str(&s)?),
+            None => bail!("area not selected yet"),
         }
     }
 
@@ -507,10 +481,8 @@ impl SettingStorage for SettingStorageSqlite {
         let StartIndex {
             start_frame,
             start_row,
-        } = self
-            .start_index()?
-            .ok_or_else(|| anyhow!("not synchronized yet"))?;
-        let area = self.area()?.ok_or_else(|| anyhow!("area unset"))?;
+        } = self.start_index()?;
+        let area = self.area()?;
 
         let nframes = video_metadata.nframes;
         let cal_num = (nframes - start_frame).min(nrows - start_row);
@@ -523,18 +495,9 @@ impl SettingStorage for SettingStorageSqlite {
         })
     }
 
-    fn thermocouples(&self) -> Result<Option<Vec<Thermocouple>>> {
-        let id = self.setting_id()?;
-        let ret: Option<String> = self.conn.query_row(
-            "SELECT thermocouples FROM settings WHERE id = ?1",
-            [id],
-            |row| row.get(0),
-        )?;
-
-        match ret {
-            Some(s) => Ok(Some(serde_json::from_str(&s)?)),
-            None => Ok(None),
-        }
+    fn thermocouples(&self) -> Result<Vec<Thermocouple>> {
+        self.thermocouples_inner()?
+            .ok_or_else(|| anyhow!("thermocouples not selected yet"))
     }
 
     fn filter_metadata(&self) -> Result<FilterMetadata> {
@@ -617,106 +580,4 @@ impl SettingStorage for SettingStorageSqlite {
 
         Ok(physical_param)
     }
-}
-
-impl SettingStorageSqlite {
-    pub fn new() -> Self {
-        const DB_FILEPATH: &str = "./var/db.sqlite3";
-        let conn = Connection::open(DB_FILEPATH)
-            .unwrap_or_else(|e| panic!("Failed to create/open metadata db at {DB_FILEPATH}: {e}"));
-        conn.execute(include_str!("../db/schema.sql"), ())
-            .expect("Failed to create db");
-
-        Self {
-            conn,
-            setting_id: None,
-        }
-    }
-
-    fn setting_id(&self) -> Result<i64> {
-        self.setting_id
-            .ok_or_else(|| anyhow!("no experiment setting is selected"))
-    }
-
-    fn video_metadata_inner(&self) -> Result<Option<VideoMetadata>> {
-        let id = self.setting_id()?;
-        let ret: Option<String> = self.conn.query_row(
-            "SELECT video_metadata FROM settings WHERE id = ?1",
-            [id],
-            |row| row.get(0),
-        )?;
-
-        match ret {
-            Some(s) => Ok(Some(serde_json::from_str(&s)?)),
-            None => Ok(None),
-        }
-    }
-
-    fn daq_metadata_inner(&self) -> Result<Option<DaqMetadata>> {
-        let id = self.setting_id()?;
-        let ret: Option<String> = self.conn.query_row(
-            "SELECT daq_metadata FROM settings WHERE id = ?1",
-            [id],
-            |row| row.get(0),
-        )?;
-
-        match ret {
-            Some(s) => Ok(Some(serde_json::from_str(&s)?)),
-            None => Ok(None),
-        }
-    }
-
-    fn set_start_index(&self, start_frame: usize, start_row: usize) -> Result<()> {
-        let id = self.setting_id()?;
-        let updated_at = util::time::now_as_secs();
-        self.conn.execute(
-            "UPDATE settings SET start_frame = ?1, start_row = ?2 updated_at = ?3 WHERE id = ?4",
-            params![start_frame, start_row, updated_at, id],
-        )?;
-
-        Ok(())
-    }
-}
-
-/// `SettingSnapshot` will be saved together with the results for later check.
-#[derive(Debug, Serialize)]
-struct SettingSnapshot {
-    save_root_dir: PathBuf,
-    video_metadata: VideoMetadata,
-    daq_metadata: DaqMetadata,
-    start_frame: usize,
-    start_row: usize,
-    area: (usize, usize, usize, usize),
-    thermocouples: Vec<Thermocouple>,
-    filter_method: FilterMethod,
-    interpolation_method: InterpolationMethod,
-    iteration_method: IterationMethod,
-    physical_param: PhysicalParam,
-    // TODO: hash
-}
-
-impl SettingSnapshot {
-    #[instrument(fields(setting_path))]
-    pub async fn save<P: AsRef<Path>>(&self, setting_path: P) -> Result<()> {
-        let mut file = tokio::fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .open(setting_path)
-            .await?;
-        let buf = toml::to_string_pretty(&self)?;
-        file.write_all(buf.as_bytes()).await?;
-
-        Ok(())
-    }
-}
-
-/// StartIndex combines `start_frame` and `start_row` together because
-/// they are only meaningful after synchronization and should be updated
-/// simultaneously.
-#[derive(Debug, Deserialize, Serialize, Clone, Copy)]
-pub struct StartIndex {
-    /// Start frame of video involved in the calculation.
-    start_frame: usize,
-    /// Start row of DAQ data involved in the calculation.
-    start_row: usize,
 }

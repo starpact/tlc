@@ -2,8 +2,8 @@ CREATE TABLE IF NOT EXISTS settings (
     id INTEGER PRIMARY KEY,
     name TEXT NOT NULL UNIQUE,
     save_root_dir TEXT NOT NULL,
-    video_metadata TEXT NOT NULL, -- JSON
-    daq_metadata TEXT NOT NULL, -- JSON
+    video_metadata TEXT, -- JSON
+    daq_metadata TEXT, -- JSON
     start_frame INTEGER,
     start_row INTEGER,
     area TEXT, -- JSON

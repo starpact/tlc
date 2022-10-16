@@ -4,6 +4,8 @@ use anyhow::{bail, Result};
 use rayon::{ThreadPool, ThreadPoolBuilder};
 use tokio::sync::{Semaphore, SemaphorePermit};
 
+const DEFAULT_NUM_THREADS: usize = 4;
+
 /// When user drags the progress bar quickly, the decoding can not keep up
 /// and there will be a significant lag. Actually, we do not have to decode
 /// every frames, and the key is how to give up decoding some frames properly.
@@ -18,8 +20,10 @@ use tokio::sync::{Semaphore, SemaphorePermit};
 pub struct SpawnHandle {
     /// Thread pool for decoding single frame, which makes use of thread-local decoders.
     thread_pool: ThreadPool,
+
     /// Track the number of idle workers in the thread pool.
     semaphore: Semaphore,
+
     /// See [get_spawner].
     last_target_frame_index: AtomicUsize,
 }
@@ -89,6 +93,6 @@ impl SpawnHandle {
 
 impl Default for SpawnHandle {
     fn default() -> Self {
-        Self::new(4)
+        Self::new(DEFAULT_NUM_THREADS)
     }
 }

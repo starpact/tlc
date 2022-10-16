@@ -14,6 +14,7 @@ use anyhow::{anyhow, bail, Result};
 use ffmpeg::{
     codec,
     codec::{packet::Packet, Parameters},
+    format::context::Input,
 };
 use ffmpeg_next as ffmpeg;
 use image::{codecs::jpeg::JpegEncoder, ColorType::Rgb8};
@@ -22,7 +23,7 @@ use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use tauri::async_runtime::spawn_blocking;
 use tokio::sync::oneshot;
-use tracing::{debug, error, instrument, trace_span};
+use tracing::{debug, error, info_span, instrument};
 
 use crate::setting::SettingStorage;
 use decode::DecoderManager;
@@ -90,7 +91,7 @@ struct VideoData {
     filtered_green2: Option<ArcArray2<u8>>,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
 pub struct VideoMetadata {
     pub path: PathBuf,
     pub frame_rate: usize,
@@ -121,20 +122,34 @@ impl<S: SettingStorage> VideoManager<S> {
         }
     }
 
-    /// Spawn a thread to load all video packets into memory.
-    #[instrument(skip(self), fields(video_path))]
-    pub async fn spawn_load_packets(&self, video_path: PathBuf) -> Result<()> {
+    /// Read video metadata and update setting if needed and continue loading all
+    /// video packets into memory in the background.
+    /// `video_path` is_some means updating video setting.
+    /// `video_path` is_none means reading the path from current setting.
+    #[instrument(skip(self), err)]
+    pub async fn spawn_load_packets(&self, video_path: Option<PathBuf>) -> Result<()> {
         let video_manager = self.clone();
         let (tx, rx) = oneshot::channel();
 
-        let f = move || {
+        let join_handle = spawn_blocking(move || {
             let video_manager = video_manager.inner;
             // Stop current building and filtering process.
             video_manager.build_progress_bar.reset();
             video_manager.filter_progress_bar.reset();
 
-            let _span1 = trace_span!("read_video_metadata").entered();
-            let mut input = ffmpeg::format::input(&video_path)?;
+            let _span1 = info_span!("read_video_metadata").entered();
+            let video_path = match video_path {
+                Some(video_path) => video_path,
+                None => {
+                    video_manager
+                        .setting_storage
+                        .lock()
+                        .unwrap()
+                        .video_metadata()?
+                        .path
+                }
+            };
+            let input = ffmpeg::format::input(&video_path)?;
             let video_stream = input
                 .streams()
                 .best(ffmpeg::media::Type::Video)
@@ -155,6 +170,7 @@ impl<S: SettingStorage> VideoManager<S> {
                 shape: (decoder.height() as usize, decoder.width() as usize),
                 fingerprint: fingerprint.clone(),
             };
+            debug!(?video_metadata);
 
             // Update db and video data.
             {
@@ -172,45 +188,12 @@ impl<S: SettingStorage> VideoManager<S> {
             tx.send(()).unwrap();
             drop(_span1);
 
-            let _span2 = trace_span!("load_packets").entered();
-            let mut cnt = 0;
-            for (_, packet) in input
-                .packets()
-                .filter(|(stream, _)| stream.index() == video_stream_index)
-            {
-                let mut video_data = video_manager.video_data.write().unwrap();
-                if fingerprint
-                    != video_manager
-                        .setting_storage
-                        .lock()
-                        .unwrap()
-                        .video_metadata()?
-                        .fingerprint
-                {
-                    // Video has been changed, which means user changed the video before previous
-                    // loading finishes. So we should abort current loading at once. Other threads
-                    // should be waiting for the lock to read from the latest path at this point.
-                    bail!("video has been changed before finishing loading packets");
-                }
-                video_data.packets.push(packet);
-                cnt += 1;
-            }
-
-            debug_assert!(cnt == nframes);
-            debug!(nframes);
-
-            Ok(())
-        };
-
-        let join_handle = spawn_blocking(|| {
-            if let Err(e) = f() {
-                error!("Failed to load packets: {e}");
-            }
+            video_manager.load_packets(input, video_stream_index, fingerprint, nframes)
         });
 
         match rx.await {
             Ok(()) => Ok(()),
-            Err(_) => Err(join_handle.await.unwrap_err().into()),
+            Err(_) => Err(join_handle.await?.unwrap_err()),
         }
     }
 
@@ -230,7 +213,7 @@ impl<S: SettingStorage> VideoManager<S> {
         let video_manager = self.clone();
         let (tx, rx) = oneshot::channel();
 
-        let f = move || {
+        let join_handle = spawn_blocking(move || {
             let video_manager = video_manager.inner;
 
             let (green2_metadata, green2) = {
@@ -271,19 +254,11 @@ impl<S: SettingStorage> VideoManager<S> {
             video_data.green2 = Some(green2.into_shared());
 
             Ok(())
-        };
-
-        // `rayon::spawn` will block here when there is already a parallel computation, so use
-        // `spawn_blocking` instead.
-        let join_handle = spawn_blocking(|| {
-            if let Err(e) = f() {
-                error!("Failed to build green2: {e}");
-            }
         });
 
         match rx.await {
             Ok(()) => Ok(()),
-            Err(_) => Err(join_handle.await.unwrap_err().into()),
+            Err(_) => Err(join_handle.await?.unwrap_err()),
         }
     }
 
@@ -331,15 +306,17 @@ impl<S: SettingStorage> VideoManager<S> {
             Ok(())
         };
 
-        let join_handle = spawn_blocking(|| {
-            if let Err(e) = f() {
+        let join_handle = spawn_blocking(|| match f() {
+            Ok(_) => Ok(()),
+            Err(e) => {
                 error!("Failed to filter green2: {e}");
+                Err(e)
             }
         });
 
         match rx.await {
             Ok(()) => Ok(()),
-            Err(_) => Err(join_handle.await.unwrap_err().into()),
+            Err(_) => Err(join_handle.await?.unwrap_err()),
         }
     }
 
@@ -401,7 +378,60 @@ impl<S: SettingStorage> VideoManager<S> {
 }
 
 impl<S: SettingStorage> VideoManagerInner<S> {
-    #[instrument(level = "trace", skip(self))]
+    #[instrument(skip_all, err)]
+    fn load_packets(
+        &self,
+        mut input: Input,
+        video_stream_index: usize,
+        fingerprint: String,
+        nframes: usize,
+    ) -> Result<()> {
+        const LOCAL_BUFFER_LENGTH: usize = 50;
+        let mut buf = Vec::with_capacity(LOCAL_BUFFER_LENGTH);
+        let mut cnt = 0;
+        for (_, packet) in input
+            .packets()
+            .filter(|(stream, _)| stream.index() == video_stream_index)
+        {
+            // The first frame should be available as soon as possible.
+            if cnt == 1 || buf.len() == LOCAL_BUFFER_LENGTH {
+                self.batch_push_packets(&fingerprint, &mut buf)?;
+            }
+            buf.push(packet);
+            cnt += 1;
+        }
+
+        if !buf.is_empty() {
+            self.batch_push_packets(&fingerprint, &mut buf)?;
+        }
+
+        debug_assert!(cnt == nframes);
+        debug!(nframes);
+
+        Ok(())
+    }
+
+    fn batch_push_packets(&self, fingerprint: &str, buf: &mut Vec<Packet>) -> Result<()> {
+        let mut video_data = self.video_data.write().unwrap();
+        if fingerprint
+            != self
+                .setting_storage
+                .lock()
+                .unwrap()
+                .video_metadata()?
+                .fingerprint
+        {
+            // Video has been changed, which means user changed the video before previous
+            // loading finishes. So we should abort current loading at once. Other threads
+            // should be waiting for the lock to read from the latest path at this point.
+            bail!("video has been changed before finishing loading packets");
+        }
+        video_data.packets.append(buf);
+
+        Ok(())
+    }
+
+    #[instrument(skip(self), err)]
     fn read_single_frame_base64(&self, frame_index: usize) -> Result<String> {
         loop {
             let video_data = self.video_data.read().unwrap();
@@ -418,7 +448,7 @@ impl<S: SettingStorage> VideoManagerInner<S> {
             }
 
             if let Some(packet) = video_data.packets.get(frame_index) {
-                let _span = trace_span!("decode_single_frame").entered();
+                let _span = info_span!("decode_single_frame").entered();
 
                 let mut decoder = video_data.decoder_manager.decoder()?;
                 let mut buf = Vec::new();
@@ -445,7 +475,7 @@ impl VideoData {
         self.filtered_green2 = None;
     }
 
-    #[instrument(skip(self))]
+    #[instrument(skip(self), err)]
     fn build_green2(
         &self,
         video_metadata: &VideoMetadata,
@@ -458,7 +488,7 @@ impl VideoData {
 
         let _reset_guard = progress_bar.start(cal_num as u32);
 
-        let _span2 = trace_span!("decode_in_parallel").entered();
+        let _span2 = info_span!("decode_in_parallel").entered();
         let mut green2 = Array2::zeros((cal_num, cal_h * cal_w));
         self.packets
             .par_iter()
@@ -500,20 +530,18 @@ impl VideoData {
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
-
     use super::*;
-    use crate::{setting::SettingStorageSqlite, util::log};
+    use crate::{setting::SqliteSettingStorage, util::log};
 
     #[tokio::test]
+    #[ignore]
     async fn test_load_packets() {
         log::init();
-        let video_manager = VideoManager::new(Arc::new(Mutex::new(SettingStorageSqlite::new())));
+        let video_manager = VideoManager::new(Arc::new(Mutex::new(SqliteSettingStorage::new())));
         video_manager
-            .spawn_load_packets(
-                Path::new("/home/yhj/Documents/2021yhj/EXP/imp/videos/imp_50000_1_up.avi")
-                    .to_owned(),
-            )
+            .spawn_load_packets(Some(PathBuf::from(
+                "/home/yhj/Documents/2021yhj/EXP/imp/videos/imp_50000_1_up.avi",
+            )))
             .await
             .unwrap();
         println!(
@@ -529,14 +557,14 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore]
     async fn test_read_single_frame_pending_until_available() {
         log::init();
-        let video_manager = VideoManager::new(Arc::new(Mutex::new(SettingStorageSqlite::new())));
+        let video_manager = VideoManager::new(Arc::new(Mutex::new(SqliteSettingStorage::new())));
         video_manager
-            .spawn_load_packets(
-                Path::new("/home/yhj/Documents/2021yhj/EXP/imp/videos/imp_50000_1_up.avi")
-                    .to_owned(),
-            )
+            .spawn_load_packets(Some(PathBuf::from(
+                "/home/yhj/Documents/2021yhj/EXP/imp/videos/imp_50000_1_up.avi",
+            )))
             .await
             .unwrap();
 
@@ -570,12 +598,16 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore]
     async fn test_build_green2() {
         log::init();
-        let video_manager = VideoManager::new(Arc::new(Mutex::new(SettingStorageSqlite::new())));
+        let video_manager = VideoManager::new(Arc::new(Mutex::new(SqliteSettingStorage::new())));
         let video_path =
             PathBuf::from("/home/yhj/Documents/2021yhj/EXP/imp/videos/imp_50000_1_up.avi");
-        video_manager.spawn_load_packets(video_path).await.unwrap();
+        video_manager
+            .spawn_load_packets(Some(video_path))
+            .await
+            .unwrap();
         video_manager.spawn_build_green2().await.unwrap();
 
         loop {

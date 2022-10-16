@@ -145,7 +145,7 @@ fn interpolator2(
 
     temperature2
         .axis_iter_mut(Axis(0))
-        .into_par_iter()
+        // .into_par_iter()
         .zip(0..pix_num)
         .for_each(|(mut row, pos)| {
             let x = (pos % cal_w) as i32;
@@ -217,20 +217,45 @@ mod test {
 
     #[test]
     fn test_interp_bilinear() {
-        let daq_data = array![[1.], [2.], [3.], [4.], [5.], [6.]];
+        let daq_data = array![
+            [1.0, 5.0],
+            [2.0, 6.0],
+            [3.0, 7.0],
+            [4.0, 8.0],
+            [5.0, 9.0],
+            [6.0, 10.0]
+        ];
         println!("{:?}", daq_data.shape());
         let interp_method = BilinearExtra(2, 3);
         let thermocouples: Vec<Thermocouple> =
             [(10, 10), (10, 15), (10, 20), (20, 10), (20, 15), (20, 20)]
                 .iter()
-                .map(|&position| Thermocouple {
-                    column_index: 0,
+                .enumerate()
+                .map(|(i, &position)| Thermocouple {
+                    column_index: i,
                     position,
                 })
                 .collect();
         let area = (8, 8, 14, 14);
 
-        let _interpolator = Temperature2::new(daq_data.view(), interp_method, area, &thermocouples);
-        todo!()
+        let temperture2 = Temperature2::new(daq_data.view(), interp_method, area, &thermocouples);
+        println!(
+            "frame 0:\n{:?}",
+            temperture2
+                .inner
+                .column(0)
+                .to_owned()
+                .into_shape((area.2, area.3))
+                .unwrap()
+        );
+        println!(
+            "frame 1:\n{:?}",
+            temperture2
+                .inner
+                .column(1)
+                .to_owned()
+                .into_shape((area.2, area.3))
+                .unwrap()
+        );
     }
 }
