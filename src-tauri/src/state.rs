@@ -165,7 +165,7 @@ impl<S: SettingStorage> GlobalState<S> {
     }
 
     pub fn get_build_green2_progress(&self) -> Progress {
-        self.video_manager.build_progress()
+        self.video_manager.build_green2_progress()
     }
 
     pub async fn filter_method(&self) -> Result<FilterMethod> {
@@ -176,7 +176,7 @@ impl<S: SettingStorage> GlobalState<S> {
     pub async fn set_filter_method(&self, filter_method: FilterMethod) -> Result<()> {
         self.asyncify(move |s| s.set_filter_method(filter_method))
             .await?;
-        self.video_manager.spawn_filter_green2().await
+        self.video_manager.spawn_detect_peak().await
     }
 
     pub async fn filter_single_point(&self, position: (usize, usize)) -> Result<Vec<u8>> {
@@ -184,11 +184,11 @@ impl<S: SettingStorage> GlobalState<S> {
     }
 
     pub async fn spawn_filter_green2(&self) -> Result<()> {
-        self.video_manager.spawn_filter_green2().await
+        self.video_manager.spawn_detect_peak().await
     }
 
-    pub fn get_filter_green2_progress(&self) -> Progress {
-        self.video_manager.filter_progress()
+    pub fn get_detect_peak_progress(&self) -> Progress {
+        self.video_manager.detect_peak_progress_bar()
     }
 
     pub async fn get_iteration_method(&self) -> Result<IterationMethod> {
@@ -201,9 +201,9 @@ impl<S: SettingStorage> GlobalState<S> {
     }
 
     pub async fn solve(&self) -> Result<()> {
-        let filtered_green2 = self
+        let peak_temperature_frames = self
             .video_manager
-            .filtered_green2()
+            .gmax_frame_indexes()
             .ok_or_else(|| anyhow!("green2 not built or filtered yet"))?;
 
         let setting_storage = self.setting_storage.clone();
@@ -215,7 +215,7 @@ impl<S: SettingStorage> GlobalState<S> {
             let iteration_method = setting_storage.iteration_method()?;
 
             solve::solve(
-                filtered_green2,
+                peak_temperature_frames,
                 physical_param,
                 iteration_method,
                 frame_rate,

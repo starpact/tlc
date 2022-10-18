@@ -1,13 +1,11 @@
-use std::path::PathBuf;
-
 use anyhow::Result;
 use dwt::{transform, wavelet::Wavelet, Operation};
 use median::Filter;
-use ndarray::{parallel::prelude::*, prelude::*, ArcArray2};
+use ndarray::{parallel::prelude::*, prelude::*};
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
 
-use super::progress_bar::ProgressBar;
+use super::{progress_bar::ProgressBar, Green2Metadata};
 
 #[derive(Debug, Default, Deserialize, Serialize, Clone, Copy, PartialEq)]
 pub enum FilterMethod {
@@ -24,75 +22,104 @@ pub enum FilterMethod {
 #[derive(Debug, Clone, PartialEq)]
 pub struct FilterMetadata {
     pub filter_method: FilterMethod,
-    pub video_path: PathBuf,
+    pub green2_metadata: Green2Metadata,
 }
 
-#[instrument(skip(green2, progress_bar), err)]
-pub fn filter_all(
-    green2: ArcArray2<u8>,
+#[instrument(skip(green2, progress_bar))]
+pub fn filter_detect_peak(
+    green2: ArrayView2<u8>,
     filter_method: FilterMethod,
     progress_bar: &ProgressBar,
-) -> Result<ArcArray2<u8>> {
+) -> Result<Vec<usize>> {
     let total = green2.dim().1;
     let _reset_guard = progress_bar.start(total as u32);
 
     use FilterMethod::*;
     match filter_method {
-        No => {
-            progress_bar.add(total as i64).unwrap();
-            Ok(green2)
-        }
-        Median { window_size } => apply(green2, progress_bar, move |g1| median(g1, window_size)),
-        Wavelet { threshold_ratio } => {
-            apply(green2, progress_bar, move |g1| wavelet(g1, threshold_ratio))
-        }
+        No => apply(green2, progress_bar, filter_detect_peak_no),
+        Median { window_size } => apply(green2, progress_bar, move |g1| {
+            filter_detect_peak_median(g1, window_size)
+        }),
+        Wavelet { threshold_ratio } => apply(green2, progress_bar, move |g1| {
+            filter_detect_peak_wavelet(g1, threshold_ratio)
+        }),
     }
 }
 
 #[instrument(skip(green1))]
 pub fn filter_single_point(filter_method: FilterMethod, green1: ArrayView1<u8>) -> Vec<u8> {
-    let mut green1 = green1.to_owned();
-
-    use FilterMethod::*;
     match filter_method {
-        No => {}
-        Median { window_size } => median(green1.view_mut(), window_size),
-        Wavelet { threshold_ratio } => wavelet(green1.view_mut(), threshold_ratio),
-    };
-
-    green1.to_vec()
+        FilterMethod::No => green1.to_vec(),
+        FilterMethod::Median { window_size } => filter_median(green1, window_size),
+        FilterMethod::Wavelet { threshold_ratio } => filter_wavelet(green1, threshold_ratio),
+    }
 }
 
-fn apply<F>(mut green2: ArcArray2<u8>, progress_bar: &ProgressBar, f: F) -> Result<ArcArray2<u8>>
+fn apply<F>(green2: ArrayView2<u8>, progress_bar: &ProgressBar, f: F) -> Result<Vec<usize>>
 where
-    F: Fn(ArrayViewMut1<u8>) + Send + Sync,
+    F: Fn(ArrayView1<u8>) -> usize + Send + Sync,
 {
     green2
-        .axis_iter_mut(Axis(1)) // green2 is cloned here
+        .axis_iter(Axis(1))
         .into_par_iter()
-        .try_for_each(|green_history| {
-            f(green_history);
-            progress_bar.add(1)
-        })?;
-
-    Ok(green2)
+        .map(|green_history| {
+            if let Err(e) = progress_bar.add(1) {
+                println!("====================");
+                return Err(e);
+            }
+            Ok(f(green_history))
+        })
+        .collect()
 }
 
-fn median(mut green1: ArrayViewMut1<u8>, window_size: usize) {
+fn filter_detect_peak_no(green1: ArrayView1<u8>) -> usize {
+    green1
+        .into_iter()
+        .enumerate()
+        .max_by_key(|(_, &g)| g)
+        .unwrap()
+        .0
+}
+
+fn filter_detect_peak_median(green1: ArrayView1<u8>, window_size: usize) -> usize {
     let mut filter = Filter::new(window_size);
-    green1.iter_mut().for_each(|g| *g = filter.consume(*g));
+    green1
+        .into_iter()
+        .enumerate()
+        .max_by_key(|(_, &g)| filter.consume(g))
+        .unwrap()
+        .0
+}
+
+fn filter_detect_peak_wavelet(green1: ArrayView1<u8>, threshold_ratio: f64) -> usize {
+    wavelet(green1, threshold_ratio)
+        .into_iter()
+        .enumerate()
+        .max_by_key(|&(_, g)| g as u8)
+        .unwrap()
+        .0
+}
+
+fn filter_median(green1: ArrayView1<u8>, window_size: usize) -> Vec<u8> {
+    let mut filter = Filter::new(window_size);
+    green1.into_iter().map(|&g| filter.consume(g)).collect()
+}
+
+fn filter_wavelet(green1: ArrayView1<u8>, threshold_ratio: f64) -> Vec<u8> {
+    wavelet(green1, threshold_ratio)
+        .into_iter()
+        .map(|x| x as u8)
+        .collect()
 }
 
 /// Refer to [pywavelets](https://pywavelets.readthedocs.io/en/latest/ref).
-fn wavelet(mut green1: ArrayViewMut1<u8>, threshold_ratio: f64) {
+fn wavelet(green1: ArrayView1<u8>, threshold_ratio: f64) -> Vec<f64> {
     let data_len = green1.len();
     let wavelet = db8();
 
     let max_level = ((data_len / (wavelet.length - 1)) as f64).log2() as usize;
     let level_2 = 1 << max_level;
     let filter_len = data_len / level_2 * level_2;
-
-    // [u8] => [f64]
     let mut green1f: Vec<_> = green1.iter().take(filter_len).map(|v| *v as f64).collect();
 
     // Decomposition.
@@ -122,11 +149,7 @@ fn wavelet(mut green1: ArrayViewMut1<u8>, threshold_ratio: f64) {
         max_level,
     );
 
-    // [f64] => [u8]
-    green1
-        .iter_mut()
-        .zip(green1f)
-        .for_each(|(g, b)| *g = b as u8);
+    green1f
 }
 
 /// Refer to [Daubechies 8](http://wavelets.pybytes.com/wavelet/db8)。

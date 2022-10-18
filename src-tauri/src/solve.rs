@@ -1,14 +1,14 @@
 use std::f64::{consts::PI, NAN};
 
 use libm::erfc;
-use ndarray::ArcArray2;
+use ndarray::ArcArray1;
 use packed_simd::{f64x4, Simd};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize, Serialize, Clone, Copy)]
 #[cfg_attr(test, derive(Default))]
 pub struct PhysicalParam {
-    pub peak_temperature: f64,
+    pub gmax_temperature: f64,
     pub solid_thermal_conductivity: f64,
     pub solid_thermal_diffusivity: f64,
     pub characteristic_length: f64,
@@ -22,7 +22,7 @@ pub enum IterationMethod {
 }
 
 struct PointData<'a> {
-    peak_frame_index: usize,
+    gmax_frame_index: usize,
     temperatures: &'a [f64],
 }
 
@@ -46,7 +46,7 @@ struct NewtonDownSolver {
 
 impl PointData<'_> {
     fn heat_transfer_equation(&self, h: f64, dt: f64, k: f64, a: f64, tw: f64) -> (f64, f64) {
-        let peak_frame_index = self.peak_frame_index;
+        let gmax_frame_index = self.gmax_frame_index;
         let temps = self.temperatures;
 
         // We use the average of first 4 values to calculate the initial temperature.
@@ -55,7 +55,7 @@ impl PointData<'_> {
         let (mut sum, mut diff_sum) = (f64x4::default(), f64x4::default());
 
         let mut frame_index = 0;
-        while frame_index + f64x4::lanes() < peak_frame_index {
+        while frame_index + f64x4::lanes() < gmax_frame_index {
             let delta_temp = unsafe {
                 f64x4::from_slice_unaligned_unchecked(&temps[frame_index + 1..])
                     - f64x4::from_slice_unaligned_unchecked(&temps[frame_index..])
@@ -63,10 +63,10 @@ impl PointData<'_> {
             let at = a
                 * dt
                 * f64x4::new(
-                    (peak_frame_index - frame_index - 1) as f64,
-                    (peak_frame_index - frame_index - 2) as f64,
-                    (peak_frame_index - frame_index - 3) as f64,
-                    (peak_frame_index - frame_index - 4) as f64,
+                    (gmax_frame_index - frame_index - 1) as f64,
+                    (gmax_frame_index - frame_index - 2) as f64,
+                    (gmax_frame_index - frame_index - 3) as f64,
+                    (gmax_frame_index - frame_index - 4) as f64,
                 );
             let exp_erfc = (h.powf(2.0) / k.powf(2.0) * at).exp() * erfc_simd(h / k * at.sqrt());
             let step = (1.0 - exp_erfc) * delta_temp;
@@ -80,10 +80,10 @@ impl PointData<'_> {
 
         let (mut sum, mut diff_sum) = (sum.sum(), diff_sum.sum());
 
-        while frame_index < peak_frame_index {
+        while frame_index < gmax_frame_index {
             let delta_temp =
                 unsafe { temps.get_unchecked(frame_index + 1) - temps.get_unchecked(frame_index) };
-            let at = a * dt * (peak_frame_index - frame_index - 1) as f64;
+            let at = a * dt * (gmax_frame_index - frame_index - 1) as f64;
             let exp_erfc = (h.powf(2.0) / k.powf(2.0) * at).exp() * erfc(h / k * at.sqrt());
             let step = (1.0 - exp_erfc) * delta_temp;
             let d_step = -delta_temp
@@ -113,7 +113,7 @@ fn erfc_simd(arr: Simd<[f64; 4]>) -> Simd<[f64; 4]> {
 impl SolveSinglePoint for NewtonTangentSolver {
     fn solve_single_point(&self, point_data: PointData) -> f64 {
         let PhysicalParam {
-            peak_temperature: tw,
+            gmax_temperature: tw,
             solid_thermal_conductivity: k,
             solid_thermal_diffusivity: a,
             ..
@@ -139,7 +139,7 @@ impl SolveSinglePoint for NewtonTangentSolver {
 impl SolveSinglePoint for NewtonDownSolver {
     fn solve_single_point(&self, point_data: PointData) -> f64 {
         let PhysicalParam {
-            peak_temperature: tw,
+            gmax_temperature: tw,
             solid_thermal_conductivity: k,
             solid_thermal_diffusivity: a,
             ..
@@ -186,7 +186,7 @@ impl Default for IterationMethod {
 }
 
 pub fn solve(
-    _green2: ArcArray2<u8>,
+    _gmax_frame_indexes: ArcArray1<usize>,
     physical_param: PhysicalParam,
     iteration_method: IterationMethod,
     frame_rate: usize,
@@ -226,7 +226,7 @@ mod tests {
         sync::{Arc, Mutex},
     };
 
-    use crate::{daq::DaqManager, setting::SqliteSettingStorage};
+    use crate::{daq::DaqManager, setting::MockSettingStorage};
 
     use super::*;
     use approx::assert_relative_eq;
@@ -236,7 +236,7 @@ mod tests {
 
     impl PointData<'_> {
         fn iter_no_simd(&self, h: f64, dt: f64, k: f64, a: f64, tw: f64) -> (f64, f64) {
-            let peak_frame_index = self.peak_frame_index;
+            let gmax_frame_index = self.gmax_frame_index;
             let temperatures = self.temperatures;
             // We use the average of first 4 values to calculate the initial temperature.
             const FIRST_FEW_TO_CAL_T0: usize = 4;
@@ -245,37 +245,41 @@ mod tests {
 
             let (sum, diff_sum) = temperatures
                 .array_windows::<2>()
-                .take(peak_frame_index)
+                .take(gmax_frame_index)
                 .enumerate()
-                .fold((0.0, 0.0), |(sum, diff_sum), (frame_index, temps_2)| {
-                    let delta_temp = unsafe { temps_2.get_unchecked(1) - temps_2.get_unchecked(0) };
-                    let at = a * dt * (peak_frame_index - frame_index - 1) as f64;
-                    let exp_erfc = (h.powf(2.0) / k.powf(2.0) * at).exp() * erfc(h / k * at.sqrt());
+                .fold(
+                    (0.0, 0.0),
+                    |(sum, diff_sum), (frame_index, [temp1, temp2])| {
+                        let delta_temp = temp2 - temp1;
+                        let at = a * dt * (gmax_frame_index - frame_index - 1) as f64;
+                        let exp_erfc =
+                            (h.powf(2.0) / k.powf(2.0) * at).exp() * erfc(h / k * at.sqrt());
 
-                    let step = (1.0 - exp_erfc) * delta_temp;
-                    let diff_step = -delta_temp
-                        * (2.0 * at.sqrt() / k / PI.sqrt()
-                            - (2.0 * at * h * exp_erfc) / k.powf(2.));
+                        let step = (1.0 - exp_erfc) * delta_temp;
+                        let diff_step = -delta_temp
+                            * (2.0 * at.sqrt() / k / PI.sqrt()
+                                - (2.0 * at * h * exp_erfc) / k.powf(2.));
 
-                    (sum + step, diff_sum + diff_step)
-                });
+                        (sum + step, diff_sum + diff_step)
+                    },
+                );
 
             (tw - t0 - sum, diff_sum)
         }
 
         fn no_iter_no_simd(&self, h: f64, dt: f64, k: f64, a: f64, tw: f64) -> (f64, f64) {
-            let peak_frame_index = self.peak_frame_index;
+            let gmax_frame_index = self.gmax_frame_index;
             let temps = self.temperatures;
             // We use the average of first 4 values to calculate the initial temperature.
             const FIRST_FEW_TO_CAL_T0: usize = 4;
             let t0 = temps[..FIRST_FEW_TO_CAL_T0].iter().sum::<f64>() / FIRST_FEW_TO_CAL_T0 as f64;
 
             let (mut sum, mut diff_sum) = (0., 0.);
-            for frame_index in 0..peak_frame_index {
+            for frame_index in 0..gmax_frame_index {
                 let delta_temp = unsafe {
                     temps.get_unchecked(frame_index + 1) - temps.get_unchecked(frame_index)
                 };
-                let at = a * dt * (peak_frame_index - frame_index - 1) as f64;
+                let at = a * dt * (gmax_frame_index - frame_index - 1) as f64;
                 let exp_erfc = (h.powf(2.0) / k.powf(2.0) * at).exp() * erfc(h / k * at.sqrt());
 
                 let step = (1.0 - exp_erfc) * delta_temp;
@@ -292,11 +296,13 @@ mod tests {
 
     fn new_temps() -> Array1<f64> {
         async_runtime::block_on(async {
-            let daq_manager =
-                DaqManager::new(Arc::new(Mutex::new(SqliteSettingStorage::new_in_memory())));
+            let mut mock = MockSettingStorage::new();
+            mock.expect_set_daq_metadata().return_once(|_| Ok(()));
+
+            let daq_manager = DaqManager::new(Arc::new(Mutex::new(mock)));
             daq_manager
                 .read_daq(Some(PathBuf::from(
-                    "/home/yhj/Documents/2021yhj/EXP/imp/daq/imp_20000_1.lvm",
+                    "/home/yhj/Downloads/2021_YanHongjie/EXP/imp/daq/imp_20000_1.lvm",
                 )))
                 .await
                 .unwrap();
@@ -307,11 +313,10 @@ mod tests {
     const I: (f64, f64, f64, f64, f64) = (100.0, 0.04, 0.19, 1.091e-7, 35.48);
 
     #[test]
-    #[ignore]
     fn test_result_correct() {
         let temps = new_temps();
         let point_data = PointData {
-            peak_frame_index: 800,
+            gmax_frame_index: 800,
             temperatures: temps.as_slice_memory_order().unwrap(),
         };
         let r1 = point_data.heat_transfer_equation(I.0, I.1, I.2, I.3, I.4);
@@ -336,11 +341,10 @@ mod tests {
     // in this case.
 
     #[bench]
-    #[ignore]
     fn bench_simd(b: &mut Bencher) {
         let temps = new_temps();
         let point_data = PointData {
-            peak_frame_index: 800,
+            gmax_frame_index: 800,
             temperatures: temps.as_slice_memory_order().unwrap(),
         };
 
@@ -349,11 +353,10 @@ mod tests {
     }
 
     #[bench]
-    #[ignore]
     fn bench_iter_no_simd(b: &mut Bencher) {
         let temps = new_temps();
         let point_data = PointData {
-            peak_frame_index: 800,
+            gmax_frame_index: 800,
             temperatures: temps.as_slice_memory_order().unwrap(),
         };
 
@@ -362,11 +365,10 @@ mod tests {
     }
 
     #[bench]
-    #[ignore]
     fn bench_no_iter_no_simd(b: &mut Bencher) {
         let temps = new_temps();
         let point_data = PointData {
-            peak_frame_index: 800,
+            gmax_frame_index: 800,
             temperatures: temps.as_slice_memory_order().unwrap(),
         };
 

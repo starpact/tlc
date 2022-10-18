@@ -115,7 +115,7 @@ impl SettingStorage for SqliteSettingStorage {
             iteration_method,
             physical_param:
                 PhysicalParam {
-                    peak_temperature,
+                    gmax_temperature: peak_temperature,
                     solid_thermal_conductivity,
                     solid_thermal_diffusivity,
                     characteristic_length,
@@ -493,18 +493,18 @@ impl SettingStorage for SqliteSettingStorage {
 
     fn filter_metadata(&self) -> Result<FilterMetadata> {
         let id = self.setting_id()?;
-        let (video_metadata_str, filter_method_str): (String, String) = self.conn.query_row(
-            "SELECT video_metadata, filter_method FROM settings WHERE id = ?1",
+        let filter_method_str: String = self.conn.query_row(
+            "SELECT filter_method FROM settings WHERE id = ?1",
             [id],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| row.get(0),
         )?;
 
-        let video_metadata: VideoMetadata = serde_json::from_str(&video_metadata_str)?;
         let filter_method = serde_json::from_str(&filter_method_str)?;
+        let green2_metadata = self.green2_metadata()?;
 
         Ok(FilterMetadata {
             filter_method,
-            video_path: video_metadata.path,
+            green2_metadata,
         })
     }
 
@@ -560,7 +560,7 @@ impl SettingStorage for SqliteSettingStorage {
             [id],
             |row| {
                 Ok(PhysicalParam {
-                    peak_temperature: row.get(0)?,
+                    gmax_temperature: row.get(0)?,
                     solid_thermal_conductivity: row.get(1)?,
                     solid_thermal_diffusivity: row.get(2)?,
                     characteristic_length: row.get(3)?,

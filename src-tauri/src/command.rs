@@ -150,7 +150,7 @@ pub async fn filter_green2(state: State<'_>) -> TlcResult<()> {
 
 #[tauri::command]
 pub async fn get_filter_green2_progress(state: State<'_>) -> TlcResult<Progress> {
-    Ok(state.get_filter_green2_progress())
+    Ok(state.get_detect_peak_progress())
 }
 
 #[tauri::command]

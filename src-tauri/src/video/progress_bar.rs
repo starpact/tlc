@@ -67,7 +67,7 @@ impl ProgressBar {
     fn interrupt(&self) {
         self.0.store(i64::MIN, Ordering::Relaxed);
         for i in 0.. {
-            std::thread::sleep(std::time::Duration::from_millis(1));
+            std::thread::sleep(std::time::Duration::from_millis(10));
             let progress = to_progress(self.0.load(Ordering::Relaxed));
             if matches!(progress, Progress::Uninitialized) {
                 debug!("interrupted after {i} checks");
