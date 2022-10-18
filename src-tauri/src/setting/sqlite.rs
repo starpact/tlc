@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::Path;
 
 use anyhow::{anyhow, bail, Result};
 use rusqlite::{params, Connection, Error::QueryReturnedNoRows};
@@ -23,10 +23,21 @@ pub struct SqliteSettingStorage {
 }
 
 impl SqliteSettingStorage {
-    pub fn new() -> Self {
-        const DB_FILEPATH: &str = "./var/db.sqlite3";
-        let conn = Connection::open(DB_FILEPATH)
-            .unwrap_or_else(|e| panic!("Failed to create/open metadata db at {DB_FILEPATH}: {e}"));
+    pub fn new<P: AsRef<Path>>(path: P) -> Self {
+        let conn = Connection::open(path)
+            .unwrap_or_else(|e| panic!("Failed to create/open metadata db: {e}",));
+        conn.execute(include_str!("../../db/schema.sql"), ())
+            .expect("Failed to create db");
+
+        Self {
+            conn,
+            setting_id: None,
+        }
+    }
+
+    #[cfg(test)]
+    pub fn new_in_memory() -> Self {
+        let conn = Connection::open_in_memory().unwrap();
         conn.execute(include_str!("../../db/schema.sql"), ())
             .expect("Failed to create db");
 
@@ -96,7 +107,7 @@ impl SqliteSettingStorage {
 }
 
 impl SettingStorage for SqliteSettingStorage {
-    fn create_setting(&mut self, request: CreateRequest) -> Result<i64> {
+    fn create_setting(&mut self, request: CreateRequest) -> Result<()> {
         let CreateRequest {
             name,
             save_root_dir,
@@ -151,7 +162,7 @@ impl SettingStorage for SqliteSettingStorage {
             ])?;
         self.setting_id = Some(id);
 
-        Ok(id)
+        Ok(())
     }
 
     fn switch_setting(&mut self, setting_id: i64) -> Result<()> {
@@ -175,8 +186,12 @@ impl SettingStorage for SqliteSettingStorage {
         Ok(())
     }
 
-    fn delete_setting(&mut self, setting_id: i64) -> Result<()> {
-        unimplemented!()
+    fn delete_setting(&mut self) -> Result<()> {
+        let id = self.setting_id()?;
+        self.conn
+            .execute("DELETE FROM settings WHERE id = ?1", [id])?;
+
+        todo!()
     }
 
     fn save_root_dir(&self) -> Result<String> {
@@ -190,7 +205,7 @@ impl SettingStorage for SqliteSettingStorage {
         Ok(save_root_dir)
     }
 
-    fn set_save_root_dir(&self, save_root_dir: PathBuf) -> Result<()> {
+    fn set_save_root_dir(&self, save_root_dir: &Path) -> Result<()> {
         let id = self.setting_id()?;
         let save_root_dir = save_root_dir
             .to_str()
@@ -210,24 +225,10 @@ impl SettingStorage for SqliteSettingStorage {
     }
 
     /// Compare the new `video_metadata` with the old one to make minimal updates.
-    fn set_video_metadata(&self, video_metadata: VideoMetadata) -> Result<()> {
+    fn set_video_metadata(&self, video_metadata: &VideoMetadata) -> Result<()> {
         let id = self.setting_id()?;
         match self.video_metadata_inner()? {
-            Some(old_video_metadata)
-                if old_video_metadata.fingerprint == video_metadata.fingerprint =>
-            {
-                // When two videos have the same finderprint, we can reuse other part of
-                // the current setting. The only possible change is the path of video.
-                if old_video_metadata.path != video_metadata.path {
-                    let video_metadata_str = serde_json::to_string(&video_metadata)?;
-                    let updated_at = util::time::now_as_secs();
-                    self.conn.execute(
-                        "UPDATE settings SET video_metadata = ?1, updated_at = ?2  WHERE id = ?3",
-                        params![video_metadata_str, updated_at, id],
-                    )?;
-                }
-                Ok(())
-            }
+            Some(old_video_metadata) if old_video_metadata.path == video_metadata.path => Ok(()),
             Some(old_video_metadata) if old_video_metadata.shape == video_metadata.shape => {
                 // Most of the time we can make use of the previous position setting rather
                 // than directly invalidate it because within a series of experiments the
@@ -281,20 +282,10 @@ impl SettingStorage for SqliteSettingStorage {
             .ok_or_else(|| anyhow!("daq metadata not loaded yet"))
     }
 
-    fn set_daq_metadata(&self, daq_metadata: DaqMetadata) -> Result<()> {
+    fn set_daq_metadata(&self, daq_metadata: &DaqMetadata) -> Result<()> {
         let id = self.setting_id()?;
         match self.daq_metadata_inner()? {
-            Some(old_daq_metadata) if old_daq_metadata.fingerprint == daq_metadata.fingerprint => {
-                if old_daq_metadata.path != daq_metadata.path {
-                    let daq_metadata_str = serde_json::to_string(&daq_metadata)?;
-                    let updated_at = util::time::now_as_secs();
-                    self.conn.execute(
-                        "UPDATE settings SET daq_metadata = ?1, updated_at = ?2  WHERE id = ?3",
-                        params![daq_metadata_str, updated_at, id],
-                    )?;
-                }
-                Ok(())
-            }
+            Some(old_daq_metadata) if old_daq_metadata.path == daq_metadata.path => Ok(()),
             _ => {
                 let thermocouples = self.thermocouples_inner()?;
                 let daq_metadata_str = serde_json::to_string(&daq_metadata)?;
@@ -491,7 +482,7 @@ impl SettingStorage for SqliteSettingStorage {
             start_frame,
             cal_num,
             area,
-            video_fingerprint: video_metadata.fingerprint,
+            video_path: video_metadata.path,
         })
     }
 
@@ -513,7 +504,7 @@ impl SettingStorage for SqliteSettingStorage {
 
         Ok(FilterMetadata {
             filter_method,
-            video_fingerprint: video_metadata.fingerprint,
+            video_path: video_metadata.path,
         })
     }
 
@@ -580,4 +571,10 @@ impl SettingStorage for SqliteSettingStorage {
 
         Ok(physical_param)
     }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn test() {}
 }

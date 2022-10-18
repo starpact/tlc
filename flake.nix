@@ -1,9 +1,10 @@
 {
   inputs.nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
 
-  outputs = { self, nixpkgs, flake-utils }:
+  outputs = { self, nixpkgs }:
     let
       pkgs = import nixpkgs { system = "x86_64-linux"; };
+      stdenv = pkgs.llvmPackages_14.stdenv;
       libraries = with pkgs;[
         dbus.lib
         cairo
@@ -30,7 +31,7 @@
       ];
     in
     {
-      devShells.x86_64-linux.default = pkgs.mkShell {
+      devShells.x86_64-linux.default = pkgs.mkShell.override { inherit stdenv; } {
         buildInputs = packages;
         shellHook =
           let

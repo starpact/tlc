@@ -58,33 +58,30 @@ impl<S: SettingStorage> GlobalState<S> {
             physical_param: request.physical_param,
         };
 
-        let setting_id = self
-            .asyncify(|mut s| s.create_setting(create_request))
+        self.asyncify(|mut s| s.create_setting(create_request))
             .await?;
 
-        let load_video_and_daq = async move {
-            self.video_manager
-                .spawn_load_packets(Some(video_path))
-                .await?;
-            self.daq_manager.read_daq(Some(daq_path)).await?;
-            Ok(())
-        };
-
-        if let e @ Err(_) = load_video_and_daq.await {
-            // Rollback.
-            self.asyncify(move |mut s| s.delete_setting(setting_id))
-                .await?;
-            return e;
+        // We cannot use `try_join` because we need to wait until both tasks are finished
+        // to make sure every db operation finished before rollback starts.
+        match tokio::join!(
+            self.video_manager.spawn_read_video(Some(video_path)),
+            self.daq_manager.read_daq(Some(daq_path)),
+        ) {
+            (Ok(_), Ok(_)) => Ok(()),
+            // TBD: only return one error.
+            (Err(e), _) | (_, Err(e)) => {
+                // Rollback.
+                self.asyncify(|mut s| s.delete_setting()).await?;
+                Err(e)
+            }
         }
-
-        Ok(())
     }
 
     pub async fn switch_setting(&self, setting_id: i64) -> Result<()> {
         self.asyncify(move |mut s| s.switch_setting(setting_id))
             .await?;
 
-        self.video_manager.spawn_load_packets(None).await?;
+        self.video_manager.spawn_read_video(None).await?;
         self.daq_manager.read_daq(None).await?;
 
         Ok(())
@@ -98,7 +95,8 @@ impl<S: SettingStorage> GlobalState<S> {
         if !save_root_dir.is_dir() {
             bail!("save_root_dir is not a valid directory: {save_root_dir:?}");
         }
-        self.asyncify(|s| s.set_save_root_dir(save_root_dir)).await
+        self.asyncify(move |s| s.set_save_root_dir(&save_root_dir))
+            .await
     }
 
     pub async fn get_video_metadata(&self) -> Result<VideoMetadata> {
@@ -106,9 +104,7 @@ impl<S: SettingStorage> GlobalState<S> {
     }
 
     pub async fn set_video_path(&self, video_path: PathBuf) -> Result<()> {
-        self.video_manager
-            .spawn_load_packets(Some(video_path))
-            .await
+        self.video_manager.spawn_read_video(Some(video_path)).await
     }
 
     pub async fn get_daq_metadata(&self) -> Result<DaqMetadata> {
@@ -248,27 +244,28 @@ impl<S: SettingStorage> GlobalState<S> {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use mockall::predicate::eq;
 
-    use crate::{
-        setting::{MockSettingStorage, SqliteSettingStorage},
-        util::{self, log},
-    };
-
     use super::*;
+    use crate::{setting::MockSettingStorage, util};
 
+    // For unit tests.
     const SAMPLE_VIDEO_PATH: &str = "./tests/almost_empty.avi";
+    // Too large, just for integration tests.
+    const VIDEO_PATH: &str =
+        "/home/yhj/Downloads/2021_YanHongjie/EXP/imp/videos/imp_20000_1_up.avi";
+    // For both unit and integration tests.
+    const DAQ_PATH: &str = "./tests/imp_20000_1.lvm";
 
     #[tokio::test]
     async fn test_create_setting_video_not_found() {
-        log::init();
+        util::log::init();
 
         let mut mock = MockSettingStorage::new();
-        mock.expect_create_setting().once().return_once(|_| Ok(10));
-        mock.expect_delete_setting()
-            .once()
-            .with(eq(10))
-            .return_once(|_| Ok(()));
+        mock.expect_create_setting().once().return_once(|_| Ok(()));
+        mock.expect_delete_setting().once().return_once(|| Ok(()));
 
         let global_state = GlobalState::new(mock);
         global_state
@@ -282,27 +279,23 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_setting_daq_not_found() {
-        log::init();
+        util::log::init();
 
         let video_metadata = VideoMetadata {
             path: PathBuf::from(SAMPLE_VIDEO_PATH),
             frame_rate: 25,
             nframes: 3,
             shape: (1024, 1280),
-            fingerprint: "TODO".to_owned(),
         };
 
         let mut mock = MockSettingStorage::new();
-        mock.expect_create_setting().once().return_once(|_| Ok(10));
+        mock.expect_create_setting().once().return_once(|_| Ok(()));
         mock.expect_set_video_metadata()
             .with(eq(video_metadata.clone()))
             .return_once(|_| Ok(()));
         mock.expect_video_metadata()
             .returning(move || Ok(video_metadata.clone()));
-        mock.expect_delete_setting()
-            .once()
-            .with(eq(10))
-            .return_once(|_| Ok(()));
+        mock.expect_delete_setting().once().return_once(|| Ok(()));
 
         let global_state = GlobalState::new(mock);
         global_state
@@ -316,24 +309,92 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore]
-    async fn test_trigger_try_spawn_build_green2() {
+    async fn test_create_setting_ok() {
         util::log::init();
-        let global_state = GlobalState::new(SqliteSettingStorage::new());
-        println!("{:#?}", global_state.setting_storage);
 
+        let video_path = PathBuf::from(SAMPLE_VIDEO_PATH);
+        let daq_path = PathBuf::from(DAQ_PATH);
+
+        let video_metadata = VideoMetadata {
+            path: video_path.clone(),
+            frame_rate: 25,
+            nframes: 3,
+            shape: (1024, 1280),
+        };
+        let daq_metadata = DaqMetadata {
+            path: daq_path.clone(),
+            nrows: 2589,
+            ncols: 10,
+        };
+
+        let mut mock = MockSettingStorage::new();
+        mock.expect_create_setting().once().return_once(|_| Ok(()));
+        mock.expect_set_video_metadata()
+            .with(eq(video_metadata.clone()))
+            .return_once(|_| Ok(()));
+        mock.expect_video_metadata()
+            .returning(move || Ok(video_metadata.clone()));
+        mock.expect_set_daq_metadata()
+            .with(eq(daq_metadata))
+            .return_once(|_| Ok(()));
+
+        let global_state = GlobalState::new(mock);
         global_state
-            .set_video_path(PathBuf::from(
-                "/home/yhj/Documents/2021yhj/EXP/imp/videos/imp_50000_1_up.avi",
-            ))
+            .create_setting(CreateSettingRequest {
+                video_path,
+                daq_path,
+                ..Default::default()
+            })
             .await
             .unwrap();
 
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn test_full_real() {
+        util::log::init();
+
+        let video_path = PathBuf::from(VIDEO_PATH);
+        let daq_path = PathBuf::from(DAQ_PATH);
+
+        let video_metadata = VideoMetadata {
+            path: video_path,
+            frame_rate: 25,
+            nframes: 2444,
+            shape: (1024, 1280),
+        };
+        let daq_metadata = DaqMetadata {
+            path: daq_path,
+            nrows: 2589,
+            ncols: 10,
+        };
+
+        let video_path = video_metadata.path.clone();
+        let daq_path = daq_metadata.path.clone();
+
+        let mut mock = MockSettingStorage::new();
+        mock.expect_create_setting().once().return_once(|_| Ok(()));
+        mock.expect_set_video_metadata()
+            .with(eq(video_metadata.clone()))
+            .return_once(|_| Ok(()));
+        mock.expect_video_metadata()
+            .returning(move || Ok(video_metadata.clone()));
+        mock.expect_set_daq_metadata()
+            .with(eq(daq_metadata))
+            .return_once(|_| Ok(()));
+
+        let global_state = GlobalState::new(mock);
         global_state
-            .synchronize_video_and_daq(10, 20)
+            .create_setting(CreateSettingRequest {
+                video_path,
+                daq_path,
+                ..Default::default()
+            })
             .await
             .unwrap();
-        global_state.set_start_frame(10).await.unwrap();
-        tokio::time::sleep(std::time::Duration::from_secs(6)).await;
+
+        tokio::time::sleep(Duration::from_secs(3)).await;
     }
 }

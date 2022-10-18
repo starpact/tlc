@@ -292,7 +292,8 @@ mod tests {
 
     fn new_temps() -> Array1<f64> {
         async_runtime::block_on(async {
-            let daq_manager = DaqManager::new(Arc::new(Mutex::new(SqliteSettingStorage::new())));
+            let daq_manager =
+                DaqManager::new(Arc::new(Mutex::new(SqliteSettingStorage::new_in_memory())));
             daq_manager
                 .read_daq(Some(PathBuf::from(
                     "/home/yhj/Documents/2021yhj/EXP/imp/daq/imp_20000_1.lvm",

@@ -43,7 +43,7 @@ impl ProgressBar {
         self.start(0); // 0 can be any u32.
     }
 
-    pub fn get(&self) -> Progress {
+    pub fn progress(&self) -> Progress {
         to_progress(self.0.load(Ordering::Relaxed))
     }
 
@@ -55,8 +55,10 @@ impl ProgressBar {
         if old == 0 {
             unreachable!("add before start");
         }
-        if old as u32 >= (old >> 32) as u32 {
-            unreachable!("progress exceeds limit");
+        let total = (old >> 32) as u32;
+        let count = old as u32;
+        if count >= total {
+            unreachable!("progress exceeds limit: {count} >= {total}");
         }
 
         Ok(())
@@ -68,7 +70,7 @@ impl ProgressBar {
             std::thread::sleep(std::time::Duration::from_millis(1));
             let progress = to_progress(self.0.load(Ordering::Relaxed));
             if matches!(progress, Progress::Uninitialized) {
-                debug!("Interrupted after {i} checks");
+                debug!("interrupted after {i} checks");
                 break;
             }
         }
@@ -110,7 +112,7 @@ mod tests {
     #[test]
     fn test_interrupt() {
         let progress_bar = ProgressBar::default();
-        assert_matches!(progress_bar.get(), Progress::Uninitialized);
+        assert_matches!(progress_bar.progress(), Progress::Uninitialized);
 
         thread::scope(|s| {
             s.spawn(|| {
@@ -128,11 +130,11 @@ mod tests {
             });
             thread::sleep(Duration::from_millis(100));
 
-            assert_matches!(progress_bar.get(), Progress::InProgress { .. });
+            assert_matches!(progress_bar.progress(), Progress::InProgress { .. });
             const TOTAL: u32 = 2333333;
             let _reset_guard = progress_bar.start(TOTAL);
             assert_matches!(
-                progress_bar.get(),
+                progress_bar.progress(),
                 Progress::InProgress {
                     total: TOTAL,
                     count: 0
@@ -140,21 +142,21 @@ mod tests {
             );
             progress_bar.add(1).unwrap();
             assert_matches!(
-                progress_bar.get(),
+                progress_bar.progress(),
                 Progress::InProgress {
                     total: TOTAL,
                     count: 1
                 }
             );
             drop(_reset_guard);
-            assert_matches!(progress_bar.get(), Progress::Uninitialized);
+            assert_matches!(progress_bar.progress(), Progress::Uninitialized);
         });
     }
 
     #[test]
     fn test_reset() {
         let progress_bar = ProgressBar::default();
-        assert_matches!(progress_bar.get(), Progress::Uninitialized);
+        assert_matches!(progress_bar.progress(), Progress::Uninitialized);
 
         thread::scope(|s| {
             s.spawn(|| {
@@ -172,9 +174,9 @@ mod tests {
             });
             thread::sleep(Duration::from_millis(100));
 
-            assert_matches!(progress_bar.get(), Progress::InProgress { .. });
+            assert_matches!(progress_bar.progress(), Progress::InProgress { .. });
             progress_bar.start(0);
-            assert_matches!(progress_bar.get(), Progress::Uninitialized);
+            assert_matches!(progress_bar.progress(), Progress::Uninitialized);
         });
     }
 

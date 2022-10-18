@@ -22,16 +22,16 @@ pub use sqlite::SqliteSettingStorage;
 
 #[cfg_attr(test, automock)]
 pub trait SettingStorage: Send + 'static {
-    fn create_setting(&mut self, request: CreateRequest) -> Result<i64>;
+    fn create_setting(&mut self, request: CreateRequest) -> Result<()>;
     fn switch_setting(&mut self, setting_id: i64) -> Result<()>;
-    fn delete_setting(&mut self, setting_id: i64) -> Result<()>;
+    fn delete_setting(&mut self) -> Result<()>;
 
     fn save_root_dir(&self) -> Result<String>;
-    fn set_save_root_dir(&self, save_root_dir: PathBuf) -> Result<()>;
+    fn set_save_root_dir(&self, save_root_dir: &Path) -> Result<()>;
     fn video_metadata(&self) -> Result<VideoMetadata>;
-    fn set_video_metadata(&self, video_metadata: VideoMetadata) -> Result<()>;
+    fn set_video_metadata(&self, video_metadata: &VideoMetadata) -> Result<()>;
     fn daq_metadata(&self) -> Result<DaqMetadata>;
-    fn set_daq_metadata(&self, daq_metadata: DaqMetadata) -> Result<()>;
+    fn set_daq_metadata(&self, daq_metadata: &DaqMetadata) -> Result<()>;
     fn start_index(&self) -> Result<StartIndex>;
     fn synchronize_video_and_daq(&self, start_frame: usize, start_row: usize) -> Result<()>;
     fn set_start_frame(&self, start_frame: usize) -> Result<()>;

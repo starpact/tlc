@@ -85,10 +85,6 @@ impl SpawnHandle {
             _permit,
         })
     }
-
-    pub fn last_target_frame_index(&self) -> usize {
-        self.last_target_frame_index.load(Ordering::Relaxed)
-    }
 }
 
 impl Default for SpawnHandle {

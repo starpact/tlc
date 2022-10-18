@@ -24,13 +24,18 @@ use tracing::error;
 use command::*;
 use state::*;
 
+const SQLITE_FILEPATH: &str = "./var/db.sqlite3";
+
 fn main() {
     util::log::init();
 
     ffmpeg::init().expect("Failed to init ffmpeg");
 
+    let setting_storage = SqliteSettingStorage::new(SQLITE_FILEPATH);
+    let global_state = GlobalState::new(setting_storage);
+
     tauri::Builder::default()
-        .manage(GlobalState::new(SqliteSettingStorage::new()))
+        .manage(global_state)
         .invoke_handler(tauri::generate_handler![
             create_setting,
             switch_setting,
@@ -65,5 +70,5 @@ fn main() {
             solve,
         ])
         .run(tauri::generate_context!())
-        .unwrap_or_else(|e| error!("Uncaught error: {}", e));
+        .unwrap_or_else(|e| error!("error while running application: {e}"));
 }

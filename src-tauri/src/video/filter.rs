@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use anyhow::Result;
 use dwt::{transform, wavelet::Wavelet, Operation};
 use median::Filter;
@@ -11,24 +13,28 @@ use super::progress_bar::ProgressBar;
 pub enum FilterMethod {
     #[default]
     No,
-    Median(usize),
-    Wavelet(f64),
+    Median {
+        window_size: usize,
+    },
+    Wavelet {
+        threshold_ratio: f64,
+    },
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct FilterMetadata {
     pub filter_method: FilterMethod,
-    pub video_fingerprint: String,
+    pub video_path: PathBuf,
 }
 
-#[instrument(ret)]
+#[instrument(skip(green2, progress_bar), err)]
 pub fn filter_all(
     green2: ArcArray2<u8>,
     filter_method: FilterMethod,
     progress_bar: &ProgressBar,
 ) -> Result<ArcArray2<u8>> {
     let total = green2.dim().1;
-    progress_bar.start(total as u32);
+    let _reset_guard = progress_bar.start(total as u32);
 
     use FilterMethod::*;
     match filter_method {
@@ -36,19 +42,22 @@ pub fn filter_all(
             progress_bar.add(total as i64).unwrap();
             Ok(green2)
         }
-        Median(window_size) => apply(green2, progress_bar, move |g1| median(g1, window_size)),
-        Wavelet(threshold) => apply(green2, progress_bar, move |g1| wavelet(g1, threshold)),
+        Median { window_size } => apply(green2, progress_bar, move |g1| median(g1, window_size)),
+        Wavelet { threshold_ratio } => {
+            apply(green2, progress_bar, move |g1| wavelet(g1, threshold_ratio))
+        }
     }
 }
 
+#[instrument(skip(green1))]
 pub fn filter_single_point(filter_method: FilterMethod, green1: ArrayView1<u8>) -> Vec<u8> {
     let mut green1 = green1.to_owned();
 
     use FilterMethod::*;
     match filter_method {
         No => {}
-        Median(window_size) => median(green1.view_mut(), window_size),
-        Wavelet(threshold_ratio) => wavelet(green1.view_mut(), threshold_ratio),
+        Median { window_size } => median(green1.view_mut(), window_size),
+        Wavelet { threshold_ratio } => wavelet(green1.view_mut(), threshold_ratio),
     };
 
     green1.to_vec()
@@ -59,7 +68,7 @@ where
     F: Fn(ArrayViewMut1<u8>) + Send + Sync,
 {
     green2
-        .axis_iter_mut(Axis(1)) // clone here
+        .axis_iter_mut(Axis(1)) // green2 is cloned here
         .into_par_iter()
         .try_for_each(|green_history| {
             f(green_history);

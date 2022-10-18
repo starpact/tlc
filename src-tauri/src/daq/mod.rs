@@ -10,15 +10,22 @@ use calamine::{open_workbook, Reader, Xlsx};
 use ndarray::{ArcArray2, Array2};
 use serde::{Deserialize, Serialize};
 use tauri::async_runtime::spawn_blocking;
-use tracing::instrument;
+use tracing::{info, instrument};
 
 pub use interpolation::{InterpolationMethod, Temperature2};
 
 use crate::setting::SettingStorage;
 
-#[derive(Clone)]
 pub struct DaqManager<S: SettingStorage> {
     inner: Arc<DaqManagerInner<S>>,
+}
+
+impl<S: SettingStorage> Clone for DaqManager<S> {
+    fn clone(&self) -> Self {
+        DaqManager {
+            inner: self.inner.clone(),
+        }
+    }
 }
 
 struct DaqManagerInner<S: SettingStorage> {
@@ -31,12 +38,11 @@ struct DaqData {
     temperature2: Option<Temperature2>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct DaqMetadata {
     pub path: PathBuf,
     pub nrows: usize,
     pub ncols: usize,
-    pub fingerprint: String,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Copy)]
@@ -63,55 +69,54 @@ impl<S: SettingStorage> DaqManager<S> {
         }
     }
 
-    #[instrument(skip(self), err)]
     pub async fn read_daq(&self, daq_path: Option<PathBuf>) -> Result<()> {
-        let daq_manager = self.inner.clone();
-        spawn_blocking(move || {
-            let daq_path = match daq_path {
-                Some(daq_path) => daq_path,
-                None => {
-                    daq_manager
-                        .setting_storage
-                        .lock()
-                        .unwrap()
-                        .daq_metadata()?
-                        .path
-                }
-            };
-
-            let daq_data = match daq_path
-                .extension()
-                .ok_or_else(|| anyhow!("invalid daq path: {:?}", daq_path))?
-                .to_str()
-            {
-                Some("lvm") => read_daq_lvm(&daq_path),
-                Some("xlsx") => read_daq_excel(&daq_path),
-                _ => bail!("only .lvm and .xlsx are supported"),
-            }?;
-
-            let daq_metadata = DaqMetadata {
-                path: daq_path,
-                nrows: daq_data.nrows(),
-                ncols: daq_data.ncols(),
-                fingerprint: "TODO".to_owned(),
-            };
-
-            {
-                daq_manager
-                    .setting_storage
-                    .lock()
-                    .unwrap()
-                    .set_daq_metadata(daq_metadata)?;
-                daq_manager.daq_data.lock().unwrap().raw = Some(daq_data.into_shared());
-            }
-
-            Ok(())
-        })
-        .await?
+        let daq_manager = (*self).clone();
+        spawn_blocking(move || daq_manager.inner.read_daq(daq_path)).await?
     }
 
     pub fn daq_data(&self) -> Option<ArcArray2<f64>> {
         self.inner.daq_data.lock().unwrap().raw.clone()
+    }
+}
+
+impl<S: SettingStorage> DaqManagerInner<S> {
+    #[instrument(skip(self), err)]
+    fn read_daq(&self, daq_path: Option<PathBuf>) -> Result<()> {
+        let daq_path = match daq_path {
+            Some(daq_path) => daq_path,
+            None => self.setting_storage.lock().unwrap().daq_metadata()?.path,
+        };
+
+        let raw = match daq_path
+            .extension()
+            .ok_or_else(|| anyhow!("invalid daq path: {:?}", daq_path))?
+            .to_str()
+        {
+            Some("lvm") => read_daq_lvm(&daq_path),
+            Some("xlsx") => read_daq_excel(&daq_path),
+            _ => bail!("only .lvm and .xlsx are supported"),
+        }?;
+
+        let nrows = raw.nrows();
+        let ncols = raw.ncols();
+        let fingerprint = "TODO".to_owned();
+        let daq_metadata = DaqMetadata {
+            path: daq_path,
+            nrows,
+            ncols,
+        };
+
+        info!(nrows, ncols, fingerprint);
+        {
+            let mut daq_data = self.daq_data.lock().unwrap();
+            self.setting_storage
+                .lock()
+                .unwrap()
+                .set_daq_metadata(&daq_metadata)?;
+            daq_data.raw = Some(raw.into_shared());
+        }
+
+        Ok(())
     }
 }
 
