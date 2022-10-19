@@ -243,6 +243,8 @@ fn interpolator2(
 
 #[cfg(test)]
 mod test {
+    use approx::assert_relative_eq;
+
     use super::*;
 
     #[test]
@@ -260,8 +262,26 @@ mod test {
             .collect();
         let area = (9, 9, 5, 5);
         let interpolator = Interpolator::new(temperature2, interp_method, area, &thermocouples);
-        println!("{:?}", interpolator.interpolate_single_frame(0).unwrap());
-        println!("{:?}", interpolator.interpolate_single_frame(1).unwrap());
+        assert_relative_eq!(
+            interpolator.interpolate_single_frame(0).unwrap(),
+            array![
+                [1.0, 1.0, 2.0, 3.0, 3.0],
+                [1.0, 1.0, 2.0, 3.0, 3.0],
+                [1.0, 1.0, 2.0, 3.0, 3.0],
+                [1.0, 1.0, 2.0, 3.0, 3.0],
+                [1.0, 1.0, 2.0, 3.0, 3.0]
+            ]
+        );
+        assert_relative_eq!(
+            interpolator.interpolate_single_frame(1).unwrap(),
+            array![
+                [5.0, 5.0, 6.0, 7.0, 7.0],
+                [5.0, 5.0, 6.0, 7.0, 7.0],
+                [5.0, 5.0, 6.0, 7.0, 7.0],
+                [5.0, 5.0, 6.0, 7.0, 7.0],
+                [5.0, 5.0, 6.0, 7.0, 7.0]
+            ]
+        );
     }
 
     #[test]
@@ -279,8 +299,26 @@ mod test {
             .collect();
         let area = (9, 9, 5, 5);
         let interpolator = Interpolator::new(temperature2, interp_method, area, &thermocouples);
-        println!("{:?}", interpolator.interpolate_single_frame(0).unwrap());
-        println!("{:?}", interpolator.interpolate_single_frame(1).unwrap());
+        assert_relative_eq!(
+            interpolator.interpolate_single_frame(0).unwrap(),
+            array![
+                [0.0, 1.0, 2.0, 3.0, 4.0],
+                [0.0, 1.0, 2.0, 3.0, 4.0],
+                [0.0, 1.0, 2.0, 3.0, 4.0],
+                [0.0, 1.0, 2.0, 3.0, 4.0],
+                [0.0, 1.0, 2.0, 3.0, 4.0]
+            ]
+        );
+        assert_relative_eq!(
+            interpolator.interpolate_single_frame(1).unwrap(),
+            array![
+                [4.0, 5.0, 6.0, 7.0, 8.0],
+                [4.0, 5.0, 6.0, 7.0, 8.0],
+                [4.0, 5.0, 6.0, 7.0, 8.0],
+                [4.0, 5.0, 6.0, 7.0, 8.0],
+                [4.0, 5.0, 6.0, 7.0, 8.0]
+            ]
+        );
     }
 
     #[test]
@@ -299,8 +337,26 @@ mod test {
             .collect();
         let area = (9, 9, 5, 5);
         let interpolator = Interpolator::new(temperature2, interp_method, area, &thermocouples);
-        println!("{:?}", interpolator.interpolate_single_frame(0).unwrap());
-        println!("{:?}", interpolator.interpolate_single_frame(1).unwrap());
+        assert_relative_eq!(
+            interpolator.interpolate_single_frame(0).unwrap(),
+            array![
+                [1.0, 1.0, 1.0, 1.0, 1.0],
+                [1.0, 1.0, 1.0, 1.0, 1.0],
+                [1.5, 1.5, 1.5, 1.5, 1.5],
+                [2.0, 2.0, 2.0, 2.0, 2.0],
+                [2.0, 2.0, 2.0, 2.0, 2.0]
+            ]
+        );
+        assert_relative_eq!(
+            interpolator.interpolate_single_frame(1).unwrap(),
+            array![
+                [5.0, 5.0, 5.0, 5.0, 5.0],
+                [5.0, 5.0, 5.0, 5.0, 5.0],
+                [5.5, 5.5, 5.5, 5.5, 5.5],
+                [6.0, 6.0, 6.0, 6.0, 6.0],
+                [6.0, 6.0, 6.0, 6.0, 6.0]
+            ]
+        );
     }
 
     #[test]
@@ -319,8 +375,26 @@ mod test {
             .collect();
         let area = (9, 9, 5, 5);
         let interpolator = Interpolator::new(temperature2, interp_method, area, &thermocouples);
-        println!("{:?}", interpolator.interpolate_single_frame(0).unwrap());
-        println!("{:?}", interpolator.interpolate_single_frame(1).unwrap());
+        assert_relative_eq!(
+            interpolator.interpolate_single_frame(0).unwrap(),
+            array![
+                [0.5, 0.5, 0.5, 0.5, 0.5],
+                [1.0, 1.0, 1.0, 1.0, 1.0],
+                [1.5, 1.5, 1.5, 1.5, 1.5],
+                [2.0, 2.0, 2.0, 2.0, 2.0],
+                [2.5, 2.5, 2.5, 2.5, 2.5]
+            ]
+        );
+        assert_relative_eq!(
+            interpolator.interpolate_single_frame(1).unwrap(),
+            array![
+                [4.5, 4.5, 4.5, 4.5, 4.5],
+                [5.0, 5.0, 5.0, 5.0, 5.0],
+                [5.5, 5.5, 5.5, 5.5, 5.5],
+                [6.0, 6.0, 6.0, 6.0, 6.0],
+                [6.5, 6.5, 6.5, 6.5, 6.5]
+            ]
+        );
     }
 
     #[test]
@@ -347,8 +421,26 @@ mod test {
                 .collect();
         let area = (9, 9, 5, 5);
         let interpolator = Interpolator::new(temperature2, interp_method, area, &thermocouples);
-        println!("{:?}", interpolator.interpolate_single_frame(0).unwrap());
-        println!("{:?}", interpolator.interpolate_single_frame(1).unwrap());
+        assert_relative_eq!(
+            interpolator.interpolate_single_frame(0).unwrap(),
+            array![
+                [1.0, 1.0, 2.0, 3.0, 3.0],
+                [1.0, 1.0, 2.0, 3.0, 3.0],
+                [2.5, 2.5, 3.5, 4.5, 4.5],
+                [4.0, 4.0, 5.0, 6.0, 6.0],
+                [4.0, 4.0, 5.0, 6.0, 6.0]
+            ]
+        );
+        assert_relative_eq!(
+            interpolator.interpolate_single_frame(1).unwrap(),
+            array![
+                [5.0, 5.0, 6.0, 7.0, 7.0],
+                [5.0, 5.0, 6.0, 7.0, 7.0],
+                [6.5, 6.5, 7.5, 8.5, 8.5],
+                [8.0, 8.0, 9.0, 10.0, 10.0],
+                [8.0, 8.0, 9.0, 10.0, 10.0]
+            ]
+        );
     }
 
     #[test]
@@ -375,7 +467,25 @@ mod test {
                 .collect();
         let area = (9, 9, 5, 5);
         let interpolator = Interpolator::new(temperature2, interp_method, area, &thermocouples);
-        println!("{:?}", interpolator.interpolate_single_frame(0).unwrap());
-        println!("{:?}", interpolator.interpolate_single_frame(1).unwrap());
+        assert_relative_eq!(
+            interpolator.interpolate_single_frame(0).unwrap(),
+            array![
+                [-1.5, -0.5, 0.5, 1.5, 2.5],
+                [0.0, 1.0, 2.0, 3.0, 4.0],
+                [1.5, 2.5, 3.5, 4.5, 5.5],
+                [3.0, 4.0, 5.0, 6.0, 7.0],
+                [4.5, 5.5, 6.5, 7.5, 8.5]
+            ]
+        );
+        assert_relative_eq!(
+            interpolator.interpolate_single_frame(1).unwrap(),
+            array![
+                [2.5, 3.5, 4.5, 5.5, 6.5],
+                [4.0, 5.0, 6.0, 7.0, 8.0],
+                [5.5, 6.5, 7.5, 8.5, 9.5],
+                [7.0, 8.0, 9.0, 10.0, 11.0],
+                [8.5, 9.5, 10.5, 11.5, 12.5]
+            ]
+        );
     }
 }

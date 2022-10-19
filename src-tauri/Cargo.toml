@@ -26,7 +26,7 @@ ffmpeg-next = "5.1"
 thread_local = "1.1"
 image = "0.24"
 base64 = "0.13"
-ndarray = { version = "0.15", features = ["rayon", "serde"] }
+ndarray = { version = "0.15", features = ["rayon", "serde", "approx-0_5"] }
 csv = "1.1"
 calamine = "0.18"
 plotters = "0.3"

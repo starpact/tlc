@@ -5,7 +5,7 @@ use std::{
     time::Instant,
 };
 
-use anyhow::Result;
+use anyhow::{anyhow, bail, Result};
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWriteExt;
 use tracing::instrument;
@@ -28,18 +28,15 @@ pub trait SettingStorage: Send + 'static {
 
     fn save_root_dir(&self) -> Result<String>;
     fn set_save_root_dir(&self, save_root_dir: &Path) -> Result<()>;
-    fn video_metadata(&self) -> Result<VideoMetadata>;
+    fn video_metadata_optional(&self) -> Result<Option<VideoMetadata>>;
     fn set_video_metadata(&self, video_metadata: &VideoMetadata) -> Result<()>;
-    fn daq_metadata(&self) -> Result<DaqMetadata>;
+    fn daq_metadata_optional(&self) -> Result<Option<DaqMetadata>>;
     fn set_daq_metadata(&self, daq_metadata: &DaqMetadata) -> Result<()>;
     fn start_index(&self) -> Result<StartIndex>;
-    fn synchronize_video_and_daq(&self, start_frame: usize, start_row: usize) -> Result<()>;
-    fn set_start_frame(&self, start_frame: usize) -> Result<()>;
-    fn set_start_row(&self, start_row: usize) -> Result<()>;
+    fn set_start_index(&self, start_frame: usize, start_row: usize) -> Result<()>;
     fn area(&self) -> Result<(usize, usize, usize, usize)>;
     fn set_area(&self, area: (usize, usize, usize, usize)) -> Result<()>;
-    fn green2_metadata(&self) -> Result<Green2Metadata>;
-    fn thermocouples(&self) -> Result<Vec<Thermocouple>>;
+    fn thermocouples_optional(&self) -> Result<Option<Vec<Thermocouple>>>;
     fn interpolation_method(&self) -> Result<InterpolationMethod>;
     fn set_interpolation_method(&self, interpolation_method: InterpolationMethod) -> Result<()>;
     fn filter_metadata(&self) -> Result<FilterMetadata>;
@@ -47,6 +44,124 @@ pub trait SettingStorage: Send + 'static {
     fn iteration_method(&self) -> Result<IterationMethod>;
     fn set_iteration_method(&self, iteration_method: IterationMethod) -> Result<()>;
     fn physical_param(&self) -> Result<PhysicalParam>;
+
+    fn video_metadata(&self) -> Result<VideoMetadata> {
+        self.video_metadata_optional()?
+            .ok_or_else(|| anyhow!("video metadata not loaded yet"))
+    }
+
+    fn daq_metadata(&self) -> Result<DaqMetadata> {
+        self.daq_metadata_optional()?
+            .ok_or_else(|| anyhow!("daq metadata not loaded yet"))
+    }
+
+    fn synchronize_video_and_daq(&self, start_frame: usize, start_row: usize) -> Result<()> {
+        let nframes = self
+            .video_metadata_optional()?
+            .ok_or_else(|| anyhow!("video path unset"))?
+            .nframes;
+        if start_frame >= nframes {
+            bail!("frame_index({start_frame}) out of range({nframes})");
+        }
+        let nrows = self
+            .daq_metadata_optional()?
+            .ok_or_else(|| anyhow!("daq  path unset"))?
+            .nrows;
+        if start_row >= nrows {
+            bail!("row_index({start_row}) out of range({nrows})");
+        }
+
+        self.set_start_index(start_frame, start_row)
+    }
+
+    fn set_start_frame(&self, start_frame: usize) -> Result<()> {
+        let nframes = self
+            .video_metadata_optional()?
+            .ok_or_else(|| anyhow!("video path unset"))?
+            .nframes;
+        if start_frame >= nframes {
+            bail!("frame_index({start_frame}) out of range({nframes})");
+        }
+
+        let StartIndex {
+            start_frame: old_start_frame,
+            start_row: old_start_row,
+        } = self.start_index()?;
+
+        let nrows = self
+            .daq_metadata_optional()?
+            .ok_or_else(|| anyhow!("daq  path unset"))?
+            .nrows;
+        if old_start_row + start_frame < old_start_frame {
+            bail!("invalid start_frame");
+        }
+
+        let start_row = old_start_row + start_frame - old_start_frame;
+        if start_row >= nrows {
+            bail!("row_index({start_row}) out of range({nrows})");
+        }
+
+        self.set_start_index(start_frame, start_row)
+    }
+
+    fn set_start_row(&self, start_row: usize) -> Result<()> {
+        let nrows = self
+            .daq_metadata_optional()?
+            .ok_or_else(|| anyhow!("daq  path unset"))?
+            .nrows;
+        if start_row >= nrows {
+            bail!("row_index({start_row}) out of range({nrows})");
+        }
+
+        let StartIndex {
+            start_frame: old_start_frame,
+            start_row: old_start_row,
+        } = self.start_index()?;
+
+        let nframes = self
+            .video_metadata_optional()?
+            .ok_or_else(|| anyhow!("video path unset"))?
+            .nframes;
+        if old_start_frame + start_row < old_start_row {
+            bail!("invalid start_row");
+        }
+        let start_frame = old_start_frame + start_row - old_start_row;
+        if start_frame >= nframes {
+            bail!("frames_index({start_frame}) out of range({nframes})");
+        }
+
+        self.set_start_index(start_frame, start_row)
+    }
+
+    fn green2_metadata(&self) -> Result<Green2Metadata> {
+        let video_metadata = self
+            .video_metadata_optional()?
+            .ok_or_else(|| anyhow!("video path unset"))?;
+        let nrows = self
+            .daq_metadata_optional()?
+            .ok_or_else(|| anyhow!("daq path unset"))?
+            .nrows;
+        let StartIndex {
+            start_frame,
+            start_row,
+        } = self.start_index()?;
+        let area = self.area()?;
+
+        let nframes = video_metadata.nframes;
+        let cal_num = (nframes - start_frame).min(nrows - start_row);
+
+        Ok(Green2Metadata {
+            start_frame,
+            cal_num,
+            area,
+            video_path: video_metadata.path,
+        })
+    }
+
+    fn thermocouples(&self) -> Result<Vec<Thermocouple>> {
+        self.thermocouples_optional()?
+            .ok_or_else(|| anyhow!("thermocouples not selected yet"))
+    }
 }
 
 struct Setting {

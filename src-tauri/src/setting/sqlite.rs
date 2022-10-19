@@ -50,59 +50,6 @@ impl SqliteSettingStorage {
         self.setting_id
             .ok_or_else(|| anyhow!("no experiment setting is selected"))
     }
-
-    fn video_metadata_inner(&self) -> Result<Option<VideoMetadata>> {
-        let id = self.setting_id()?;
-        let ret: Option<String> = self.conn.query_row(
-            "SELECT video_metadata FROM settings WHERE id = ?1",
-            [id],
-            |row| row.get(0),
-        )?;
-
-        match ret {
-            Some(s) => Ok(Some(serde_json::from_str(&s)?)),
-            None => Ok(None),
-        }
-    }
-
-    fn daq_metadata_inner(&self) -> Result<Option<DaqMetadata>> {
-        let id = self.setting_id()?;
-        let ret: Option<String> = self.conn.query_row(
-            "SELECT daq_metadata FROM settings WHERE id = ?1",
-            [id],
-            |row| row.get(0),
-        )?;
-
-        match ret {
-            Some(s) => Ok(Some(serde_json::from_str(&s)?)),
-            None => Ok(None),
-        }
-    }
-
-    fn set_start_index(&self, start_frame: usize, start_row: usize) -> Result<()> {
-        let id = self.setting_id()?;
-        let updated_at = util::time::now_as_secs();
-        self.conn.execute(
-            "UPDATE settings SET start_frame = ?1, start_row = ?2 updated_at = ?3 WHERE id = ?4",
-            params![start_frame, start_row, updated_at, id],
-        )?;
-
-        Ok(())
-    }
-
-    fn thermocouples_inner(&self) -> Result<Option<Vec<Thermocouple>>> {
-        let id = self.setting_id()?;
-        let ret: Option<String> = self.conn.query_row(
-            "SELECT thermocouples FROM settings WHERE id = ?1",
-            [id],
-            |row| row.get(0),
-        )?;
-
-        match ret {
-            Some(s) => Ok(Some(serde_json::from_str(&s)?)),
-            None => Ok(None),
-        }
-    }
 }
 
 impl SettingStorage for SqliteSettingStorage {
@@ -218,15 +165,24 @@ impl SettingStorage for SqliteSettingStorage {
         Ok(())
     }
 
-    fn video_metadata(&self) -> Result<VideoMetadata> {
-        self.video_metadata_inner()?
-            .ok_or_else(|| anyhow!("video metadata not loaded yet"))
+    fn video_metadata_optional(&self) -> Result<Option<VideoMetadata>> {
+        let id = self.setting_id()?;
+        let ret: Option<String> = self.conn.query_row(
+            "SELECT video_metadata FROM settings WHERE id = ?1",
+            [id],
+            |row| row.get(0),
+        )?;
+
+        match ret {
+            Some(s) => Ok(Some(serde_json::from_str(&s)?)),
+            None => Ok(None),
+        }
     }
 
     /// Compare the new `video_metadata` with the old one to make minimal updates.
     fn set_video_metadata(&self, video_metadata: &VideoMetadata) -> Result<()> {
         let id = self.setting_id()?;
-        match self.video_metadata_inner()? {
+        match self.video_metadata_optional()? {
             Some(old_video_metadata) if old_video_metadata.path == video_metadata.path => Ok(()),
             Some(old_video_metadata) if old_video_metadata.shape == video_metadata.shape => {
                 // Most of the time we can make use of the previous position setting rather
@@ -276,17 +232,26 @@ impl SettingStorage for SqliteSettingStorage {
         }
     }
 
-    fn daq_metadata(&self) -> Result<DaqMetadata> {
-        self.daq_metadata_inner()?
-            .ok_or_else(|| anyhow!("daq metadata not loaded yet"))
+    fn daq_metadata_optional(&self) -> Result<Option<DaqMetadata>> {
+        let id = self.setting_id()?;
+        let ret: Option<String> = self.conn.query_row(
+            "SELECT daq_metadata FROM settings WHERE id = ?1",
+            [id],
+            |row| row.get(0),
+        )?;
+
+        match ret {
+            Some(s) => Ok(Some(serde_json::from_str(&s)?)),
+            None => Ok(None),
+        }
     }
 
     fn set_daq_metadata(&self, daq_metadata: &DaqMetadata) -> Result<()> {
         let id = self.setting_id()?;
-        match self.daq_metadata_inner()? {
+        match self.daq_metadata_optional()? {
             Some(old_daq_metadata) if old_daq_metadata.path == daq_metadata.path => Ok(()),
             _ => {
-                let thermocouples = self.thermocouples_inner()?;
+                let thermocouples = self.thermocouples_optional()?;
                 let daq_metadata_str = serde_json::to_string(&daq_metadata)?;
                 let updated_at = util::time::now_as_secs();
 
@@ -344,82 +309,15 @@ impl SettingStorage for SqliteSettingStorage {
         }
     }
 
-    fn synchronize_video_and_daq(&self, start_frame: usize, start_row: usize) -> Result<()> {
-        let nframes = self
-            .video_metadata_inner()?
-            .ok_or_else(|| anyhow!("video path unset"))?
-            .nframes;
-        if start_frame >= nframes {
-            bail!("frame_index({start_frame}) out of range({nframes})");
-        }
-        let nrows = self
-            .daq_metadata_inner()?
-            .ok_or_else(|| anyhow!("daq  path unset"))?
-            .nrows;
-        if start_row >= nrows {
-            bail!("row_index({start_row}) out of range({nrows})");
-        }
+    fn set_start_index(&self, start_frame: usize, start_row: usize) -> Result<()> {
+        let id = self.setting_id()?;
+        let updated_at = util::time::now_as_secs();
+        self.conn.execute(
+            "UPDATE settings SET start_frame = ?1, start_row = ?2 updated_at = ?3 WHERE id = ?4",
+            params![start_frame, start_row, updated_at, id],
+        )?;
 
-        self.set_start_index(start_frame, start_row)
-    }
-
-    fn set_start_frame(&self, start_frame: usize) -> Result<()> {
-        let nframes = self
-            .video_metadata_inner()?
-            .ok_or_else(|| anyhow!("video path unset"))?
-            .nframes;
-        if start_frame >= nframes {
-            bail!("frame_index({start_frame}) out of range({nframes})");
-        }
-
-        let StartIndex {
-            start_frame: old_start_frame,
-            start_row: old_start_row,
-        } = self.start_index()?;
-
-        let nrows = self
-            .daq_metadata_inner()?
-            .ok_or_else(|| anyhow!("daq  path unset"))?
-            .nrows;
-        if old_start_row + start_frame < old_start_frame {
-            bail!("invalid start_frame");
-        }
-
-        let start_row = old_start_row + start_frame - old_start_frame;
-        if start_row >= nrows {
-            bail!("row_index({start_row}) out of range({nrows})");
-        }
-
-        self.set_start_index(start_frame, start_row)
-    }
-
-    fn set_start_row(&self, start_row: usize) -> Result<()> {
-        let nrows = self
-            .daq_metadata_inner()?
-            .ok_or_else(|| anyhow!("daq  path unset"))?
-            .nrows;
-        if start_row >= nrows {
-            bail!("row_index({start_row}) out of range({nrows})");
-        }
-
-        let StartIndex {
-            start_frame: old_start_frame,
-            start_row: old_start_row,
-        } = self.start_index()?;
-
-        let nframes = self
-            .video_metadata_inner()?
-            .ok_or_else(|| anyhow!("video path unset"))?
-            .nframes;
-        if old_start_frame + start_row < old_start_row {
-            bail!("invalid start_row");
-        }
-        let start_frame = old_start_frame + start_row - old_start_row;
-        if start_frame >= nframes {
-            bail!("frames_index({start_frame}) out of range({nframes})");
-        }
-
-        self.set_start_index(start_frame, start_row)
+        Ok(())
     }
 
     fn area(&self) -> Result<(usize, usize, usize, usize)> {
@@ -439,7 +337,7 @@ impl SettingStorage for SqliteSettingStorage {
     fn set_area(&self, area: (usize, usize, usize, usize)) -> Result<()> {
         let id = self.setting_id()?;
         let (h, w) = self
-            .video_metadata_inner()?
+            .video_metadata_optional()?
             .ok_or_else(|| anyhow!("video path unset"))?
             .shape;
         let (tl_y, tl_x, cal_h, cal_w) = area;
@@ -460,34 +358,18 @@ impl SettingStorage for SqliteSettingStorage {
         Ok(())
     }
 
-    fn green2_metadata(&self) -> Result<Green2Metadata> {
-        let video_metadata = self
-            .video_metadata_inner()?
-            .ok_or_else(|| anyhow!("video path unset"))?;
-        let nrows = self
-            .daq_metadata_inner()?
-            .ok_or_else(|| anyhow!("daq path unset"))?
-            .nrows;
-        let StartIndex {
-            start_frame,
-            start_row,
-        } = self.start_index()?;
-        let area = self.area()?;
+    fn thermocouples_optional(&self) -> Result<Option<Vec<Thermocouple>>> {
+        let id = self.setting_id()?;
+        let ret: Option<String> = self.conn.query_row(
+            "SELECT thermocouples FROM settings WHERE id = ?1",
+            [id],
+            |row| row.get(0),
+        )?;
 
-        let nframes = video_metadata.nframes;
-        let cal_num = (nframes - start_frame).min(nrows - start_row);
-
-        Ok(Green2Metadata {
-            start_frame,
-            cal_num,
-            area,
-            video_path: video_metadata.path,
-        })
-    }
-
-    fn thermocouples(&self) -> Result<Vec<Thermocouple>> {
-        self.thermocouples_inner()?
-            .ok_or_else(|| anyhow!("thermocouples not selected yet"))
+        match ret {
+            Some(s) => Ok(Some(serde_json::from_str(&s)?)),
+            None => Ok(None),
+        }
     }
 
     fn interpolation_method(&self) -> Result<InterpolationMethod> {
