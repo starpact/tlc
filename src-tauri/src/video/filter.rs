@@ -63,10 +63,7 @@ where
         .axis_iter(Axis(1))
         .into_par_iter()
         .map(|green_history| {
-            if let Err(e) = progress_bar.add(1) {
-                println!("====================");
-                return Err(e);
-            }
+            progress_bar.add(1)?;
             Ok(f(green_history))
         })
         .collect()

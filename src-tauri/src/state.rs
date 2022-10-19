@@ -5,12 +5,12 @@ use std::{
 };
 
 use anyhow::{anyhow, bail, Result};
-use ndarray::ArcArray2;
+use ndarray::{ArcArray2, Array2};
 use serde::Deserialize;
 use tauri::async_runtime::spawn_blocking;
 
 use crate::{
-    daq::{DaqManager, DaqMetadata},
+    daq::{DaqManager, DaqMetadata, InterpolationMethod},
     setting::{self, SettingStorage, StartIndex},
     solve::{self, IterationMethod, PhysicalParam},
     video::{FilterMethod, Progress, VideoManager, VideoMetadata},
@@ -123,7 +123,7 @@ impl<S: SettingStorage> GlobalState<S> {
 
     pub async fn get_daq_data(&self) -> Result<ArcArray2<f64>> {
         self.daq_manager
-            .daq_data()
+            .daq_raw()
             .ok_or_else(|| anyhow!("daq path unset"))
     }
 
@@ -168,7 +168,7 @@ impl<S: SettingStorage> GlobalState<S> {
         self.video_manager.build_green2_progress()
     }
 
-    pub async fn filter_method(&self) -> Result<FilterMethod> {
+    pub async fn get_filter_method(&self) -> Result<FilterMethod> {
         self.asyncify(|s| Ok(s.filter_metadata()?.filter_method))
             .await
     }
@@ -191,6 +191,36 @@ impl<S: SettingStorage> GlobalState<S> {
         self.video_manager.detect_peak_progress_bar()
     }
 
+    pub async fn get_interpolation_method(&self) -> Result<InterpolationMethod> {
+        self.asyncify(|s| s.interpolation_method()).await
+    }
+
+    pub async fn set_interpolation_method(
+        &self,
+        interpolation_method: InterpolationMethod,
+    ) -> Result<()> {
+        self.asyncify(move |s| s.set_interpolation_method(interpolation_method))
+            .await?;
+        self.daq_manager.interpolate().await?;
+
+        Ok(())
+    }
+
+    pub async fn interpolate_single_frame(&self, frame_index: usize) -> Result<Array2<f64>> {
+        let daq_manager = self.daq_manager.clone();
+        spawn_blocking(move || {
+            daq_manager
+                .interpolator()
+                .ok_or_else(|| anyhow!("interpolator not interpolated yet"))?
+                .interpolate_single_frame(frame_index)
+        })
+        .await?
+    }
+
+    pub async fn interpolate(&self) -> Result<()> {
+        self.daq_manager.interpolate().await
+    }
+
     pub async fn get_iteration_method(&self) -> Result<IterationMethod> {
         self.asyncify(|s| s.iteration_method()).await
     }
@@ -201,10 +231,14 @@ impl<S: SettingStorage> GlobalState<S> {
     }
 
     pub async fn solve(&self) -> Result<()> {
-        let peak_temperature_frames = self
+        let gmax_frame_indexes = self
             .video_manager
             .gmax_frame_indexes()
-            .ok_or_else(|| anyhow!("green2 not built or filtered yet"))?;
+            .ok_or_else(|| anyhow!("gmax_frame_indexes not built yet"))?;
+        let interpolator = self
+            .daq_manager
+            .interpolator()
+            .ok_or_else(|| anyhow!("interpolator not built yet"))?;
 
         let setting_storage = self.setting_storage.clone();
         spawn_blocking(move || -> Result<()> {
@@ -215,7 +249,8 @@ impl<S: SettingStorage> GlobalState<S> {
             let iteration_method = setting_storage.iteration_method()?;
 
             solve::solve(
-                peak_temperature_frames,
+                gmax_frame_indexes,
+                interpolator,
                 physical_param,
                 iteration_method,
                 frame_rate,

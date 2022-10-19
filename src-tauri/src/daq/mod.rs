@@ -7,14 +7,13 @@ use std::{
 
 use anyhow::{anyhow, bail, Result};
 use calamine::{open_workbook, Reader, Xlsx};
-use ndarray::{ArcArray2, Array2};
+use ndarray::{prelude::*, ArcArray2};
 use serde::{Deserialize, Serialize};
 use tauri::async_runtime::spawn_blocking;
 use tracing::{info, instrument};
 
-pub use interpolation::{InterpolationMethod, Temperature2};
-
-use crate::setting::SettingStorage;
+use crate::{setting::SettingStorage, video::Green2Metadata};
+pub use interpolation::{InterpolationMethod, Interpolator};
 
 pub struct DaqManager<S: SettingStorage> {
     inner: Arc<DaqManagerInner<S>>,
@@ -35,7 +34,7 @@ struct DaqManagerInner<S: SettingStorage> {
 
 struct DaqData {
     raw: Option<ArcArray2<f64>>,
-    temperature2: Option<Temperature2>,
+    interpolator: Option<Interpolator>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -60,7 +59,7 @@ impl<S: SettingStorage> DaqManager<S> {
             setting_storage,
             daq_data: Mutex::new(DaqData {
                 raw: None,
-                temperature2: None,
+                interpolator: None,
             }),
         };
 
@@ -74,8 +73,17 @@ impl<S: SettingStorage> DaqManager<S> {
         spawn_blocking(move || daq_manager.inner.read_daq(daq_path)).await?
     }
 
-    pub fn daq_data(&self) -> Option<ArcArray2<f64>> {
+    pub fn daq_raw(&self) -> Option<ArcArray2<f64>> {
         self.inner.daq_data.lock().unwrap().raw.clone()
+    }
+
+    pub async fn interpolate(&self) -> Result<()> {
+        let daq_manager = self.clone();
+        spawn_blocking(move || daq_manager.inner.interpolate()).await?
+    }
+
+    pub fn interpolator(&self) -> Option<Interpolator> {
+        self.inner.daq_data.lock().unwrap().interpolator.clone()
     }
 }
 
@@ -99,22 +107,55 @@ impl<S: SettingStorage> DaqManagerInner<S> {
 
         let nrows = raw.nrows();
         let ncols = raw.ncols();
-        let fingerprint = "TODO".to_owned();
         let daq_metadata = DaqMetadata {
             path: daq_path,
             nrows,
             ncols,
         };
 
-        info!(nrows, ncols, fingerprint);
-        {
-            let mut daq_data = self.daq_data.lock().unwrap();
-            self.setting_storage
-                .lock()
-                .unwrap()
-                .set_daq_metadata(&daq_metadata)?;
-            daq_data.raw = Some(raw.into_shared());
-        }
+        info!(?daq_metadata);
+        let mut daq_data = self.daq_data.lock().unwrap();
+        self.setting_storage
+            .lock()
+            .unwrap()
+            .set_daq_metadata(&daq_metadata)?;
+        daq_data.raw = Some(raw.into_shared());
+
+        Ok(())
+    }
+
+    #[instrument(skip(self), err)]
+    fn interpolate(&self) -> Result<()> {
+        let mut daq_data = self.daq_data.lock().unwrap();
+        let daq_raw = daq_data
+            .raw
+            .as_ref()
+            .ok_or_else(|| anyhow!("daq not loaded yet"))?
+            .view();
+        let setting_storage = self.setting_storage.lock().unwrap();
+        let interpolation_method = setting_storage.interpolation_method()?;
+        let Green2Metadata { area, cal_num, .. } = setting_storage.green2_metadata()?;
+        let start_row = setting_storage.start_index()?.start_row;
+        let thermocouples = setting_storage.thermocouples()?;
+
+        let mut temperature2 = Array2::zeros((thermocouples.len(), cal_num));
+        daq_raw
+            .rows()
+            .into_iter()
+            .skip(start_row)
+            .take(cal_num)
+            .zip(temperature2.columns_mut())
+            .for_each(|(daq_row, mut col)| {
+                thermocouples
+                    .iter()
+                    .zip(col.iter_mut())
+                    .for_each(|(tc, t)| *t = daq_row[tc.column_index]);
+            });
+
+        let interpolator =
+            Interpolator::new(temperature2, interpolation_method, area, &thermocouples);
+
+        daq_data.interpolator = Some(interpolator);
 
         Ok(())
     }
@@ -169,4 +210,87 @@ fn read_daq_excel(daq_path: &Path) -> Result<Array2<f64>> {
     }
 
     Ok(daq)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use crate::{
+        setting::{MockSettingStorage, StartIndex},
+        util,
+        video::Green2Metadata,
+    };
+
+    const DAQ_PATH: &str = "./tests/imp_20000_1.lvm";
+
+    #[tokio::test]
+    async fn test_full() {
+        util::log::init();
+
+        let daq_metadata = DaqMetadata {
+            path: PathBuf::from(DAQ_PATH),
+            nrows: 66666666,
+            ncols: 66666666,
+        };
+
+        let cal_num = 2000;
+        let mut mock = MockSettingStorage::new();
+        mock.expect_daq_metadata().return_once(|| Ok(daq_metadata));
+        mock.expect_set_daq_metadata().return_once(|_| Ok(()));
+        mock.expect_interpolation_method()
+            .return_once(|| Ok(InterpolationMethod::Horizontal));
+        mock.expect_green2_metadata().return_once(move || {
+            Ok(Green2Metadata {
+                start_frame: 1,
+                cal_num,
+                area: (10, 10, 600, 800),
+                video_path: PathBuf::from("FAKE"),
+            })
+        });
+        mock.expect_start_index().return_once(|| {
+            Ok(StartIndex {
+                start_frame: 1,
+                start_row: 20,
+            })
+        });
+        mock.expect_thermocouples().return_once(|| {
+            Ok(vec![
+                Thermocouple {
+                    column_index: 1,
+                    position: (0, 0),
+                },
+                Thermocouple {
+                    column_index: 2,
+                    position: (0, 200),
+                },
+                Thermocouple {
+                    column_index: 3,
+                    position: (0, 500),
+                },
+                Thermocouple {
+                    column_index: 4,
+                    position: (0, 800),
+                },
+            ])
+        });
+
+        let daq_manager = DaqManager::new(Arc::new(Mutex::new(mock)));
+
+        daq_manager.read_daq(None).await.unwrap();
+        {
+            let daq_data = daq_manager.inner.daq_data.lock().unwrap();
+            assert_eq!(daq_data.raw.as_ref().unwrap().dim(), (2589, 10));
+            assert!(daq_data.interpolator.is_none());
+        }
+
+        daq_manager.interpolate().await.unwrap();
+        let interpolator = daq_manager.interpolator().unwrap();
+        let temperature_distribution = interpolator.interpolate_single_frame(0).unwrap();
+        println!("{:?}", temperature_distribution);
+        let temperature_distribution = interpolator.interpolate_single_frame(cal_num - 1).unwrap();
+        println!("{:?}", temperature_distribution);
+        let temperature_history = interpolator.interpolate_single_point(10000);
+        println!("{:?}", temperature_history);
+    }
 }

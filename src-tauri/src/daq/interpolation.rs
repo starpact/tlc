@@ -1,4 +1,5 @@
-use ndarray::{parallel::prelude::*, prelude::*};
+use anyhow::{anyhow, Result};
+use ndarray::{parallel::prelude::*, prelude::*, ArcArray2};
 use packed_simd::f64x4;
 use serde::{Deserialize, Serialize};
 
@@ -6,19 +7,17 @@ use crate::daq::Thermocouple;
 
 use InterpolationMethod::*;
 
-#[derive(Debug)]
-pub struct Temperature2 {
+#[derive(Debug, Clone)]
+pub struct Interpolator {
     interpolation_method: InterpolationMethod,
-
     shape: (usize, usize),
-
     /// horizontal: (cal_w, cal_num)
     /// vertical: (cal_h, cal_num)
     /// bilinear: (cal_h * cal_w, cal_num)
-    inner: Array2<f64>,
+    data: ArcArray2<f64>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 pub enum InterpolationMethod {
     Horizontal,
     HorizontalExtra,
@@ -28,40 +27,73 @@ pub enum InterpolationMethod {
     BilinearExtra(usize, usize),
 }
 
-impl Temperature2 {
+impl Interpolator {
     pub fn new(
-        daq_data: ArrayView2<f64>,
-        interp_method: InterpolationMethod,
+        temperature2: Array2<f64>,
+        interpolation_method: InterpolationMethod,
         area: (usize, usize, usize, usize),
         thermocouples: &[Thermocouple],
     ) -> Self {
-        match interp_method {
+        match interpolation_method {
             Bilinear(..) | BilinearExtra(..) => {
-                interpolator2(daq_data, interp_method, area, thermocouples)
+                interpolator2(temperature2, interpolation_method, area, thermocouples)
             }
-            _ => interpolator1(daq_data, interp_method, area, thermocouples),
+            _ => interpolator1(temperature2, interpolation_method, area, thermocouples),
         }
+    }
+
+    pub fn interpolate_single_frame(&self, frame_index: usize) -> Result<Array2<f64>> {
+        let (cal_h, cal_w) = self.shape;
+        let temperature_flattened = self.data.column(frame_index);
+        let temperature_distribution = match self.interpolation_method {
+            Horizontal | HorizontalExtra => temperature_flattened
+                .broadcast((cal_h, cal_w))
+                .ok_or_else(|| anyhow!("failed to broadcast"))?
+                .to_owned(),
+            Vertical | VerticalExtra => temperature_flattened
+                .to_owned()
+                .into_shape((cal_h, 1))?
+                .broadcast((cal_h, cal_w))
+                .ok_or_else(|| anyhow!("failed to broadcast"))?
+                .to_owned(),
+            Bilinear(..) | BilinearExtra(..) => {
+                temperature_flattened.to_owned().into_shape(self.shape)?
+            }
+        };
+
+        Ok(temperature_distribution)
+    }
+
+    /// point_index = y * w + x.
+    pub fn interpolate_single_point(&self, point_index: usize) -> ArrayView1<f64> {
+        let point_index = match self.interpolation_method {
+            Horizontal | HorizontalExtra => point_index / self.shape.1,
+            Vertical | VerticalExtra => point_index % self.shape.0,
+            Bilinear(..) | BilinearExtra(..) => point_index,
+        };
+
+        self.data.row(point_index)
     }
 }
 
 fn interpolator1(
-    daq_data: ArrayView2<f64>,
+    temperature2: Array2<f64>,
     interp_method: InterpolationMethod,
     area: (usize, usize, usize, usize),
     thermocouples: &[Thermocouple],
-) -> Temperature2 {
+) -> Interpolator {
     let (tl_y, tl_x, cal_h, cal_w) = area;
-    let frame_num = daq_data.ncols();
+    let cal_num = temperature2.ncols();
 
     let (interp_len, tc_pos): (_, Vec<_>) = match interp_method {
-        InterpolationMethod::Horizontal | InterpolationMethod::HorizontalExtra => (
+        Horizontal | HorizontalExtra => (
             cal_w,
             thermocouples
                 .iter()
                 .map(|tc| tc.position.1 - tl_x as i32)
                 .collect(),
         ),
-        InterpolationMethod::Vertical | InterpolationMethod::VerticalExtra => (
+        Vertical | VerticalExtra => (
             cal_h,
             thermocouples
                 .iter()
@@ -72,13 +104,12 @@ fn interpolator1(
     };
 
     let do_extra = matches!(interp_method, HorizontalExtra | VerticalExtra);
-    let mut temperature2 = Array2::zeros((interp_len, frame_num));
+    let mut data = Array2::zeros((interp_len, cal_num));
 
-    temperature2
-        .axis_iter_mut(Axis(0))
+    data.axis_iter_mut(Axis(0))
         .into_par_iter()
-        .zip(0..interp_len)
-        .for_each(|(mut row, pos)| {
+        .enumerate()
+        .for_each(|(pos, mut row)| {
             let pos = pos as i32;
             let (mut li, mut ri) = (0, 1);
             while pos >= tc_pos[ri] && ri < tc_pos.len() - 1 {
@@ -86,7 +117,7 @@ fn interpolator1(
                 ri += 1;
             }
             let (l, r) = (tc_pos[li], tc_pos[ri]);
-            let (l_temps, r_temps) = (daq_data.row(li), daq_data.row(ri));
+            let (l_temps, r_temps) = (temperature2.row(li), temperature2.row(ri));
             let l_temps = l_temps.as_slice_memory_order().unwrap();
             let r_temps = r_temps.as_slice_memory_order().unwrap();
 
@@ -94,33 +125,33 @@ fn interpolator1(
 
             let row = row.as_slice_memory_order_mut().unwrap();
             let mut frame = 0;
-            while frame + f64x4::lanes() < frame_num {
+            while frame + f64x4::lanes() < cal_num {
                 let lv = f64x4::from_slice_unaligned(&l_temps[frame..]);
                 let rv = f64x4::from_slice_unaligned(&r_temps[frame..]);
                 let v4 = (lv * (r - pos) as f64 + rv * (pos - l) as f64) / (r - l) as f64;
                 v4.write_to_slice_unaligned(&mut row[frame..]);
                 frame += f64x4::lanes();
             }
-            while frame < frame_num {
+            while frame < cal_num {
                 let (lv, rv) = (l_temps[frame], r_temps[frame]);
                 row[frame] = (lv * (r - pos) as f64 + rv * (pos - l) as f64) / (r - l) as f64;
                 frame += 1;
             }
         });
 
-    Temperature2 {
+    Interpolator {
         interpolation_method: interp_method,
         shape: (cal_h, cal_w),
-        inner: temperature2,
+        data: data.into_shared(),
     }
 }
 
 fn interpolator2(
-    daq_data: ArrayView2<f64>,
+    temperature2: Array2<f64>,
     interp_method: InterpolationMethod,
     area: (usize, usize, usize, usize),
     thermocouples: &[Thermocouple],
-) -> Temperature2 {
+) -> Interpolator {
     let (tc_h, tc_w, do_extra) = match interp_method {
         Bilinear(tc_h, tc_w) => (tc_h, tc_w, false),
         BilinearExtra(tc_h, tc_w) => (tc_h, tc_w, true),
@@ -139,15 +170,14 @@ fn interpolator2(
         .map(|tc| tc.position.0 - tl_y as i32)
         .collect();
 
-    let frame_num = daq_data.ncols();
+    let cal_num = temperature2.ncols();
     let pix_num = cal_h * cal_w;
-    let mut temperature2 = Array2::zeros((pix_num, frame_num));
+    let mut data = Array2::zeros((pix_num, cal_num));
 
-    temperature2
-        .axis_iter_mut(Axis(0))
-        // .into_par_iter()
-        .zip(0..pix_num)
-        .for_each(|(mut row, pos)| {
+    data.axis_iter_mut(Axis(0))
+        .into_par_iter()
+        .enumerate()
+        .for_each(|(pos, mut row)| {
             let x = (pos % cal_w) as i32;
             let y = (pos / cal_w) as i32;
             let (mut yi0, mut yi1) = (0, 1);
@@ -161,10 +191,10 @@ fn interpolator2(
                 xi1 += 1;
             }
             let (x0, x1, y0, y1) = (tc_x[xi0], tc_x[xi1], tc_y[yi0], tc_y[yi1]);
-            let t00 = daq_data.row(tc_w * yi0 + xi0);
-            let t01 = daq_data.row(tc_w * yi0 + xi1);
-            let t10 = daq_data.row(tc_w * yi1 + xi0);
-            let t11 = daq_data.row(tc_w * yi1 + xi1);
+            let t00 = temperature2.row(tc_w * yi0 + xi0);
+            let t01 = temperature2.row(tc_w * yi0 + xi1);
+            let t10 = temperature2.row(tc_w * yi1 + xi0);
+            let t11 = temperature2.row(tc_w * yi1 + xi1);
             let t00 = t00.as_slice_memory_order().unwrap();
             let t01 = t01.as_slice_memory_order().unwrap();
             let t10 = t10.as_slice_memory_order().unwrap();
@@ -175,7 +205,7 @@ fn interpolator2(
 
             let row = row.as_slice_memory_order_mut().unwrap();
             let mut frame = 0;
-            while frame + f64x4::lanes() < frame_num {
+            while frame + f64x4::lanes() < cal_num {
                 let v00 = f64x4::from_slice_unaligned(&t00[frame..]);
                 let v01 = f64x4::from_slice_unaligned(&t01[frame..]);
                 let v10 = f64x4::from_slice_unaligned(&t10[frame..]);
@@ -189,7 +219,7 @@ fn interpolator2(
                 v4.write_to_slice_unaligned(&mut row[frame..]);
                 frame += f64x4::lanes();
             }
-            while frame < frame_num {
+            while frame < cal_num {
                 let v00 = t00[frame];
                 let v01 = t01[frame];
                 let v10 = t10[frame];
@@ -204,10 +234,10 @@ fn interpolator2(
             }
         });
 
-    Temperature2 {
+    Interpolator {
         interpolation_method: interp_method,
         shape: (cal_h, cal_w),
-        inner: temperature2,
+        data: data.into_shared(),
     }
 }
 
@@ -216,8 +246,86 @@ mod test {
     use super::*;
 
     #[test]
-    fn test_interp_bilinear() {
-        let daq_data = array![
+    fn test_interpolate_horizontal_no_extra() {
+        let temperature2 = array![[1.0, 5.0], [2.0, 6.0], [3.0, 7.0]];
+        let interp_method = Horizontal;
+        // 1 2 3
+        let thermocouples: Vec<Thermocouple> = [(10, 10), (10, 11), (10, 12)]
+            .iter()
+            .enumerate()
+            .map(|(column_index, &position)| Thermocouple {
+                column_index,
+                position,
+            })
+            .collect();
+        let area = (9, 9, 5, 5);
+        let interpolator = Interpolator::new(temperature2, interp_method, area, &thermocouples);
+        println!("{:?}", interpolator.interpolate_single_frame(0).unwrap());
+        println!("{:?}", interpolator.interpolate_single_frame(1).unwrap());
+    }
+
+    #[test]
+    fn test_interpolate_horizontal_extra() {
+        let temperature2 = array![[1.0, 5.0], [2.0, 6.0], [3.0, 7.0]];
+        let interp_method = HorizontalExtra;
+        // 1 2 3
+        let thermocouples: Vec<Thermocouple> = [(10, 10), (10, 11), (10, 12)]
+            .iter()
+            .enumerate()
+            .map(|(column_index, &position)| Thermocouple {
+                column_index,
+                position,
+            })
+            .collect();
+        let area = (9, 9, 5, 5);
+        let interpolator = Interpolator::new(temperature2, interp_method, area, &thermocouples);
+        println!("{:?}", interpolator.interpolate_single_frame(0).unwrap());
+        println!("{:?}", interpolator.interpolate_single_frame(1).unwrap());
+    }
+
+    #[test]
+    fn test_interpolate_vertical_no_extra() {
+        let temperature2 = array![[1.0, 5.0], [2.0, 6.0], [3.0, 7.0]];
+        let interp_method = Vertical;
+        // 1
+        // 2
+        let thermocouples: Vec<Thermocouple> = [(10, 10), (12, 10)]
+            .iter()
+            .enumerate()
+            .map(|(column_index, &position)| Thermocouple {
+                column_index,
+                position,
+            })
+            .collect();
+        let area = (9, 9, 5, 5);
+        let interpolator = Interpolator::new(temperature2, interp_method, area, &thermocouples);
+        println!("{:?}", interpolator.interpolate_single_frame(0).unwrap());
+        println!("{:?}", interpolator.interpolate_single_frame(1).unwrap());
+    }
+
+    #[test]
+    fn test_interpolate_vertical_extra() {
+        let temperature2 = array![[1.0, 5.0], [2.0, 6.0], [3.0, 7.0]];
+        let interp_method = VerticalExtra;
+        // 1
+        // 2
+        let thermocouples: Vec<Thermocouple> = [(10, 10), (12, 10)]
+            .iter()
+            .enumerate()
+            .map(|(column_index, &position)| Thermocouple {
+                column_index,
+                position,
+            })
+            .collect();
+        let area = (9, 9, 5, 5);
+        let interpolator = Interpolator::new(temperature2, interp_method, area, &thermocouples);
+        println!("{:?}", interpolator.interpolate_single_frame(0).unwrap());
+        println!("{:?}", interpolator.interpolate_single_frame(1).unwrap());
+    }
+
+    #[test]
+    fn test_interpolate_bilinear_no_extra() {
+        let temperature2 = array![
             [1.0, 5.0],
             [2.0, 6.0],
             [3.0, 7.0],
@@ -225,37 +333,49 @@ mod test {
             [5.0, 9.0],
             [6.0, 10.0]
         ];
-        println!("{:?}", daq_data.shape());
-        let interp_method = BilinearExtra(2, 3);
+        let interp_method = Bilinear(2, 3);
+        // 1 2 3
+        // 4 5 6
         let thermocouples: Vec<Thermocouple> =
-            [(10, 10), (10, 15), (10, 20), (20, 10), (20, 15), (20, 20)]
+            [(10, 10), (10, 11), (10, 12), (12, 10), (12, 11), (12, 12)]
                 .iter()
                 .enumerate()
-                .map(|(i, &position)| Thermocouple {
-                    column_index: i,
+                .map(|(column_index, &position)| Thermocouple {
+                    column_index,
                     position,
                 })
                 .collect();
-        let area = (8, 8, 14, 14);
+        let area = (9, 9, 5, 5);
+        let interpolator = Interpolator::new(temperature2, interp_method, area, &thermocouples);
+        println!("{:?}", interpolator.interpolate_single_frame(0).unwrap());
+        println!("{:?}", interpolator.interpolate_single_frame(1).unwrap());
+    }
 
-        let temperture2 = Temperature2::new(daq_data.view(), interp_method, area, &thermocouples);
-        println!(
-            "frame 0:\n{:?}",
-            temperture2
-                .inner
-                .column(0)
-                .to_owned()
-                .into_shape((area.2, area.3))
-                .unwrap()
-        );
-        println!(
-            "frame 1:\n{:?}",
-            temperture2
-                .inner
-                .column(1)
-                .to_owned()
-                .into_shape((area.2, area.3))
-                .unwrap()
-        );
+    #[test]
+    fn test_interpolate_bilinear_extra() {
+        let temperature2 = array![
+            [1.0, 5.0],
+            [2.0, 6.0],
+            [3.0, 7.0],
+            [4.0, 8.0],
+            [5.0, 9.0],
+            [6.0, 10.0]
+        ];
+        let interp_method = BilinearExtra(2, 3);
+        // 1 2 3
+        // 4 5 6
+        let thermocouples: Vec<Thermocouple> =
+            [(10, 10), (10, 11), (10, 12), (12, 10), (12, 11), (12, 12)]
+                .iter()
+                .enumerate()
+                .map(|(column_index, &position)| Thermocouple {
+                    column_index,
+                    position,
+                })
+                .collect();
+        let area = (9, 9, 5, 5);
+        let interpolator = Interpolator::new(temperature2, interp_method, area, &thermocouples);
+        println!("{:?}", interpolator.interpolate_single_frame(0).unwrap());
+        println!("{:?}", interpolator.interpolate_single_frame(1).unwrap());
     }
 }

@@ -10,15 +10,15 @@ use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWriteExt;
 use tracing::instrument;
 
-#[cfg(test)]
-use mockall::automock;
-
 use crate::{
     daq::{DaqMetadata, InterpolationMethod, Thermocouple},
     solve::{IterationMethod, PhysicalParam},
     video::{FilterMetadata, FilterMethod, Green2Metadata, VideoMetadata},
 };
 pub use sqlite::SqliteSettingStorage;
+
+#[cfg(test)]
+use mockall::automock;
 
 #[cfg_attr(test, automock)]
 pub trait SettingStorage: Send + 'static {
@@ -40,6 +40,8 @@ pub trait SettingStorage: Send + 'static {
     fn set_area(&self, area: (usize, usize, usize, usize)) -> Result<()>;
     fn green2_metadata(&self) -> Result<Green2Metadata>;
     fn thermocouples(&self) -> Result<Vec<Thermocouple>>;
+    fn interpolation_method(&self) -> Result<InterpolationMethod>;
+    fn set_interpolation_method(&self, interpolation_method: InterpolationMethod) -> Result<()>;
     fn filter_metadata(&self) -> Result<FilterMetadata>;
     fn set_filter_method(&self, filter_method: FilterMethod) -> Result<()>;
     fn iteration_method(&self) -> Result<IterationMethod>;
@@ -85,7 +87,7 @@ struct Setting {
     iteration_method: String,
 
     /// All physical parameters used when solving heat transfer equation.
-    peak_temperature: f64,
+    gmax_temperature: f64,
     solid_thermal_conductivity: f64,
     solid_thermal_diffusivity: f64,
     characteristic_length: f64,
@@ -121,7 +123,6 @@ struct SettingSnapshot {
     interpolation_method: InterpolationMethod,
     iteration_method: IterationMethod,
     physical_param: PhysicalParam,
-    // TODO: hash
 }
 
 impl SettingSnapshot {
@@ -145,7 +146,7 @@ impl SettingSnapshot {
 #[derive(Debug, Deserialize, Serialize, Clone, Copy)]
 pub struct StartIndex {
     /// Start frame of video involved in the calculation.
-    start_frame: usize,
+    pub start_frame: usize,
     /// Start row of DAQ data involved in the calculation.
-    start_row: usize,
+    pub start_row: usize,
 }

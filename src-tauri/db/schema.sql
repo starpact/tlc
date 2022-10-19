@@ -8,9 +8,10 @@ CREATE TABLE IF NOT EXISTS settings (
     start_row INTEGER,
     area TEXT, -- JSON
     thermocouples TEXT, -- JSON
+    interpolation_method TEXT, --JSON
     filter_method TEXT NOT NULL, -- JSON
     iteration_method TEXT NOT NULL, -- JSON
-    peak_temperature REAL NOT NULL,
+    gmax_temperature REAL NOT NULL,
     solid_thermal_conductivity REAL NOT NULL,
     solid_thermal_diffusivity REAL NOT NULL,
     characteristic_length REAL NOT NULL,

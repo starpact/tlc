@@ -1,11 +1,11 @@
 use std::path::PathBuf;
 
 use anyhow::Result;
-use ndarray::ArcArray2;
+use ndarray::{ArcArray2, Array2};
 use serde::Serialize;
 
 use crate::{
-    daq::DaqMetadata,
+    daq::{DaqMetadata, InterpolationMethod},
     setting::{SqliteSettingStorage, StartIndex},
     solve::IterationMethod,
     state::{CreateSettingRequest, GlobalState},
@@ -129,8 +129,8 @@ pub async fn get_build_green2_progress(state: State<'_>) -> TlcResult<Progress> 
 }
 
 #[tauri::command]
-pub async fn filter_method(state: State<'_>) -> TlcResult<FilterMethod> {
-    state.filter_method().await.to()
+pub async fn get_filter_method(state: State<'_>) -> TlcResult<FilterMethod> {
+    state.get_filter_method().await.to()
 }
 
 #[tauri::command]
@@ -154,23 +154,37 @@ pub async fn get_filter_green2_progress(state: State<'_>) -> TlcResult<Progress>
 }
 
 #[tauri::command]
+pub async fn get_interpolation_method(state: State<'_>) -> TlcResult<InterpolationMethod> {
+    state.get_interpolation_method().await.to()
+}
+
+#[tauri::command]
+pub async fn set_interpolation_method(
+    interpolation_method: InterpolationMethod,
+    state: State<'_>,
+) -> TlcResult<()> {
+    state
+        .set_interpolation_method(interpolation_method)
+        .await
+        .to()
+}
+
+#[tauri::command]
+pub async fn interpolate_single_frame(
+    frame_index: usize,
+    state: State<'_>,
+) -> TlcResult<Array2<f64>> {
+    state.interpolate_single_frame(frame_index).await.to()
+}
+
+#[tauri::command]
+pub async fn interpolate(state: State<'_>) -> TlcResult<()> {
+    state.interpolate().await.to()
+}
+
+#[tauri::command]
 pub async fn get_iteration_method(state: State<'_>) -> TlcResult<IterationMethod> {
     state.get_iteration_method().await.to()
-}
-
-#[tauri::command]
-pub fn set_interpolation_method() -> TlcResult<()> {
-    todo!()
-}
-
-#[tauri::command]
-pub fn interpolate_single_point() -> TlcResult<()> {
-    todo!()
-}
-
-#[tauri::command]
-pub fn interpolate() -> TlcResult<()> {
-    todo!()
 }
 
 #[tauri::command]

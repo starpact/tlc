@@ -5,6 +5,8 @@ use ndarray::ArcArray1;
 use packed_simd::{f64x4, Simd};
 use serde::{Deserialize, Serialize};
 
+use crate::daq::Interpolator;
+
 #[derive(Debug, Deserialize, Serialize, Clone, Copy)]
 #[cfg_attr(test, derive(Default))]
 pub struct PhysicalParam {
@@ -187,6 +189,7 @@ impl Default for IterationMethod {
 
 pub fn solve(
     _gmax_frame_indexes: ArcArray1<usize>,
+    interpolator: Interpolator,
     physical_param: PhysicalParam,
     iteration_method: IterationMethod,
     frame_rate: usize,
@@ -210,6 +213,7 @@ pub fn solve(
             }),
         }
     });
+    let _ = interpolator.interpolate_single_point(100);
 
     todo!()
 }
@@ -306,7 +310,7 @@ mod tests {
                 )))
                 .await
                 .unwrap();
-            daq_manager.daq_data().unwrap().column(3).to_owned()
+            daq_manager.daq_raw().unwrap().column(3).to_owned()
         })
     }
 

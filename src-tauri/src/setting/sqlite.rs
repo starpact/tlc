@@ -3,15 +3,14 @@ use std::path::Path;
 use anyhow::{anyhow, bail, Result};
 use rusqlite::{params, Connection, Error::QueryReturnedNoRows};
 
+use super::{CreateRequest, SettingStorage, StartIndex};
 use crate::{
-    daq::{DaqMetadata, Thermocouple},
+    daq::{DaqMetadata, InterpolationMethod, Thermocouple},
     error::Error,
     solve::{IterationMethod, PhysicalParam},
     util,
     video::{FilterMetadata, FilterMethod, Green2Metadata, VideoMetadata},
 };
-
-use super::{CreateRequest, SettingStorage, StartIndex};
 
 #[derive(Debug)]
 pub struct SqliteSettingStorage {
@@ -115,7 +114,7 @@ impl SettingStorage for SqliteSettingStorage {
             iteration_method,
             physical_param:
                 PhysicalParam {
-                    gmax_temperature: peak_temperature,
+                    gmax_temperature,
                     solid_thermal_conductivity,
                     solid_thermal_diffusivity,
                     characteristic_length,
@@ -134,7 +133,7 @@ impl SettingStorage for SqliteSettingStorage {
                     save_root_dir,
                     filter_method,
                     iteration_method,
-                    peak_temperature,
+                    gmax_temperature,
                     solid_thermal_conductivity,
                     solid_thermal_diffusivity,
                     characteristic_length,
@@ -151,7 +150,7 @@ impl SettingStorage for SqliteSettingStorage {
                 save_root_dir,
                 filter_method_str,
                 iteration_method_str,
-                peak_temperature,
+                gmax_temperature,
                 solid_thermal_conductivity,
                 solid_thermal_diffusivity,
                 characteristic_length,
@@ -191,7 +190,7 @@ impl SettingStorage for SqliteSettingStorage {
         self.conn
             .execute("DELETE FROM settings WHERE id = ?1", [id])?;
 
-        todo!()
+        Ok(())
     }
 
     fn save_root_dir(&self) -> Result<String> {
@@ -467,7 +466,7 @@ impl SettingStorage for SqliteSettingStorage {
             .ok_or_else(|| anyhow!("video path unset"))?;
         let nrows = self
             .daq_metadata_inner()?
-            .ok_or_else(|| anyhow!("daq  path unset"))?
+            .ok_or_else(|| anyhow!("daq path unset"))?
             .nrows;
         let StartIndex {
             start_frame,
@@ -489,6 +488,31 @@ impl SettingStorage for SqliteSettingStorage {
     fn thermocouples(&self) -> Result<Vec<Thermocouple>> {
         self.thermocouples_inner()?
             .ok_or_else(|| anyhow!("thermocouples not selected yet"))
+    }
+
+    fn interpolation_method(&self) -> Result<InterpolationMethod> {
+        let id = self.setting_id()?;
+        let interpolatioin_method_str: String = self.conn.query_row(
+            "SELECT interpolation_method FROM settings WHERE id = ?1",
+            [id],
+            |row| row.get(0),
+        )?;
+
+        let interpolation_method = serde_json::from_str(&interpolatioin_method_str)?;
+
+        Ok(interpolation_method)
+    }
+
+    fn set_interpolation_method(&self, interpolation_method: InterpolationMethod) -> Result<()> {
+        let id = self.setting_id()?;
+        let interpolation_method_str = serde_json::to_string(&interpolation_method)?;
+        let updated_at = util::time::now_as_secs();
+        self.conn.execute(
+            "UPDATE settings SET interpolation_method = ?1 updated_at = ?2 WHERE id = ?3",
+            params![interpolation_method_str, updated_at, id],
+        )?;
+
+        Ok(())
     }
 
     fn filter_metadata(&self) -> Result<FilterMetadata> {
@@ -548,7 +572,7 @@ impl SettingStorage for SqliteSettingStorage {
         let physical_param = self.conn.query_row(
             "
             SELECT (
-                peak_temperature,
+                gmax_temperature,
                 solid_thermal_conductivity,
                 solid_thermal_diffusivity,
                 characteristic_length,

@@ -19,7 +19,6 @@ use thread_local::ThreadLocal;
 pub struct Decoder {
     codec_ctx: ffmpeg::decoder::Video,
     sws_ctx: SendableSwsCtx,
-
     /// `src_frame` and `dst_frame` are used to avoid frequent allocation.
     /// This can speed up decoding by about 10%.
     src_frame: Video,
