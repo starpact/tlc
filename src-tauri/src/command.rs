@@ -8,7 +8,7 @@ use crate::{
     daq::{DaqMetadata, InterpolationMethod},
     setting::{SqliteSettingStorage, StartIndex},
     solve::IterationMethod,
-    state::{CreateSettingRequest, GlobalState},
+    state::{CreateSettingRequest, GlobalState, NuData},
     video::{FilterMethod, Progress, VideoMetadata},
 };
 
@@ -37,7 +37,7 @@ pub async fn switch_setting(setting_id: i64, state: State<'_>) -> TlcResult<()> 
 }
 
 #[tauri::command]
-pub async fn get_save_root_dir(state: State<'_>) -> TlcResult<String> {
+pub async fn get_save_root_dir(state: State<'_>) -> TlcResult<PathBuf> {
     state.get_save_root_dir().await.to()
 }
 
@@ -72,8 +72,8 @@ pub async fn read_single_frame_base64(frame_index: usize, state: State<'_>) -> T
 }
 
 #[tauri::command]
-pub async fn get_daq_data(state: State<'_>) -> TlcResult<ArcArray2<f64>> {
-    state.get_daq_data().await.to()
+pub async fn get_daq_raw(state: State<'_>) -> TlcResult<ArcArray2<f64>> {
+    state.get_daq_raw().await.to()
 }
 
 #[tauri::command]
@@ -144,12 +144,12 @@ pub async fn filter_single_point(position: (usize, usize), state: State<'_>) -> 
 }
 
 #[tauri::command]
-pub async fn filter_green2(state: State<'_>) -> TlcResult<()> {
-    state.spawn_filter_green2().await.to()
+pub async fn detect_peak(state: State<'_>) -> TlcResult<()> {
+    state.spawn_detect_peak().await.to()
 }
 
 #[tauri::command]
-pub async fn get_filter_green2_progress(state: State<'_>) -> TlcResult<Progress> {
+pub async fn get_detect_peak_progress(state: State<'_>) -> TlcResult<Progress> {
     Ok(state.get_detect_peak_progress())
 }
 
@@ -196,6 +196,60 @@ pub async fn set_iteration_method(
 }
 
 #[tauri::command]
+pub async fn set_gmax_temperature(gmax_temperature: f64, state: State<'_>) -> TlcResult<()> {
+    state.set_gmax_temperature(gmax_temperature).await.to()
+}
+
+#[tauri::command]
+pub async fn set_solid_thermal_conductivity(
+    solid_thermal_conductivity: f64,
+    state: State<'_>,
+) -> TlcResult<()> {
+    state
+        .set_solid_thermal_conductivity(solid_thermal_conductivity)
+        .await
+        .to()
+}
+
+#[tauri::command]
+pub async fn set_solid_thermal_diffusivity(
+    solid_thermal_diffusivity: f64,
+    state: State<'_>,
+) -> TlcResult<()> {
+    state
+        .set_solid_thermal_diffusivity(solid_thermal_diffusivity)
+        .await
+        .to()
+}
+
+#[tauri::command]
+pub async fn set_characteristic_length(
+    characteristic_length: f64,
+    state: State<'_>,
+) -> TlcResult<()> {
+    state
+        .set_characteristic_length(characteristic_length)
+        .await
+        .to()
+}
+
+#[tauri::command]
+pub async fn set_air_thermal_conductivity(
+    air_thermal_conductivity: f64,
+    state: State<'_>,
+) -> TlcResult<()> {
+    state
+        .set_air_thermal_conductivity(air_thermal_conductivity)
+        .await
+        .to()
+}
+
+#[tauri::command]
 pub async fn solve(state: State<'_>) -> TlcResult<()> {
     state.solve().await.to()
+}
+
+#[tauri::command]
+pub async fn get_nu(edge_truncation: Option<(f64, f64)>, state: State<'_>) -> TlcResult<NuData> {
+    state.get_nu(edge_truncation).await.to()
 }

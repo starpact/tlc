@@ -26,7 +26,9 @@ pub trait SettingStorage: Send + 'static {
     fn switch_setting(&mut self, setting_id: i64) -> Result<()>;
     fn delete_setting(&mut self) -> Result<()>;
 
-    fn save_root_dir(&self) -> Result<String>;
+    fn name(&self) -> Result<String>;
+    fn set_name(&self, name: &str) -> Result<()>;
+    fn save_root_dir(&self) -> Result<PathBuf>;
     fn set_save_root_dir(&self, save_root_dir: &Path) -> Result<()>;
     fn video_metadata_optional(&self) -> Result<Option<VideoMetadata>>;
     fn set_video_metadata(&self, video_metadata: &VideoMetadata) -> Result<()>;
@@ -44,6 +46,29 @@ pub trait SettingStorage: Send + 'static {
     fn iteration_method(&self) -> Result<IterationMethod>;
     fn set_iteration_method(&self, iteration_method: IterationMethod) -> Result<()>;
     fn physical_param(&self) -> Result<PhysicalParam>;
+    fn set_gmax_temperature(&self, gmax_temperature: f64) -> Result<()>;
+    fn set_solid_thermal_conductivity(&self, solid_thermal_conductivity: f64) -> Result<()>;
+    fn set_solid_thermal_diffusivity(&self, solid_thermal_diffusivity: f64) -> Result<()>;
+    fn set_characteristic_length(&self, characteristic_length: f64) -> Result<()>;
+    fn set_air_thermal_conductivity(&self, air_thermal_conductivity: f64) -> Result<()>;
+
+    fn output_file_stem(&self) -> Result<PathBuf> {
+        let save_root_dir = self.save_root_dir()?;
+        let name = self.name()?;
+        Ok(save_root_dir.join(name))
+    }
+
+    fn nu_path(&self) -> Result<PathBuf> {
+        Ok(self.output_file_stem()?.with_extension("csv"))
+    }
+
+    fn plot_path(&self) -> Result<PathBuf> {
+        Ok(self.output_file_stem()?.with_extension("png"))
+    }
+
+    fn setting_snapshot_path(&self) -> Result<PathBuf> {
+        Ok(self.output_file_stem()?.with_extension("toml"))
+    }
 
     fn video_metadata(&self) -> Result<VideoMetadata> {
         self.video_metadata_optional()?

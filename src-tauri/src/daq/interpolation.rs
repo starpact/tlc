@@ -74,6 +74,10 @@ impl Interpolator {
 
         self.data.row(point_index)
     }
+
+    pub fn shape(&self) -> (usize, usize) {
+        self.shape
+    }
 }
 
 fn interpolator1(

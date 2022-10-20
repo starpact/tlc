@@ -17,7 +17,7 @@ use ffmpeg::{
 };
 use ffmpeg_next as ffmpeg;
 use image::{codecs::jpeg::JpegEncoder, ColorType::Rgb8};
-use ndarray::{ArcArray1, Array2, Axis};
+use ndarray::{Array2, Axis};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use tauri::async_runtime::spawn_blocking;
@@ -86,7 +86,7 @@ struct VideoData {
     green2: Option<Array2<u8>>,
 
     /// Frame index of peak temperature.
-    gmax_frame_indexes: Option<ArcArray1<usize>>,
+    gmax_frame_indexes: Option<Arc<Vec<usize>>>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
@@ -182,7 +182,7 @@ impl<S: SettingStorage> VideoManager<S> {
         self.inner.detect_peak_progress_bar.progress()
     }
 
-    pub fn gmax_frame_indexes(&self) -> Option<ArcArray1<usize>> {
+    pub fn gmax_frame_indexes(&self) -> Option<Arc<Vec<usize>>> {
         self.inner
             .video_data
             .read()
@@ -195,7 +195,7 @@ impl<S: SettingStorage> VideoManager<S> {
 impl<S: SettingStorage> VideoManagerInner<S> {
     #[instrument(skip(self, tx), err)]
     fn read_video(&self, video_path: Option<PathBuf>, tx: Sender<()>) -> Result<()> {
-        // Stop current building and filtering process.
+        // Stop current building and peak detection process.
         self.build_green2_progress_bar.reset();
         self.detect_peak_progress_bar.reset();
 
@@ -374,7 +374,7 @@ impl<S: SettingStorage> VideoManagerInner<S> {
                 .ok_or_else(|| anyhow!("green2 not built yet"))?
                 .view();
             let filter_metadata = self.setting_storage.lock().unwrap().filter_metadata()?;
-            // Tell outside that filtering actually started.
+            // Tell outside that peak detection actually started.
             tx.send(()).unwrap();
             let filtered_green2 = filter::filter_detect_peak(
                 green2,
@@ -389,12 +389,12 @@ impl<S: SettingStorage> VideoManagerInner<S> {
         let current_filter_metadata = self.setting_storage.lock().unwrap().filter_metadata()?;
         if current_filter_metadata != filter_metadata {
             bail!(
-                "setting has been changed while filtering green2, old: {:?}, current: {:?}",
+                "setting has been changed while detecting peaks, old: {:?}, current: {:?}",
                 filter_metadata,
                 current_filter_metadata,
             );
         }
-        video_data.gmax_frame_indexes = Some(ArcArray1::from(gmax_frame_indexes));
+        video_data.gmax_frame_indexes = Some(Arc::new(gmax_frame_indexes));
 
         Ok(())
     }
@@ -613,7 +613,7 @@ mod tests {
             match video_manager.detect_peak_progress_bar() {
                 Progress::Uninitialized => {}
                 Progress::InProgress { total, count } => {
-                    println!("filtering green2...... {count}/{total}");
+                    println!("detecting peaks...... {count}/{total}");
                 }
                 Progress::Finished { .. } => break,
             }
@@ -827,7 +827,7 @@ mod tests {
         filter_metadata.lock().unwrap().filter_method = FilterMethod::Median { window_size: 10 };
 
         video_manager.spawn_detect_peak().await.unwrap();
-        tokio::time::sleep(Duration::from_millis(500)).await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
         loop {
             match video_manager.detect_peak_progress_bar() {
                 Progress::Uninitialized => {}

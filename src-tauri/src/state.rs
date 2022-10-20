@@ -1,18 +1,19 @@
 use std::{
-    fmt::Debug,
     path::PathBuf,
     sync::{Arc, Mutex, MutexGuard},
 };
 
 use anyhow::{anyhow, bail, Result};
 use ndarray::{ArcArray2, Array2};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tauri::async_runtime::spawn_blocking;
+use tracing::{debug, warn};
 
 use crate::{
     daq::{DaqManager, DaqMetadata, InterpolationMethod},
+    post::{draw_area, save_matrix},
     setting::{self, SettingStorage, StartIndex},
-    solve::{self, IterationMethod, PhysicalParam},
+    solve::{self, nan_mean, IterationMethod, PhysicalParam},
     video::{FilterMethod, Progress, VideoManager, VideoMetadata},
 };
 
@@ -20,6 +21,15 @@ pub struct GlobalState<S: SettingStorage> {
     setting_storage: Arc<Mutex<S>>,
     video_manager: VideoManager<S>,
     daq_manager: DaqManager<S>,
+    nu_data: Arc<Mutex<Option<NuData>>>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct NuData {
+    nu2: ArcArray2<f64>,
+    nu_nan_mean: f64,
+    nu_plot_base64: String,
+    edge_truncation: (f64, f64),
 }
 
 #[derive(Debug, Deserialize)]
@@ -44,6 +54,7 @@ impl<S: SettingStorage> GlobalState<S> {
             setting_storage,
             video_manager,
             daq_manager,
+            nu_data: Default::default(),
         }
     }
 
@@ -87,7 +98,7 @@ impl<S: SettingStorage> GlobalState<S> {
         Ok(())
     }
 
-    pub async fn get_save_root_dir(&self) -> Result<String> {
+    pub async fn get_save_root_dir(&self) -> Result<PathBuf> {
         self.asyncify(move |s| s.save_root_dir()).await
     }
 
@@ -121,9 +132,9 @@ impl<S: SettingStorage> GlobalState<S> {
             .await
     }
 
-    pub async fn get_daq_data(&self) -> Result<ArcArray2<f64>> {
+    pub async fn get_daq_raw(&self) -> Result<ArcArray2<f64>> {
         self.daq_manager
-            .daq_raw()
+            .raw()
             .ok_or_else(|| anyhow!("daq path unset"))
     }
 
@@ -183,7 +194,7 @@ impl<S: SettingStorage> GlobalState<S> {
         self.video_manager.filter_single_point(position).await
     }
 
-    pub async fn spawn_filter_green2(&self) -> Result<()> {
+    pub async fn spawn_detect_peak(&self) -> Result<()> {
         self.video_manager.spawn_detect_peak().await
     }
 
@@ -230,6 +241,37 @@ impl<S: SettingStorage> GlobalState<S> {
             .await
     }
 
+    pub async fn set_gmax_temperature(&self, gmax_temperature: f64) -> Result<()> {
+        self.asyncify(move |s| s.set_gmax_temperature(gmax_temperature))
+            .await
+    }
+
+    pub async fn set_solid_thermal_conductivity(
+        &self,
+        solid_thermal_conductivity: f64,
+    ) -> Result<()> {
+        self.asyncify(move |s| s.set_solid_thermal_conductivity(solid_thermal_conductivity))
+            .await
+    }
+
+    pub async fn set_solid_thermal_diffusivity(
+        &self,
+        solid_thermal_diffusivity: f64,
+    ) -> Result<()> {
+        self.asyncify(move |s| s.set_solid_thermal_diffusivity(solid_thermal_diffusivity))
+            .await
+    }
+
+    pub async fn set_characteristic_length(&self, characteristic_length: f64) -> Result<()> {
+        self.asyncify(move |s| s.set_characteristic_length(characteristic_length))
+            .await
+    }
+
+    pub async fn set_air_thermal_conductivity(&self, air_thermal_conductivity: f64) -> Result<()> {
+        self.asyncify(move |s| s.set_air_thermal_conductivity(air_thermal_conductivity))
+            .await
+    }
+
     pub async fn solve(&self) -> Result<()> {
         let gmax_frame_indexes = self
             .video_manager
@@ -241,14 +283,14 @@ impl<S: SettingStorage> GlobalState<S> {
             .ok_or_else(|| anyhow!("interpolator not built yet"))?;
 
         let setting_storage = self.setting_storage.clone();
+        let nu_data = self.nu_data.clone();
         spawn_blocking(move || -> Result<()> {
             let setting_storage = setting_storage.lock().unwrap();
-
             let physical_param = setting_storage.physical_param()?;
             let frame_rate = setting_storage.video_metadata()?.frame_rate;
             let iteration_method = setting_storage.iteration_method()?;
 
-            solve::solve(
+            let nu2 = solve::solve(
                 gmax_frame_indexes,
                 interpolator,
                 physical_param,
@@ -256,11 +298,61 @@ impl<S: SettingStorage> GlobalState<S> {
                 frame_rate,
             );
 
+            let nu_nan_mean = nan_mean(nu2.view());
+            debug!(nu_nan_mean);
+
+            let nu_path = setting_storage.nu_path()?;
+            if nu_path.exists() {
+                warn!("nu_path({nu_path:?}) already exists, overwrite")
+            }
+            save_matrix(nu_path, nu2.view())?;
+
+            let plot_path = setting_storage.plot_path()?;
+            if plot_path.exists() {
+                warn!("plot_path({plot_path:?}) already exists, overwrite")
+            }
+            let edge_truncation = default_edge_truncation_from_mean(nu_nan_mean);
+            let nu_plot_base64 = draw_area(plot_path, nu2.view(), edge_truncation)?;
+
+            *nu_data.lock().unwrap() = Some(NuData {
+                nu2: nu2.into_shared(),
+                nu_nan_mean,
+                nu_plot_base64,
+                edge_truncation,
+            });
+
             Ok(())
         })
         .await??;
 
-        todo!()
+        Ok(())
+    }
+
+    pub async fn get_nu(&self, edge_truncation: Option<(f64, f64)>) -> Result<NuData> {
+        let setting_storage = self.setting_storage.clone();
+        let nu_data = self.nu_data.clone();
+        spawn_blocking(move || -> Result<NuData> {
+            let mut nu_data = nu_data.lock().unwrap();
+            let mut nu_data = nu_data
+                .as_mut()
+                .ok_or_else(|| anyhow!("nu not calculated yet"))?;
+
+            let edge_truncation = edge_truncation
+                .unwrap_or_else(|| default_edge_truncation_from_mean(nu_data.nu_nan_mean));
+            if edge_truncation == nu_data.edge_truncation {
+                return Ok(nu_data.clone());
+            }
+
+            let setting_storage = setting_storage.lock().unwrap();
+            let plot_path = setting_storage.plot_path()?;
+            let nu_plot_base64 = draw_area(&plot_path, nu_data.nu2.view(), edge_truncation)?;
+
+            nu_data.edge_truncation = edge_truncation;
+            nu_data.nu_plot_base64 = nu_plot_base64;
+
+            Ok(nu_data.clone())
+        })
+        .await?
     }
 
     async fn asyncify<T, F>(&self, f: F) -> Result<T>
@@ -277,6 +369,10 @@ impl<S: SettingStorage> GlobalState<S> {
     }
 }
 
+fn default_edge_truncation_from_mean(mean: f64) -> (f64, f64) {
+    (mean * 0.6, mean * 2.0)
+}
+
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
@@ -284,7 +380,12 @@ mod tests {
     use mockall::predicate::eq;
 
     use super::*;
-    use crate::{setting::MockSettingStorage, util};
+    use crate::{
+        daq::Thermocouple,
+        setting::MockSettingStorage,
+        util,
+        video::{FilterMetadata, Green2Metadata},
+    };
 
     // For unit tests.
     const SAMPLE_VIDEO_PATH: &str = "./tests/almost_empty.avi";
@@ -388,28 +489,83 @@ mod tests {
 
     #[tokio::test]
     #[ignore]
-    async fn test_full_real() {
+    async fn test_full_real_data_mock_db() {
         util::log::init();
 
+        let save_root_dir = PathBuf::from("./var");
+        let name = "aaa";
+        let plot_path = save_root_dir.join(name).with_extension("png");
+        let nu_path = save_root_dir.join(name).with_extension("csv");
         let video_path = PathBuf::from(VIDEO_PATH);
         let daq_path = PathBuf::from(DAQ_PATH);
+        let nframes = 2444;
+        let cal_num = 2000;
 
         let video_metadata = VideoMetadata {
-            path: video_path,
+            path: video_path.clone(),
             frame_rate: 25,
-            nframes: 2444,
+            nframes,
             shape: (1024, 1280),
         };
         let daq_metadata = DaqMetadata {
-            path: daq_path,
+            path: daq_path.clone(),
             nrows: 2589,
             ncols: 10,
         };
-
-        let video_path = video_metadata.path.clone();
-        let daq_path = daq_metadata.path.clone();
+        let green2_metadata = Green2Metadata {
+            start_frame: 1,
+            cal_num,
+            area: (660, 20, 340, 1248),
+            video_path: video_path.clone(),
+        };
+        let start_index = StartIndex {
+            start_frame: 81,
+            start_row: 150,
+        };
+        let filter_method = FilterMethod::No;
+        let interpolation_method = InterpolationMethod::Horizontal;
+        let thermocouples = vec![
+            Thermocouple {
+                column_index: 1,
+                position: (0, 166),
+            },
+            Thermocouple {
+                column_index: 2,
+                position: (0, 355),
+            },
+            Thermocouple {
+                column_index: 3,
+                position: (0, 543),
+            },
+            Thermocouple {
+                column_index: 4,
+                position: (0, 731),
+            },
+            Thermocouple {
+                column_index: 5,
+                position: (0, 922),
+            },
+            Thermocouple {
+                column_index: 6,
+                position: (0, 1116),
+            },
+        ];
+        let physical_param = PhysicalParam {
+            gmax_temperature: 35.48,
+            solid_thermal_conductivity: 0.19,
+            solid_thermal_diffusivity: 1.091e-7,
+            characteristic_length: 0.015,
+            air_thermal_conductivity: 0.0276,
+        };
+        let iteration_method = IterationMethod::NewtonTangent {
+            h0: 50.0,
+            max_iter_num: 10,
+        };
 
         let mut mock = MockSettingStorage::new();
+        mock.expect_plot_path()
+            .returning(move || Ok(plot_path.clone()));
+        mock.expect_nu_path().return_once(|| Ok(nu_path));
         mock.expect_create_setting().once().return_once(|_| Ok(()));
         mock.expect_set_video_metadata()
             .with(eq(video_metadata.clone()))
@@ -419,6 +575,27 @@ mod tests {
         mock.expect_set_daq_metadata()
             .with(eq(daq_metadata))
             .return_once(|_| Ok(()));
+        {
+            let green2_metadata = green2_metadata.clone();
+            mock.expect_green2_metadata()
+                .returning(move || Ok(green2_metadata.clone()));
+        }
+        mock.expect_filter_metadata().returning(move || {
+            Ok(FilterMetadata {
+                filter_method,
+                green2_metadata: green2_metadata.clone(),
+            })
+        });
+        mock.expect_interpolation_method()
+            .return_once(move || Ok(interpolation_method));
+        mock.expect_start_index()
+            .return_once(move || Ok(start_index));
+        mock.expect_thermocouples()
+            .return_once(|| Ok(thermocouples));
+        mock.expect_physical_param()
+            .return_once(move || Ok(physical_param));
+        mock.expect_iteration_method()
+            .return_once(move || Ok(iteration_method));
 
         let global_state = GlobalState::new(mock);
         global_state
@@ -430,6 +607,42 @@ mod tests {
             .await
             .unwrap();
 
-        tokio::time::sleep(Duration::from_secs(3)).await;
+        global_state
+            .read_single_frame_base64(nframes - 1)
+            .await
+            .unwrap();
+
+        global_state.spawn_build_green2().await.unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        loop {
+            match global_state.video_manager.build_green2_progress() {
+                Progress::Uninitialized => {}
+                Progress::InProgress { total, count } => {
+                    println!("building green2...... {count}/{total}");
+                }
+                Progress::Finished { .. } => break,
+            }
+            tokio::time::sleep(Duration::from_millis(500)).await;
+        }
+
+        global_state.spawn_detect_peak().await.unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        loop {
+            match global_state.video_manager.detect_peak_progress_bar() {
+                Progress::Uninitialized => {}
+                Progress::InProgress { total, count } => {
+                    println!("detecting peaks...... {count}/{total}");
+                }
+                Progress::Finished { .. } => break,
+            }
+            tokio::time::sleep(Duration::from_millis(500)).await;
+        }
+
+        global_state.daq_manager.interpolate().await.unwrap();
+        global_state.solve().await.unwrap();
+        let nu_data = global_state.get_nu(None).await.unwrap();
+        dbg!(nu_data.edge_truncation);
+        let nu_data = global_state.get_nu(Some((40.0, 300.0))).await.unwrap();
+        dbg!(nu_data.edge_truncation);
     }
 }

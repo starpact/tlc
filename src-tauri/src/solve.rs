@@ -1,9 +1,14 @@
-use std::f64::{consts::PI, NAN};
+use std::{
+    f64::{consts::PI, NAN},
+    sync::Arc,
+};
 
 use libm::erfc;
-use ndarray::ArcArray1;
+use ndarray::{Array2, ArrayView, Dimension};
 use packed_simd::{f64x4, Simd};
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
+use tracing::{debug, instrument};
 
 use crate::daq::Interpolator;
 
@@ -26,24 +31,6 @@ pub enum IterationMethod {
 struct PointData<'a> {
     gmax_frame_index: usize,
     temperatures: &'a [f64],
-}
-
-trait SolveSinglePoint {
-    fn solve_single_point(&self, point_data: PointData) -> f64;
-}
-
-struct NewtonTangentSolver {
-    physical_param: PhysicalParam,
-    max_iter_num: usize,
-    h0: f64,
-    dt: f64,
-}
-
-struct NewtonDownSolver {
-    physical_param: PhysicalParam,
-    max_iter_num: usize,
-    h0: f64,
-    dt: f64,
 }
 
 impl PointData<'_> {
@@ -101,6 +88,7 @@ impl PointData<'_> {
 }
 
 // Fake SIMD version erfc.
+// I didn't find rust version SIMD erfc. Maybe use `sleef` binding in the future.
 fn erfc_simd(arr: Simd<[f64; 4]>) -> Simd<[f64; 4]> {
     unsafe {
         f64x4::new(
@@ -112,18 +100,24 @@ fn erfc_simd(arr: Simd<[f64; 4]>) -> Simd<[f64; 4]> {
     }
 }
 
-impl SolveSinglePoint for NewtonTangentSolver {
-    fn solve_single_point(&self, point_data: PointData) -> f64 {
+fn newtow_tangent(
+    physical_param: PhysicalParam,
+    dt: f64,
+    h0: f64,
+    max_iter_num: usize,
+) -> impl Fn(PointData) -> f64 {
+    move |point_data| {
         let PhysicalParam {
             gmax_temperature: tw,
             solid_thermal_conductivity: k,
             solid_thermal_diffusivity: a,
-            ..
-        } = self.physical_param;
+            characteristic_length,
+            air_thermal_conductivity,
+        } = physical_param;
 
-        let mut h = self.h0;
-        for _ in 0..self.max_iter_num {
-            let (f, df) = point_data.heat_transfer_equation(h, self.dt, k, a, tw);
+        let mut h = h0;
+        for _ in 0..max_iter_num {
+            let (f, df) = point_data.heat_transfer_equation(h, dt, k, a, tw);
             let next_h = h - f / df;
             if next_h.abs() > 10000. {
                 return NAN;
@@ -134,30 +128,35 @@ impl SolveSinglePoint for NewtonTangentSolver {
             h = next_h;
         }
 
-        h
+        h * characteristic_length / air_thermal_conductivity
     }
 }
 
-impl SolveSinglePoint for NewtonDownSolver {
-    fn solve_single_point(&self, point_data: PointData) -> f64 {
+fn newtow_down(
+    physical_param: PhysicalParam,
+    dt: f64,
+    h0: f64,
+    max_iter_num: usize,
+) -> impl Fn(PointData) -> f64 {
+    move |point_data| {
         let PhysicalParam {
             gmax_temperature: tw,
             solid_thermal_conductivity: k,
             solid_thermal_diffusivity: a,
-            ..
-        } = self.physical_param;
+            characteristic_length,
+            air_thermal_conductivity,
+        } = physical_param;
 
-        let mut h = self.h0;
-        let (mut f, mut df) = point_data.heat_transfer_equation(h, self.dt, k, a, tw);
-        for _ in 0..self.max_iter_num {
+        let mut h = h0;
+        let (mut f, mut df) = point_data.heat_transfer_equation(h, dt, k, a, tw);
+        for _ in 0..max_iter_num {
             let mut lambda = 1.;
             loop {
                 let next_h = h - lambda * f / df;
                 if (next_h - h).abs() < 1e-3 {
                     return next_h;
                 }
-                let (next_f, next_df) =
-                    point_data.heat_transfer_equation(next_h, self.dt, k, a, tw);
+                let (next_f, next_df) = point_data.heat_transfer_equation(next_h, dt, k, a, tw);
                 if next_f.abs() < f.abs() {
                     h = next_h;
                     f = next_f;
@@ -174,7 +173,7 @@ impl SolveSinglePoint for NewtonDownSolver {
             }
         }
 
-        h
+        h * characteristic_length / air_thermal_conductivity
     }
 }
 
@@ -187,39 +186,72 @@ impl Default for IterationMethod {
     }
 }
 
+#[instrument(skip(gmax_frame_indexes, interpolator))]
 pub fn solve(
-    _gmax_frame_indexes: ArcArray1<usize>,
+    gmax_frame_indexes: Arc<Vec<usize>>,
     interpolator: Interpolator,
     physical_param: PhysicalParam,
     iteration_method: IterationMethod,
     frame_rate: usize,
-) {
-    rayon::spawn(move || {
-        let dt = 1.0 / frame_rate as f64;
-        match iteration_method {
-            IterationMethod::NewtonTangent { h0, max_iter_num } => {
-                solve_core(NewtonTangentSolver {
-                    physical_param,
-                    max_iter_num,
-                    dt,
-                    h0,
-                })
-            }
-            IterationMethod::NewtonDown { h0, max_iter_num } => solve_core(NewtonDownSolver {
-                physical_param,
-                max_iter_num,
-                dt,
-                h0,
-            }),
-        }
-    });
-    let _ = interpolator.interpolate_single_point(100);
+) -> Array2<f64> {
+    let dt = 1.0 / frame_rate as f64;
+    let shape = interpolator.shape();
+    let nu1 = match iteration_method {
+        IterationMethod::NewtonTangent { h0, max_iter_num } => solve_inner(
+            gmax_frame_indexes,
+            interpolator,
+            newtow_tangent(physical_param, dt, h0, max_iter_num),
+        ),
+        IterationMethod::NewtonDown { h0, max_iter_num } => solve_inner(
+            gmax_frame_indexes,
+            interpolator,
+            newtow_down(physical_param, dt, h0, max_iter_num),
+        ),
+    };
 
-    todo!()
+    Array2::from_shape_vec(shape, nu1).unwrap()
 }
 
-fn solve_core<S: SolveSinglePoint>(_solver: S) {
-    todo!()
+pub fn nan_mean<D: Dimension>(data: ArrayView<f64, D>) -> f64 {
+    let (sum, non_nan_cnt, cnt) = data.iter().fold((0., 0, 0), |(sum, non_nan_cnt, cnt), &x| {
+        if x.is_nan() {
+            (sum, non_nan_cnt, cnt + 1)
+        } else {
+            (sum + x, non_nan_cnt + 1, cnt + 1)
+        }
+    });
+
+    let nan_ratio = (cnt - non_nan_cnt) as f64 / cnt as f64;
+    debug!(non_nan_cnt, cnt, nan_ratio);
+
+    sum / non_nan_cnt as f64
+}
+
+fn solve_inner<F>(
+    gmax_frame_indexes: Arc<Vec<usize>>,
+    interpolator: Interpolator,
+    solve_single_point: F,
+) -> Vec<f64>
+where
+    F: Fn(PointData) -> f64 + Send + Sync + 'static,
+{
+    const FIRST_FEW_TO_CAL_T0: usize = 4;
+    gmax_frame_indexes
+        .par_iter()
+        .enumerate()
+        .map(|(point_index, &gmax_frame_index)| {
+            if gmax_frame_index <= FIRST_FEW_TO_CAL_T0 {
+                return NAN;
+            }
+            let temperatures = interpolator.interpolate_single_point(point_index);
+            let temperatures = temperatures.as_slice().unwrap();
+            let point_data = PointData {
+                gmax_frame_index,
+                temperatures,
+            };
+            solve_single_point(point_data)
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -310,14 +342,14 @@ mod tests {
                 )))
                 .await
                 .unwrap();
-            daq_manager.daq_raw().unwrap().column(3).to_owned()
+            daq_manager.raw().unwrap().column(3).to_owned()
         })
     }
 
     const I: (f64, f64, f64, f64, f64) = (100.0, 0.04, 0.19, 1.091e-7, 35.48);
 
     #[test]
-    fn test_result_correct() {
+    fn test_single_point_correct() {
         let temps = new_temps();
         let point_data = PointData {
             gmax_frame_index: 800,

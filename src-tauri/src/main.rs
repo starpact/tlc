@@ -10,7 +10,7 @@
 mod command;
 mod daq;
 mod error;
-mod plot;
+mod post;
 mod setting;
 mod solve;
 mod state;
@@ -46,7 +46,7 @@ fn main() {
             get_daq_metadata,
             set_daq_path,
             read_single_frame_base64,
-            get_daq_data,
+            get_daq_raw,
             synchronize_video_and_daq,
             get_start_index,
             set_start_frame,
@@ -59,16 +59,21 @@ fn main() {
             get_filter_method,
             set_filter_method,
             filter_single_point,
-            filter_green2,
-            get_filter_green2_progress,
+            detect_peak,
+            get_detect_peak_progress,
             get_interpolation_method,
             set_interpolation_method,
             interpolate,
             interpolate_single_frame,
             get_iteration_method,
             set_iteration_method,
-            set_iteration_method,
+            set_gmax_temperature,
+            set_solid_thermal_conductivity,
+            set_solid_thermal_diffusivity,
+            set_characteristic_length,
+            set_air_thermal_conductivity,
             solve,
+            get_nu,
         ])
         .run(tauri::generate_context!())
         .unwrap_or_else(|e| error!("error while running application: {e}"));

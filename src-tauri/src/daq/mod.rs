@@ -73,7 +73,7 @@ impl<S: SettingStorage> DaqManager<S> {
         spawn_blocking(move || daq_manager.inner.read_daq(daq_path)).await?
     }
 
-    pub fn daq_raw(&self) -> Option<ArcArray2<f64>> {
+    pub fn raw(&self) -> Option<ArcArray2<f64>> {
         self.inner.daq_data.lock().unwrap().raw.clone()
     }
 
@@ -127,7 +127,7 @@ impl<S: SettingStorage> DaqManagerInner<S> {
     #[instrument(skip(self), err)]
     fn interpolate(&self) -> Result<()> {
         let mut daq_data = self.daq_data.lock().unwrap();
-        let daq_raw = daq_data
+        let raw = daq_data
             .raw
             .as_ref()
             .ok_or_else(|| anyhow!("daq not loaded yet"))?
@@ -139,18 +139,26 @@ impl<S: SettingStorage> DaqManagerInner<S> {
         let thermocouples = setting_storage.thermocouples()?;
 
         let mut temperature2 = Array2::zeros((thermocouples.len(), cal_num));
-        daq_raw
-            .rows()
+        raw.rows()
             .into_iter()
             .skip(start_row)
             .take(cal_num)
             .zip(temperature2.columns_mut())
-            .for_each(|(daq_row, mut col)| {
+            .try_for_each(|(daq_row, mut col)| {
                 thermocouples
                     .iter()
                     .zip(col.iter_mut())
-                    .for_each(|(tc, t)| *t = daq_row[tc.column_index]);
-            });
+                    .try_for_each(|(tc, t)| -> Result<()> {
+                        *t = *daq_row.get(tc.column_index).ok_or_else(|| {
+                            anyhow!(
+                                "thermocouple column index out of range: {} > {}",
+                                tc.column_index,
+                                daq_row.len()
+                            )
+                        })?;
+                        Ok(())
+                    })
+            })?;
 
         let interpolator =
             Interpolator::new(temperature2, interpolation_method, area, &thermocouples);
@@ -233,8 +241,8 @@ mod tests {
             nrows: 66666666,
             ncols: 66666666,
         };
-
         let cal_num = 2000;
+
         let mut mock = MockSettingStorage::new();
         mock.expect_daq_metadata().return_once(|| Ok(daq_metadata));
         mock.expect_set_daq_metadata().return_once(|_| Ok(()));

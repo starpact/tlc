@@ -1,37 +1,59 @@
 use std::path::Path;
 
 use anyhow::Result;
+use image::ColorType::Rgb8;
 use ndarray::prelude::*;
 use once_cell::sync::OnceCell;
 use plotters::prelude::*;
+use tracing::instrument;
 
+#[instrument(skip(area), fields(plot_path = plot_path.as_ref().to_str().unwrap()), err)]
 pub fn draw_area<P: AsRef<Path>>(
     plot_path: P,
     area: ArrayView2<f64>,
     edge_truncation: (f64, f64),
-) -> Result<()> {
+) -> Result<String> {
     let (h, w) = area.dim();
-    let root = BitMapBackend::new(&plot_path, (w as u32, h as u32)).into_drawing_area();
-    let chart = ChartBuilder::on(&root).build_cartesian_2d(0..w, 0..h)?;
-    let pix_plotter = chart.plotting_area();
+    let mut buf = vec![0; h * w * 3];
+    {
+        let root = BitMapBackend::with_buffer(&mut buf, (w as u32, h as u32)).into_drawing_area();
+        let chart = ChartBuilder::on(&root).build_cartesian_2d(0..w, 0..h)?;
+        let pix_plotter = chart.plotting_area();
 
-    let (vmax, vmin) = edge_truncation;
-    let delta = vmax - vmin;
-    let jet = CELL.get_or_init(|| JET.map(|[r, g, b]| [r * 255., g * 255., b * 255.]));
+        let (min, max) = edge_truncation;
+        let jet = CELL.get_or_init(|| JET.map(|[r, g, b]| [r * 255.0, g * 255.0, b * 255.0]));
 
-    let mut iter = area.into_iter();
-    for y in 0..h {
-        for x in 0..w {
-            if let Some(nu) = iter.next() {
-                if nu.is_nan() {
-                    pix_plotter.draw_pixel((x, y), &WHITE)?;
-                    continue;
+        let mut iter = area.into_iter();
+        for y in 0..h {
+            for x in 0..w {
+                if let Some(nu) = iter.next() {
+                    if nu.is_nan() {
+                        pix_plotter.draw_pixel((x, y), &WHITE)?;
+                        continue;
+                    }
+                    let color_index = ((nu.clamp(min, max) - min) / (max - min) * 255.0) as usize;
+                    let [r, g, b] = jet[color_index];
+                    pix_plotter.draw_pixel((x, y), &RGBColor(r as u8, g as u8, b as u8))?;
                 }
-                let color_index = ((nu.clamp(vmin, vmax) - vmin) / delta * 255.) as usize;
-                let [r, g, b] = jet[color_index];
-                pix_plotter.draw_pixel((x, y), &RGBColor(r as u8, g as u8, b as u8))?;
             }
         }
+    }
+
+    image::save_buffer(&plot_path, &buf, w as u32, h as u32, Rgb8)?;
+    let plot_base64 = base64::encode(&buf);
+
+    Ok(plot_base64)
+}
+
+#[instrument(skip(data), fields(data_path = data_path.as_ref().to_str().unwrap()), err)]
+pub fn save_matrix<P: AsRef<Path>>(data_path: P, data: ArrayView2<f64>) -> Result<()> {
+    let mut wtr = csv::WriterBuilder::new()
+        .has_headers(false)
+        .from_path(data_path.as_ref())?;
+
+    for row in data.rows() {
+        let v: Vec<_> = row.iter().map(|x| x.to_string()).collect();
+        wtr.write_record(&csv::StringRecord::from(v))?
     }
 
     Ok(())

@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS settings (
     solid_thermal_diffusivity REAL NOT NULL,
     characteristic_length REAL NOT NULL,
     air_thermal_conductivity REAL NOT NULL,
-    completed INTEGER NOT NULL, -- bool
-    created_at INTEGER NOT NULL, -- timestamp in seconds
-    updated_at INTEGER NOT NULL -- timestamp in seconds
+    completed_at INTEGER NOT NULL, -- timestamp in milliseconds
+    created_at INTEGER NOT NULL, -- timestamp in milliseconds
+    updated_at INTEGER NOT NULL -- timestamp in milliseconds
 );
