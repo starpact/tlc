@@ -3,7 +3,8 @@
 
   outputs = { self, nixpkgs }:
     let
-      pkgs = import nixpkgs { system = "x86_64-linux"; };
+      system = "x86_64-linux";
+      pkgs = import nixpkgs { inherit system; };
       stdenv = pkgs.llvmPackages_14.stdenv;
       libraries = with pkgs;[
         dbus.lib
@@ -17,7 +18,7 @@
       ];
       packages = with pkgs; [
         cargo-tauri
-        curl
+        cargo-nextest
         dbus
         ffmpeg
         glib
@@ -27,7 +28,6 @@
         pkg-config
         sqlite
         webkitgtk
-        wget
       ];
     in
     {

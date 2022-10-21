@@ -6,7 +6,6 @@ use rusqlite::{params, Connection, Error::QueryReturnedNoRows};
 use super::{CreateRequest, SettingStorage, StartIndex};
 use crate::{
     daq::{DaqMetadata, InterpolationMethod, Thermocouple},
-    error::Error,
     solve::{IterationMethod, PhysicalParam},
     util,
     video::{FilterMetadata, FilterMethod, VideoMetadata},
@@ -124,7 +123,7 @@ impl SettingStorage for SqliteSettingStorage {
                 |row| row.get(0),
             )
             .map_err::<anyhow::Error, _>(|e| match e {
-                QueryReturnedNoRows => Error::SettingIdNotFound(setting_id).into(),
+                QueryReturnedNoRows => anyhow!("setting dost not exist"),
                 _ => e.into(),
             })?;
         self.setting_id = Some(setting_id);

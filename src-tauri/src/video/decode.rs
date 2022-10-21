@@ -12,7 +12,6 @@ use ffmpeg::{
     software::{scaling, scaling::flag::Flags},
     util::frame::video::Video,
 };
-use ffmpeg_next as ffmpeg;
 use thread_local::ThreadLocal;
 
 /// Decoder is bound to a specific video and can decode any packet of this video.

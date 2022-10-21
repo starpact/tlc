@@ -15,7 +15,6 @@ use ffmpeg::{
     codec,
     codec::{packet::Packet, Parameters},
 };
-use ffmpeg_next as ffmpeg;
 use image::{codecs::jpeg::JpegEncoder, ColorType::Rgb8};
 use ndarray::{Array2, Axis};
 use rayon::prelude::*;

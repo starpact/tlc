@@ -7,6 +7,7 @@ use std::{
 
 use anyhow::{anyhow, bail, Result};
 use serde::{Deserialize, Serialize};
+pub use sqlite::SqliteSettingStorage;
 use tokio::io::AsyncWriteExt;
 use tracing::instrument;
 
@@ -15,7 +16,6 @@ use crate::{
     solve::{IterationMethod, PhysicalParam},
     video::{FilterMetadata, FilterMethod, Green2Metadata, VideoMetadata},
 };
-pub use sqlite::SqliteSettingStorage;
 
 #[cfg(test)]
 use mockall::automock;

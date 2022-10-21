@@ -337,9 +337,7 @@ mod tests {
 
             let daq_manager = DaqManager::new(Arc::new(Mutex::new(mock)));
             daq_manager
-                .read_daq(Some(PathBuf::from(
-                    "/home/yhj/Downloads/2021_YanHongjie/EXP/imp/daq/imp_20000_1.lvm",
-                )))
+                .read_daq(Some(PathBuf::from("./tests/imp_20000_1.lvm")))
                 .await
                 .unwrap();
             daq_manager.raw().unwrap().column(3).to_owned()

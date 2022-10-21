@@ -9,7 +9,6 @@
 
 mod command;
 mod daq;
-mod error;
 mod post;
 mod setting;
 mod solve;
@@ -17,7 +16,6 @@ mod state;
 mod util;
 mod video;
 
-use ffmpeg_next as ffmpeg;
 use setting::SqliteSettingStorage;
 use tracing::error;
 
