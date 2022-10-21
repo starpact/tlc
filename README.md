@@ -24,4 +24,4 @@ cargo bench
 - [FFmpeg: Difference Between Frames and Packets](https://stackoverflow.com/questions/53574798/difference-between-frames-and-packets-in-ffmpeg)
 - [FFmpeg: multithread decoding](https://www.cnblogs.com/TaigaCon/p/10220356.html)
 
-![test image](.github/assets/test.png)
+![test image](.github/assets/tlc_architecture.svg)
