@@ -5,7 +5,7 @@ use ndarray::{parallel::prelude::*, prelude::*};
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
 
-use super::{progress_bar::ProgressBar, Green2Metadata};
+use super::{progress_bar::ProgressBar, Green2Meta};
 
 #[derive(Debug, Default, Deserialize, Serialize, Clone, Copy, PartialEq)]
 pub enum FilterMethod {
@@ -20,9 +20,9 @@ pub enum FilterMethod {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct FilterMetadata {
+pub struct FilterMeta {
     pub filter_method: FilterMethod,
-    pub green2_metadata: Green2Metadata,
+    pub green2_meta: Green2Meta,
 }
 
 #[instrument(skip(green2, progress_bar))]

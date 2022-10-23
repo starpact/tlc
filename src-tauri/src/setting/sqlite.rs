@@ -5,10 +5,10 @@ use rusqlite::{params, Connection, Error::QueryReturnedNoRows};
 
 use super::{CreateRequest, SettingStorage, StartIndex};
 use crate::{
-    daq::{DaqMetadata, InterpolationMethod, Thermocouple},
+    daq::{InterpMethod, Thermocouple},
     solve::{IterationMethod, PhysicalParam},
     util,
-    video::{FilterMetadata, FilterMethod, VideoMetadata},
+    video::{FilterMeta, FilterMethod, VideoMeta},
 };
 
 #[derive(Debug)]
@@ -187,10 +187,14 @@ impl SettingStorage for SqliteSettingStorage {
         Ok(())
     }
 
-    fn video_metadata_optional(&self) -> Result<Option<VideoMetadata>> {
+    fn video_path(&self) -> Result<PathBuf> {
+        todo!()
+    }
+
+    fn video_meta_optional(&self) -> Result<Option<VideoMeta>> {
         let id = self.setting_id()?;
         let ret: Option<String> = self.conn.query_row(
-            "SELECT video_metadata FROM settings WHERE id = ?1",
+            "SELECT video_meta FROM settings WHERE id = ?1",
             [id],
             |row| row.get(0),
         )?;
@@ -202,27 +206,27 @@ impl SettingStorage for SqliteSettingStorage {
     }
 
     /// Compare the new `video_metadata` with the old one to make minimal updates.
-    fn set_video_metadata(&self, video_metadata: &VideoMetadata) -> Result<()> {
+    fn set_video_meta(&self, video_meta: &VideoMeta) -> Result<()> {
         let id = self.setting_id()?;
-        match self.video_metadata_optional()? {
-            Some(old_video_metadata) if old_video_metadata.path == video_metadata.path => Ok(()),
-            Some(old_video_metadata) if old_video_metadata.shape == video_metadata.shape => {
+        match self.video_meta_optional()? {
+            Some(old_video_meta) if old_video_meta.path == video_meta.path => Ok(()),
+            Some(old_video_meta) if old_video_meta.shape == video_meta.shape => {
                 // Most of the time we can make use of the previous position setting rather
                 // than directly invalidate it because within a series of experiments the
                 // position settings should be similar.
-                let video_metadata_str = serde_json::to_string(&video_metadata)?;
+                let video_meta_str = serde_json::to_string(&video_meta)?;
                 let updated_at = util::time::now_as_millis();
                 // Reset start_frame and start_row but reuse area and thermocouples.
                 self.conn.execute(
                     "
                     UPDATE settings SET
-                        video_metadata = ?1,
+                        video_meta = ?1,
                         start_frame = NULL,
                         start_row = NULL,
                         updated_at = ?2
                     WHERE id = ?3
                     ",
-                    params![video_metadata_str, updated_at, id],
+                    params![video_meta_str, updated_at, id],
                 )?;
                 Ok(())
             }
@@ -230,8 +234,8 @@ impl SettingStorage for SqliteSettingStorage {
                 // We will only get this point when working with a brand new setting
                 // or different camera parameters. Then we just put the select box in
                 // the center by default.
-                let video_metadata_str = serde_json::to_string(&video_metadata)?;
-                let (h, w) = video_metadata.shape;
+                let video_meta_str = serde_json::to_string(&video_meta)?;
+                let (h, w) = video_meta.shape;
                 let area = (h / 4, w / 4, h / 2, w / 2);
                 let area_str = serde_json::to_string(&area)?;
                 let updated_at = util::time::now_as_millis();
@@ -239,7 +243,7 @@ impl SettingStorage for SqliteSettingStorage {
                 self.conn.execute(
                     "
                     UPDATE settings SET
-                        video_metadata = ?1,
+                        video_meta = ?1,
                         start_frame = NULL,
                         start_row = NULL,
                         area = ?2,
@@ -247,71 +251,69 @@ impl SettingStorage for SqliteSettingStorage {
                         updated_at = ?3
                     WHERE id = ?4
                     ",
-                    params![video_metadata_str, area_str, updated_at, id],
+                    params![video_meta_str, area_str, updated_at, id],
                 )?;
                 Ok(())
             }
         }
     }
 
-    fn daq_metadata_optional(&self) -> Result<Option<DaqMetadata>> {
-        let id = self.setting_id()?;
-        let ret: Option<String> = self.conn.query_row(
-            "SELECT daq_metadata FROM settings WHERE id = ?1",
-            [id],
-            |row| row.get(0),
-        )?;
-
-        match ret {
-            Some(s) => Ok(Some(serde_json::from_str(&s)?)),
-            None => Ok(None),
-        }
+    fn set_video_path(&self, _video_path: &Path) -> Result<()> {
+        todo!()
     }
 
-    fn set_daq_metadata(&self, daq_metadata: &DaqMetadata) -> Result<()> {
-        let id = self.setting_id()?;
-        match self.daq_metadata_optional()? {
-            Some(old_daq_metadata) if old_daq_metadata.path == daq_metadata.path => Ok(()),
-            _ => {
-                let thermocouples = self.thermocouples_optional()?;
-                let daq_metadata_str = serde_json::to_string(&daq_metadata)?;
-                let updated_at = util::time::now_as_millis();
+    // fn set_daq_metadata(&self, daq_metadata: &DaqMetadata) -> Result<()> {
+    //     let id = self.setting_id()?;
+    //     match self.daq_metadata_optional()? {
+    //         Some(old_daq_metadata) if old_daq_metadata.path == daq_metadata.path => Ok(()),
+    //         _ => {
+    //             let thermocouples = self.thermocouples_optional()?;
+    //             let daq_metadata_str = serde_json::to_string(&daq_metadata)?;
+    //             let updated_at = util::time::now_as_millis();
+    //
+    //             if let Some(thermocouples) = thermocouples {
+    //                 if thermocouples
+    //                     .iter()
+    //                     .any(|t| t.column_index >= daq_metadata.ncols)
+    //                 {
+    //                     self.conn.execute(
+    //                         "
+    //                         UPDATE settings SET
+    //                             daq_metadata = ?1,
+    //                             start_frame = NULL,
+    //                             start_row = NULL,
+    //                             thermocouples = NULL,
+    //                             updated_at = ?2
+    //                         WHERE id = ?3
+    //                         ",
+    //                         params![daq_metadata_str, updated_at, id],
+    //                     )?;
+    //                 }
+    //                 return Ok(());
+    //             }
+    //
+    //             self.conn.execute(
+    //                 "
+    //                 UPDATE settings SET
+    //                     daq_metadata = ?1,
+    //                     start_frame = NULL,
+    //                     start_row = NULL,
+    //                     updated_at = ?2
+    //                 WHERE id = ?3
+    //                 ",
+    //                 params![daq_metadata_str, updated_at, id],
+    //             )?;
+    //             Ok(())
+    //         }
+    //     }
+    // }
 
-                if let Some(thermocouples) = thermocouples {
-                    if thermocouples
-                        .iter()
-                        .any(|t| t.column_index >= daq_metadata.ncols)
-                    {
-                        self.conn.execute(
-                            "
-                            UPDATE settings SET
-                                daq_metadata = ?1,
-                                start_frame = NULL,
-                                start_row = NULL,
-                                thermocouples = NULL,
-                                updated_at = ?2
-                            WHERE id = ?3
-                            ",
-                            params![daq_metadata_str, updated_at, id],
-                        )?;
-                    }
-                    return Ok(());
-                }
+    fn daq_path(&self) -> Result<PathBuf> {
+        todo!()
+    }
 
-                self.conn.execute(
-                    "
-                    UPDATE settings SET
-                        daq_metadata = ?1,
-                        start_frame = NULL,
-                        start_row = NULL,
-                        updated_at = ?2
-                    WHERE id = ?3
-                    ",
-                    params![daq_metadata_str, updated_at, id],
-                )?;
-                Ok(())
-            }
-        }
+    fn set_daq_path(&self, daq_path: &Path) -> Result<()> {
+        todo!()
     }
 
     fn start_index(&self) -> Result<StartIndex> {
@@ -359,7 +361,7 @@ impl SettingStorage for SqliteSettingStorage {
     fn set_area(&self, area: (usize, usize, usize, usize)) -> Result<()> {
         let id = self.setting_id()?;
         let (h, w) = self
-            .video_metadata_optional()?
+            .video_meta_optional()?
             .ok_or_else(|| anyhow!("video path unset"))?
             .shape;
         let (tl_y, tl_x, cal_h, cal_w) = area;
@@ -394,7 +396,7 @@ impl SettingStorage for SqliteSettingStorage {
         }
     }
 
-    fn interpolation_method(&self) -> Result<InterpolationMethod> {
+    fn interp_method(&self) -> Result<InterpMethod> {
         let id = self.setting_id()?;
         let interpolatioin_method_str: String = self.conn.query_row(
             "SELECT interpolation_method FROM settings WHERE id = ?1",
@@ -407,19 +409,19 @@ impl SettingStorage for SqliteSettingStorage {
         Ok(interpolation_method)
     }
 
-    fn set_interpolation_method(&self, interpolation_method: InterpolationMethod) -> Result<()> {
+    fn set_interp_method(&self, interp_method: InterpMethod) -> Result<()> {
         let id = self.setting_id()?;
-        let interpolation_method_str = serde_json::to_string(&interpolation_method)?;
+        let interp_method_str = serde_json::to_string(&interp_method)?;
         let updated_at = util::time::now_as_millis();
         self.conn.execute(
-            "UPDATE settings SET interpolation_method = ?1 updated_at = ?2 WHERE id = ?3",
-            params![interpolation_method_str, updated_at, id],
+            "UPDATE settings SET interp_method = ?1 updated_at = ?2 WHERE id = ?3",
+            params![interp_method_str, updated_at, id],
         )?;
 
         Ok(())
     }
 
-    fn filter_metadata(&self) -> Result<FilterMetadata> {
+    fn filter_meta(&self) -> Result<FilterMeta> {
         let id = self.setting_id()?;
         let filter_method_str: String = self.conn.query_row(
             "SELECT filter_method FROM settings WHERE id = ?1",
@@ -428,11 +430,11 @@ impl SettingStorage for SqliteSettingStorage {
         )?;
 
         let filter_method = serde_json::from_str(&filter_method_str)?;
-        let green2_metadata = self.green2_metadata()?;
+        let green2_meta = self.green2_meta()?;
 
-        Ok(FilterMetadata {
+        Ok(FilterMeta {
             filter_method,
-            green2_metadata,
+            green2_meta,
         })
     }
 
@@ -554,10 +556,4 @@ impl SettingStorage for SqliteSettingStorage {
 
         Ok(())
     }
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn test() {}
 }

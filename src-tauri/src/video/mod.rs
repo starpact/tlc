@@ -25,7 +25,7 @@ use tracing::{info_span, instrument};
 
 use crate::setting::SettingStorage;
 use decode::DecoderManager;
-pub use filter::{FilterMetadata, FilterMethod};
+pub use filter::{FilterMeta, FilterMethod};
 use pool::SpawnHandle;
 pub use progress_bar::Progress;
 use progress_bar::ProgressBar;
@@ -89,7 +89,7 @@ struct VideoData {
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
-pub struct VideoMetadata {
+pub struct VideoMeta {
     pub path: PathBuf,
     pub frame_rate: usize,
     pub nframes: usize,
@@ -98,7 +98,7 @@ pub struct VideoMetadata {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Green2Metadata {
+pub struct Green2Meta {
     pub start_frame: usize,
     pub cal_num: usize,
     pub area: (usize, usize, usize, usize),
@@ -118,7 +118,7 @@ impl<S: SettingStorage> VideoManager<S> {
         }
     }
 
-    /// Read video metadata and update setting if needed. Then load all video packets
+    /// Read video meta and update setting if needed. Then load all video packets
     /// into memory in the background(after `spawn_read_video` returned).
     /// `video_path` is_some means updating video setting.
     /// `video_path` is_none means reading the path from current setting.
@@ -198,10 +198,10 @@ impl<S: SettingStorage> VideoManagerInner<S> {
         self.build_green2_progress_bar.reset();
         self.detect_peak_progress_bar.reset();
 
-        let _span1 = info_span!("read_video_metadata").entered();
+        let _span1 = info_span!("read_video_meta").entered();
         let video_path = match video_path {
             Some(video_path) => video_path,
-            None => self.setting_storage.lock().unwrap().video_metadata()?.path,
+            None => self.setting_storage.lock().unwrap().video_meta()?.path,
         };
         let mut input = ffmpeg::format::input(&video_path)?;
         let video_stream = input
@@ -217,7 +217,7 @@ impl<S: SettingStorage> VideoManagerInner<S> {
         let decoder = codec_ctx.decoder().video()?;
         let shape = (decoder.height() as usize, decoder.width() as usize);
 
-        let video_metadata = VideoMetadata {
+        let video_meta = VideoMeta {
             path: video_path.clone(),
             frame_rate,
             nframes,
@@ -230,7 +230,7 @@ impl<S: SettingStorage> VideoManagerInner<S> {
             self.setting_storage
                 .lock()
                 .unwrap()
-                .set_video_metadata(&video_metadata)?;
+                .set_video_meta(&video_meta)?;
             // Even if video has not changed, we will still reset all video data.
             video_data.reset(parameters);
         }
@@ -266,7 +266,7 @@ impl<S: SettingStorage> VideoManagerInner<S> {
 
     fn batch_push_packets(&self, video_path: &Path, buf: &mut Vec<Packet>) -> Result<()> {
         let mut video_data = self.video_data.write().unwrap();
-        let current_video_path = self.setting_storage.lock().unwrap().video_metadata()?.path;
+        let current_video_path = self.setting_storage.lock().unwrap().video_meta()?.path;
         if video_path != current_video_path {
             // Video has been changed, which means user changed the video before previous
             // loading finishes. So we should abort current loading at once. Other threads
@@ -287,11 +287,11 @@ impl<S: SettingStorage> VideoManagerInner<S> {
         for spin_count in 0..20 {
             let video_data = self.video_data.read().unwrap();
 
-            let VideoMetadata {
+            let VideoMeta {
                 nframes,
                 shape: (h, w),
                 ..
-            } = self.setting_storage.lock().unwrap().video_metadata()?;
+            } = self.setting_storage.lock().unwrap().video_meta()?;
             if frame_index >= nframes {
                 // This is an invalid `frame_index` from frontend and will never get the frame.
                 // So directly abort it.
@@ -326,36 +326,36 @@ impl<S: SettingStorage> VideoManagerInner<S> {
 
     #[instrument(skip_all, err)]
     fn build_green2(&self, tx: oneshot::Sender<()>) -> Result<()> {
-        let (green2_metadata, green2) = {
+        let (green2_meta, green2) = {
             let video_data = self.video_data.read().unwrap();
 
             let setting_storage = self.setting_storage.lock().unwrap();
-            let video_metadata = setting_storage.video_metadata()?;
-            let green2_metadata = setting_storage.green2_metadata()?;
+            let video_meta = setting_storage.video_meta()?;
+            let green2_meta = setting_storage.green2_meta()?;
             drop(setting_storage);
 
-            if video_data.packets.len() < video_metadata.nframes {
+            if video_data.packets.len() < video_meta.nframes {
                 bail!("video not loaded yet");
             }
             // Tell outside that building actually started.
             tx.send(()).unwrap();
 
             let green2 = video_data.decode_all(
-                &video_metadata,
-                &green2_metadata,
+                &video_meta,
+                &green2_meta,
                 &self.build_green2_progress_bar,
             )?;
 
-            (green2_metadata, green2)
+            (green2_meta, green2)
         };
 
         let mut video_data = self.video_data.write().unwrap();
-        let current_green2_metadata = self.setting_storage.lock().unwrap().green2_metadata()?;
-        if current_green2_metadata != green2_metadata {
+        let current_green2_meta = self.setting_storage.lock().unwrap().green2_meta()?;
+        if current_green2_meta != green2_meta {
             bail!(
                 "setting has been changed while building green2, old: {:?}, current: {:?}",
-                green2_metadata,
-                current_green2_metadata,
+                green2_meta,
+                current_green2_meta,
             );
         }
         video_data.green2 = Some(green2);
@@ -365,32 +365,32 @@ impl<S: SettingStorage> VideoManagerInner<S> {
 
     #[instrument(skip_all, err)]
     fn detect_peak(&self, tx: oneshot::Sender<()>) -> Result<()> {
-        let (filter_metadata, gmax_frame_indexes) = {
+        let (filter_meta, gmax_frame_indexes) = {
             let video_data = self.video_data.read().unwrap();
             let green2 = video_data
                 .green2
                 .as_ref()
                 .ok_or_else(|| anyhow!("green2 not built yet"))?
                 .view();
-            let filter_metadata = self.setting_storage.lock().unwrap().filter_metadata()?;
+            let filter_meta = self.setting_storage.lock().unwrap().filter_meta()?;
             // Tell outside that peak detection actually started.
             tx.send(()).unwrap();
             let filtered_green2 = filter::filter_detect_peak(
                 green2,
-                filter_metadata.filter_method,
+                filter_meta.filter_method,
                 &self.detect_peak_progress_bar,
             )?;
 
-            (filter_metadata, filtered_green2)
+            (filter_meta, filtered_green2)
         };
 
         let mut video_data = self.video_data.write().unwrap();
-        let current_filter_metadata = self.setting_storage.lock().unwrap().filter_metadata()?;
-        if current_filter_metadata != filter_metadata {
+        let current_filter_meta = self.setting_storage.lock().unwrap().filter_meta()?;
+        if current_filter_meta != filter_meta {
             bail!(
                 "setting has been changed while detecting peaks, old: {:?}, current: {:?}",
-                filter_metadata,
-                current_filter_metadata,
+                filter_meta,
+                current_filter_meta,
             );
         }
         video_data.gmax_frame_indexes = Some(Arc::new(gmax_frame_indexes));
@@ -401,7 +401,7 @@ impl<S: SettingStorage> VideoManagerInner<S> {
     #[instrument(skip(self), err)]
     fn filter_single_point(&self, (y, x): (usize, usize)) -> Result<Vec<u8>> {
         let video_data = self.video_data.read().unwrap();
-        let (_, _, h, w) = self.setting_storage.lock().unwrap().green2_metadata()?.area;
+        let (_, _, h, w) = self.setting_storage.lock().unwrap().green2_meta()?.area;
         if y >= h {
             bail!("y({y}) out of range({h})");
         }
@@ -418,7 +418,7 @@ impl<S: SettingStorage> VideoManagerInner<S> {
             .setting_storage
             .lock()
             .unwrap()
-            .filter_metadata()?
+            .filter_meta()?
             .filter_method;
 
         Ok(filter::filter_single_point(filter_method, green1))
@@ -433,23 +433,23 @@ impl VideoData {
         self.gmax_frame_indexes = None;
     }
 
-    #[instrument(skip(self, video_metadata, progress_bar))]
+    #[instrument(skip(self, video_meta, progress_bar))]
     fn decode_all(
         &self,
-        video_metadata: &VideoMetadata,
-        green2_metadata: &Green2Metadata,
+        video_meta: &VideoMeta,
+        green2_meta: &Green2Meta,
         progress_bar: &ProgressBar,
     ) -> Result<Array2<u8>> {
-        let cal_num = green2_metadata.cal_num;
-        let byte_w = video_metadata.shape.1 * 3;
-        let (tl_y, tl_x, cal_h, cal_w) = green2_metadata.area;
+        let cal_num = green2_meta.cal_num;
+        let byte_w = video_meta.shape.1 * 3;
+        let (tl_y, tl_x, cal_h, cal_w) = green2_meta.area;
 
         let _reset_guard = progress_bar.start(cal_num as u32);
 
         let mut green2 = Array2::zeros((cal_num, cal_h * cal_w));
         self.packets
             .par_iter()
-            .skip(green2_metadata.start_frame)
+            .skip(green2_meta.start_frame)
             .zip(green2.axis_iter_mut(Axis(0)).into_iter())
             .try_for_each(|(packet, mut row)| -> Result<()> {
                 let mut decoder = self.decoder_manager.decoder()?;
@@ -503,61 +503,61 @@ mod tests {
 
     #[tokio::test]
     async fn test_full_fake() {
-        let video_metadata = VideoMetadata {
+        let video_meta = VideoMeta {
             path: PathBuf::from(SAMPLE_VIDEO_PATH),
             frame_rate: 25,
             nframes: 3,
             shape: (1024, 1280),
         };
-        let green2_metadata = Green2Metadata {
+        let green2_meta = Green2Meta {
             start_frame: 1,
             cal_num: 2,
             area: (10, 10, 600, 800),
-            video_path: video_metadata.path.to_owned(),
+            video_path: video_meta.path.to_owned(),
         };
 
-        full(video_metadata, green2_metadata).await;
+        full(video_meta, green2_meta).await;
     }
 
     #[tokio::test]
     #[ignore]
     async fn test_full_real() {
-        let video_metadata = VideoMetadata {
+        let video_meta = VideoMeta {
             path: PathBuf::from(VIDEO_PATH),
             frame_rate: 25,
             nframes: 2444,
             shape: (1024, 1280),
         };
-        let green2_metadata = Green2Metadata {
+        let green2_meta = Green2Meta {
             start_frame: 10,
             cal_num: 2000,
             area: (10, 10, 600, 800),
-            video_path: video_metadata.path.to_owned(),
+            video_path: video_meta.path.to_owned(),
         };
 
-        full(video_metadata, green2_metadata).await;
+        full(video_meta, green2_meta).await;
     }
 
-    async fn full(video_metadata: VideoMetadata, green2_metadata: Green2Metadata) {
+    async fn full(video_meta: VideoMeta, green2_meta: Green2Meta) {
         util::log::init();
 
-        let video_path = video_metadata.path.clone();
-        let nframes = video_metadata.nframes;
-        let filter_metadata = FilterMetadata {
+        let video_path = video_meta.path.clone();
+        let nframes = video_meta.nframes;
+        let filter_meta = FilterMeta {
             filter_method: FilterMethod::Median { window_size: 20 },
-            green2_metadata: green2_metadata.clone(),
+            green2_meta: green2_meta.clone(),
         };
 
         let mut mock = MockSettingStorage::new();
-        mock.expect_set_video_metadata()
-            .with(eq(video_metadata.clone()))
+        mock.expect_set_video_meta()
+            .with(eq(video_meta.clone()))
             .return_once(|_| Ok(()));
-        mock.expect_video_metadata()
-            .returning(move || Ok(video_metadata.clone()));
-        mock.expect_green2_metadata()
-            .returning(move || Ok(green2_metadata.clone()));
-        mock.expect_filter_metadata()
-            .returning(move || Ok(filter_metadata.clone()));
+        mock.expect_video_meta()
+            .returning(move || Ok(video_meta.clone()));
+        mock.expect_green2_meta()
+            .returning(move || Ok(green2_meta.clone()));
+        mock.expect_filter_meta()
+            .returning(move || Ok(filter_meta.clone()));
 
         let video_manager = VideoManager::new(Arc::new(Mutex::new(mock)));
         video_manager
@@ -636,40 +636,40 @@ mod tests {
     async fn test_interrupt_build_green2_by_video_change() {
         util::log::init();
 
-        let video_metadata = Arc::new(Mutex::new(VideoMetadata {
+        let video_meta = Arc::new(Mutex::new(VideoMeta {
             path: PathBuf::from(VIDEO_PATH),
             frame_rate: 25,
             nframes: 2444,
             shape: (1024, 1280),
         }));
-        let green2_metadata = Green2Metadata {
+        let green2_meta = Green2Meta {
             start_frame: 1,
             cal_num: 2000,
             area: (10, 10, 600, 800),
-            video_path: video_metadata.lock().unwrap().path.to_owned(),
+            video_path: video_meta.lock().unwrap().path.to_owned(),
         };
 
         let mut mock = MockSettingStorage::new();
 
         {
-            let video_metadata = video_metadata.clone();
-            mock.expect_set_video_metadata()
-                .returning(move |new_video_metadata| {
-                    *video_metadata.lock().unwrap() = new_video_metadata.clone();
+            let video_meta = video_meta.clone();
+            mock.expect_set_video_meta()
+                .returning(move |new_video_meta| {
+                    *video_meta.lock().unwrap() = new_video_meta.clone();
                     Ok(())
                 });
         }
         {
-            let video_metadata = video_metadata.clone();
-            mock.expect_video_metadata()
-                .returning(move || Ok(video_metadata.lock().unwrap().clone()));
+            let video_meta = video_meta.clone();
+            mock.expect_video_meta()
+                .returning(move || Ok(video_meta.lock().unwrap().clone()));
         }
-        mock.expect_green2_metadata()
-            .return_once(move || Ok(green2_metadata));
+        mock.expect_green2_meta()
+            .return_once(move || Ok(green2_meta));
 
         let video_manager = VideoManager::new(Arc::new(Mutex::new(mock)));
         video_manager.spawn_read_video(None).await.unwrap();
-        let nframes = video_metadata.lock().unwrap().nframes;
+        let nframes = video_meta.lock().unwrap().nframes;
         video_manager
             .read_single_frame_base64(nframes - 1)
             .await
@@ -690,7 +690,7 @@ mod tests {
             .spawn_read_video(Some(PathBuf::from(VIDEO_PATH1)))
             .await
             .unwrap();
-        let nframes = video_metadata.lock().unwrap().nframes;
+        let nframes = video_meta.lock().unwrap().nframes;
         video_manager
             .read_single_frame_base64(nframes - 1)
             .await
@@ -702,30 +702,30 @@ mod tests {
     async fn test_interrupt_build_green2_by_parameter_change() {
         util::log::init();
 
-        let video_metadata = VideoMetadata {
+        let video_meta = VideoMeta {
             path: PathBuf::from(VIDEO_PATH),
             frame_rate: 25,
             nframes: 2444,
             shape: (1024, 1280),
         };
-        let nframes = video_metadata.nframes;
-        let green2_metadata = Arc::new(Mutex::new(Green2Metadata {
+        let nframes = video_meta.nframes;
+        let green2_meta = Arc::new(Mutex::new(Green2Meta {
             start_frame: 1,
             cal_num: 2000,
             area: (10, 10, 600, 800),
-            video_path: video_metadata.path.to_owned(),
+            video_path: video_meta.path.to_owned(),
         }));
 
         let mut mock = MockSettingStorage::new();
 
-        mock.expect_set_video_metadata().returning(move |_| Ok(()));
-        let video_metadata = video_metadata.clone();
-        mock.expect_video_metadata()
-            .returning(move || Ok(video_metadata.clone()));
+        mock.expect_set_video_meta().returning(move |_| Ok(()));
+        let video_meta = video_meta.clone();
+        mock.expect_video_meta()
+            .returning(move || Ok(video_meta.clone()));
         {
-            let green2_metadata = green2_metadata.clone();
-            mock.expect_green2_metadata()
-                .returning(move || Ok(green2_metadata.lock().unwrap().clone()));
+            let green2_meta = green2_meta.clone();
+            mock.expect_green2_meta()
+                .returning(move || Ok(green2_meta.lock().unwrap().clone()));
         }
 
         let video_manager = VideoManager::new(Arc::new(Mutex::new(mock)));
@@ -745,7 +745,7 @@ mod tests {
             Progress::Finished { .. } => unreachable!(),
         }
 
-        green2_metadata.lock().unwrap().start_frame = 10;
+        green2_meta.lock().unwrap().start_frame = 10;
         video_manager.spawn_build_green2().await.unwrap();
         tokio::time::sleep(Duration::from_millis(100)).await;
         loop {
@@ -765,38 +765,38 @@ mod tests {
     async fn test_interrupt_detect_peak_by_parameter_change() {
         util::log::init();
 
-        let video_metadata = VideoMetadata {
+        let video_meta = VideoMeta {
             path: PathBuf::from(VIDEO_PATH),
             frame_rate: 25,
             nframes: 2444,
             shape: (1024, 1280),
         };
-        let nframes = video_metadata.nframes;
-        let green2_metadata = Green2Metadata {
+        let nframes = video_meta.nframes;
+        let green2_meta = Green2Meta {
             start_frame: 1,
             cal_num: 2000,
             area: (10, 10, 600, 800),
-            video_path: video_metadata.path.clone(),
+            video_path: video_meta.path.clone(),
         };
-        let filter_metadata = Arc::new(Mutex::new(FilterMetadata {
+        let filter_meta = Arc::new(Mutex::new(FilterMeta {
             filter_method: FilterMethod::Wavelet {
                 threshold_ratio: 0.8,
             },
-            green2_metadata: green2_metadata.clone(),
+            green2_meta: green2_meta.clone(),
         }));
 
         let mut mock = MockSettingStorage::new();
 
-        mock.expect_set_video_metadata().returning(move |_| Ok(()));
-        let video_metadata = video_metadata.clone();
-        mock.expect_video_metadata()
-            .returning(move || Ok(video_metadata.clone()));
-        mock.expect_green2_metadata()
-            .returning(move || Ok(green2_metadata.clone()));
+        mock.expect_set_video_meta().returning(move |_| Ok(()));
+        let video_meta = video_meta.clone();
+        mock.expect_video_meta()
+            .returning(move || Ok(video_meta.clone()));
+        mock.expect_green2_meta()
+            .returning(move || Ok(green2_meta.clone()));
         {
-            let filter_metadata = filter_metadata.clone();
-            mock.expect_filter_metadata()
-                .returning(move || Ok(filter_metadata.lock().unwrap().clone()));
+            let filter_meta = filter_meta.clone();
+            mock.expect_filter_meta()
+                .returning(move || Ok(filter_meta.lock().unwrap().clone()));
         }
 
         let video_manager = VideoManager::new(Arc::new(Mutex::new(mock)));
@@ -823,7 +823,7 @@ mod tests {
         video_manager.spawn_detect_peak().await.unwrap();
         tokio::time::sleep(Duration::from_millis(500)).await;
 
-        filter_metadata.lock().unwrap().filter_method = FilterMethod::Median { window_size: 10 };
+        filter_meta.lock().unwrap().filter_method = FilterMethod::Median { window_size: 10 };
 
         video_manager.spawn_detect_peak().await.unwrap();
         tokio::time::sleep(Duration::from_millis(100)).await;

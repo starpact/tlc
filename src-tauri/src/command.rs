@@ -1,30 +1,25 @@
 use std::path::PathBuf;
 
 use anyhow::Result;
+use crossbeam::channel::Sender;
 use ndarray::{ArcArray2, Array2};
 use serde::Serialize;
 
 use crate::{
-    daq::{DaqMetadata, InterpolationMethod},
+    daq::{DaqMeta, InterpMethod},
+    event::Event,
+    handlers,
+    old_state::{CreateSettingRequest, GlobalState, NuData},
     setting::{SqliteSettingStorage, StartIndex},
     solve::IterationMethod,
-    state::{CreateSettingRequest, GlobalState, NuData},
-    video::{FilterMethod, Progress, VideoMetadata},
+    video::{FilterMethod, Progress, VideoMeta},
 };
 
 type State<'a> = tauri::State<'a, GlobalState<SqliteSettingStorage>>;
 
+type EventSender<'a> = tauri::State<'a, Sender<Event>>;
+
 type TlcResult<T> = Result<T, String>;
-
-trait IntoTlcResult<T> {
-    fn to(self) -> TlcResult<T>;
-}
-
-impl<T: Serialize> IntoTlcResult<T> for Result<T> {
-    fn to(self) -> TlcResult<T> {
-        self.map_err(|e| format!("{e:?}"))
-    }
-}
 
 #[tauri::command]
 pub async fn create_setting(request: CreateSettingRequest, state: State<'_>) -> TlcResult<()> {
@@ -47,23 +42,25 @@ pub async fn set_save_root_dir(save_root_dir: PathBuf, state: State<'_>) -> TlcR
 }
 
 #[tauri::command]
-pub async fn get_video_metadata(state: State<'_>) -> TlcResult<VideoMetadata> {
-    state.get_video_metadata().await.to()
+pub async fn get_video_meta(event_sender: EventSender<'_>) -> TlcResult<VideoMeta> {
+    handlers::get_video_meta(&event_sender).await.to()
 }
 
 #[tauri::command]
-pub async fn set_video_path(video_path: PathBuf, state: State<'_>) -> TlcResult<()> {
-    state.set_video_path(video_path).await.to()
+pub async fn set_video_path(video_path: PathBuf, event_sender: EventSender<'_>) -> TlcResult<()> {
+    handlers::set_video_path(video_path, &event_sender)
+        .await
+        .to()
 }
 
 #[tauri::command]
-pub async fn get_daq_metadata(state: State<'_>) -> TlcResult<DaqMetadata> {
-    state.get_daq_metadata().await.to()
+pub async fn get_daq_meta(event_sender: EventSender<'_>) -> TlcResult<DaqMeta> {
+    handlers::get_daq_meta(&event_sender).await.to()
 }
 
 #[tauri::command]
-pub async fn set_daq_path(daq_path: PathBuf, state: State<'_>) -> TlcResult<()> {
-    state.set_daq_path(daq_path).await.to()
+pub async fn set_daq_path(daq_path: PathBuf, event_sender: EventSender<'_>) -> TlcResult<()> {
+    handlers::set_daq_path(daq_path, &event_sender).await.to()
 }
 
 #[tauri::command]
@@ -72,8 +69,8 @@ pub async fn read_single_frame_base64(frame_index: usize, state: State<'_>) -> T
 }
 
 #[tauri::command]
-pub async fn get_daq_raw(state: State<'_>) -> TlcResult<ArcArray2<f64>> {
-    state.get_daq_raw().await.to()
+pub async fn get_daq_raw(event_sender: EventSender<'_>) -> TlcResult<ArcArray2<f64>> {
+    handlers::get_daq_raw(&event_sender).await.to()
 }
 
 #[tauri::command]
@@ -154,32 +151,28 @@ pub async fn get_detect_peak_progress(state: State<'_>) -> TlcResult<Progress> {
 }
 
 #[tauri::command]
-pub async fn get_interpolation_method(state: State<'_>) -> TlcResult<InterpolationMethod> {
+pub async fn get_interpolation_method(state: State<'_>) -> TlcResult<InterpMethod> {
     state.get_interpolation_method().await.to()
 }
 
 #[tauri::command]
-pub async fn set_interpolation_method(
-    interpolation_method: InterpolationMethod,
-    state: State<'_>,
+pub async fn set_interp_method(
+    interpolation_method: InterpMethod,
+    event_sender: EventSender<'_>,
 ) -> TlcResult<()> {
-    state
-        .set_interpolation_method(interpolation_method)
+    handlers::set_interp_method(interpolation_method, &event_sender)
         .await
         .to()
 }
 
 #[tauri::command]
-pub async fn interpolate_single_frame(
+pub async fn interp_single_frame(
     frame_index: usize,
-    state: State<'_>,
+    event_sender: EventSender<'_>,
 ) -> TlcResult<Array2<f64>> {
-    state.interpolate_single_frame(frame_index).await.to()
-}
-
-#[tauri::command]
-pub async fn interpolate(state: State<'_>) -> TlcResult<()> {
-    state.interpolate().await.to()
+    handlers::interp_single_frame(frame_index, &event_sender)
+        .await
+        .to()
 }
 
 #[tauri::command]
@@ -245,11 +238,16 @@ pub async fn set_air_thermal_conductivity(
 }
 
 #[tauri::command]
-pub async fn solve(state: State<'_>) -> TlcResult<()> {
-    state.solve().await.to()
-}
-
-#[tauri::command]
 pub async fn get_nu(edge_truncation: Option<(f64, f64)>, state: State<'_>) -> TlcResult<NuData> {
     state.get_nu(edge_truncation).await.to()
+}
+
+trait IntoTlcResult<T> {
+    fn to(self) -> TlcResult<T>;
+}
+
+impl<T: Serialize> IntoTlcResult<T> for Result<T> {
+    fn to(self) -> TlcResult<T> {
+        self.map_err(|e| format!("{e:?}"))
+    }
 }
