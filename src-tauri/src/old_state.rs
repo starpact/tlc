@@ -5,16 +5,15 @@ use std::{
 };
 
 use anyhow::{anyhow, bail, Result};
-use ndarray::{ArcArray2, Array2};
+use ndarray::ArcArray2;
 use serde::{Deserialize, Serialize};
 use tauri::async_runtime::spawn_blocking;
-use tracing::{debug, warn};
 
 use crate::{
     daq::InterpMethod,
-    post::{draw_area, save_matrix},
+    post_processing::draw_area,
     setting::{self, SettingStorage, StartIndex},
-    solve::{self, nan_mean, IterationMethod, PhysicalParam},
+    solve::{IterationMethod, PhysicalParam},
     video::{FilterMethod, Progress, VideoManager},
 };
 

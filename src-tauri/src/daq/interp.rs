@@ -7,12 +7,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::daq::Thermocouple;
 
-use InterpMethod::*;
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct InterpMeta {
     pub daq_path: PathBuf,
-    pub video_path: PathBuf,
     pub start_row: usize,
     pub cal_num: usize,
     pub area: (usize, usize, usize, usize),
@@ -28,7 +25,6 @@ pub struct Interpolator {
     /// vertical: (cal_h, cal_num)
     /// bilinear: (cal_h * cal_w, cal_num)
     data: ArcArray2<f64>,
-
     meta: InterpMeta,
 }
 
@@ -41,6 +37,8 @@ pub enum InterpMethod {
     Bilinear(usize, usize),
     BilinearExtra(usize, usize),
 }
+
+use InterpMethod::*;
 
 pub fn interp(interp_meta: InterpMeta, daq_raw: ArcArray2<f64>) -> Result<Interpolator> {
     let InterpMeta {
@@ -286,251 +284,285 @@ fn interp2(
     data
 }
 
-// #[cfg(test)]
-// mod test {
-//     use approx::assert_relative_eq;
-//
-//     use super::*;
-//
-//     #[test]
-//     fn test_interpolate_horizontal_no_extra() {
-//         let temperature2 = array![[1.0, 5.0], [2.0, 6.0], [3.0, 7.0]];
-//         let interp_method = Horizontal;
-//         // 1 2 3
-//         let thermocouples: Vec<Thermocouple> = [(10, 10), (10, 11), (10, 12)]
-//             .iter()
-//             .enumerate()
-//             .map(|(column_index, &position)| Thermocouple {
-//                 column_index,
-//                 position,
-//             })
-//             .collect();
-//         let area = (9, 9, 5, 5);
-//         let interpolator = Interpolator::new(temperature2, interp_method, area, &thermocouples);
-//         assert_relative_eq!(
-//             interpolator.interpolate_single_frame(0).unwrap(),
-//             array![
-//                 [1.0, 1.0, 2.0, 3.0, 3.0],
-//                 [1.0, 1.0, 2.0, 3.0, 3.0],
-//                 [1.0, 1.0, 2.0, 3.0, 3.0],
-//                 [1.0, 1.0, 2.0, 3.0, 3.0],
-//                 [1.0, 1.0, 2.0, 3.0, 3.0]
-//             ]
-//         );
-//         assert_relative_eq!(
-//             interpolator.interpolate_single_frame(1).unwrap(),
-//             array![
-//                 [5.0, 5.0, 6.0, 7.0, 7.0],
-//                 [5.0, 5.0, 6.0, 7.0, 7.0],
-//                 [5.0, 5.0, 6.0, 7.0, 7.0],
-//                 [5.0, 5.0, 6.0, 7.0, 7.0],
-//                 [5.0, 5.0, 6.0, 7.0, 7.0]
-//             ]
-//         );
-//     }
-//
-//     #[test]
-//     fn test_interpolate_horizontal_extra() {
-//         let temperature2 = array![[1.0, 5.0], [2.0, 6.0], [3.0, 7.0]];
-//         let interp_method = HorizontalExtra;
-//         // 1 2 3
-//         let thermocouples: Vec<Thermocouple> = [(10, 10), (10, 11), (10, 12)]
-//             .iter()
-//             .enumerate()
-//             .map(|(column_index, &position)| Thermocouple {
-//                 column_index,
-//                 position,
-//             })
-//             .collect();
-//         let area = (9, 9, 5, 5);
-//         let interpolator = Interpolator::new(temperature2, interp_method, area, &thermocouples);
-//         assert_relative_eq!(
-//             interpolator.interpolate_single_frame(0).unwrap(),
-//             array![
-//                 [0.0, 1.0, 2.0, 3.0, 4.0],
-//                 [0.0, 1.0, 2.0, 3.0, 4.0],
-//                 [0.0, 1.0, 2.0, 3.0, 4.0],
-//                 [0.0, 1.0, 2.0, 3.0, 4.0],
-//                 [0.0, 1.0, 2.0, 3.0, 4.0]
-//             ]
-//         );
-//         assert_relative_eq!(
-//             interpolator.interpolate_single_frame(1).unwrap(),
-//             array![
-//                 [4.0, 5.0, 6.0, 7.0, 8.0],
-//                 [4.0, 5.0, 6.0, 7.0, 8.0],
-//                 [4.0, 5.0, 6.0, 7.0, 8.0],
-//                 [4.0, 5.0, 6.0, 7.0, 8.0],
-//                 [4.0, 5.0, 6.0, 7.0, 8.0]
-//             ]
-//         );
-//     }
-//
-//     #[test]
-//     fn test_interpolate_vertical_no_extra() {
-//         let temperature2 = array![[1.0, 5.0], [2.0, 6.0], [3.0, 7.0]];
-//         let interp_method = Vertical;
-//         // 1
-//         // 2
-//         let thermocouples: Vec<Thermocouple> = [(10, 10), (12, 10)]
-//             .iter()
-//             .enumerate()
-//             .map(|(column_index, &position)| Thermocouple {
-//                 column_index,
-//                 position,
-//             })
-//             .collect();
-//         let area = (9, 9, 5, 5);
-//         let interpolator = Interpolator::new(temperature2, interp_method, area, &thermocouples);
-//         assert_relative_eq!(
-//             interpolator.interpolate_single_frame(0).unwrap(),
-//             array![
-//                 [1.0, 1.0, 1.0, 1.0, 1.0],
-//                 [1.0, 1.0, 1.0, 1.0, 1.0],
-//                 [1.5, 1.5, 1.5, 1.5, 1.5],
-//                 [2.0, 2.0, 2.0, 2.0, 2.0],
-//                 [2.0, 2.0, 2.0, 2.0, 2.0]
-//             ]
-//         );
-//         assert_relative_eq!(
-//             interpolator.interpolate_single_frame(1).unwrap(),
-//             array![
-//                 [5.0, 5.0, 5.0, 5.0, 5.0],
-//                 [5.0, 5.0, 5.0, 5.0, 5.0],
-//                 [5.5, 5.5, 5.5, 5.5, 5.5],
-//                 [6.0, 6.0, 6.0, 6.0, 6.0],
-//                 [6.0, 6.0, 6.0, 6.0, 6.0]
-//             ]
-//         );
-//     }
-//
-//     #[test]
-//     fn test_interpolate_vertical_extra() {
-//         let temperature2 = array![[1.0, 5.0], [2.0, 6.0], [3.0, 7.0]];
-//         let interp_method = VerticalExtra;
-//         // 1
-//         // 2
-//         let thermocouples: Vec<Thermocouple> = [(10, 10), (12, 10)]
-//             .iter()
-//             .enumerate()
-//             .map(|(column_index, &position)| Thermocouple {
-//                 column_index,
-//                 position,
-//             })
-//             .collect();
-//         let area = (9, 9, 5, 5);
-//         let interpolator = Interpolator::new(temperature2, interp_method, area, &thermocouples);
-//         assert_relative_eq!(
-//             interpolator.interpolate_single_frame(0).unwrap(),
-//             array![
-//                 [0.5, 0.5, 0.5, 0.5, 0.5],
-//                 [1.0, 1.0, 1.0, 1.0, 1.0],
-//                 [1.5, 1.5, 1.5, 1.5, 1.5],
-//                 [2.0, 2.0, 2.0, 2.0, 2.0],
-//                 [2.5, 2.5, 2.5, 2.5, 2.5]
-//             ]
-//         );
-//         assert_relative_eq!(
-//             interpolator.interpolate_single_frame(1).unwrap(),
-//             array![
-//                 [4.5, 4.5, 4.5, 4.5, 4.5],
-//                 [5.0, 5.0, 5.0, 5.0, 5.0],
-//                 [5.5, 5.5, 5.5, 5.5, 5.5],
-//                 [6.0, 6.0, 6.0, 6.0, 6.0],
-//                 [6.5, 6.5, 6.5, 6.5, 6.5]
-//             ]
-//         );
-//     }
-//
-//     #[test]
-//     fn test_interpolate_bilinear_no_extra() {
-//         let temperature2 = array![
-//             [1.0, 5.0],
-//             [2.0, 6.0],
-//             [3.0, 7.0],
-//             [4.0, 8.0],
-//             [5.0, 9.0],
-//             [6.0, 10.0]
-//         ];
-//         let interp_method = Bilinear(2, 3);
-//         // 1 2 3
-//         // 4 5 6
-//         let thermocouples: Vec<Thermocouple> =
-//             [(10, 10), (10, 11), (10, 12), (12, 10), (12, 11), (12, 12)]
-//                 .iter()
-//                 .enumerate()
-//                 .map(|(column_index, &position)| Thermocouple {
-//                     column_index,
-//                     position,
-//                 })
-//                 .collect();
-//         let area = (9, 9, 5, 5);
-//         let interpolator = Interpolator::new(temperature2, interp_method, area, &thermocouples);
-//         assert_relative_eq!(
-//             interpolator.interpolate_single_frame(0).unwrap(),
-//             array![
-//                 [1.0, 1.0, 2.0, 3.0, 3.0],
-//                 [1.0, 1.0, 2.0, 3.0, 3.0],
-//                 [2.5, 2.5, 3.5, 4.5, 4.5],
-//                 [4.0, 4.0, 5.0, 6.0, 6.0],
-//                 [4.0, 4.0, 5.0, 6.0, 6.0]
-//             ]
-//         );
-//         assert_relative_eq!(
-//             interpolator.interpolate_single_frame(1).unwrap(),
-//             array![
-//                 [5.0, 5.0, 6.0, 7.0, 7.0],
-//                 [5.0, 5.0, 6.0, 7.0, 7.0],
-//                 [6.5, 6.5, 7.5, 8.5, 8.5],
-//                 [8.0, 8.0, 9.0, 10.0, 10.0],
-//                 [8.0, 8.0, 9.0, 10.0, 10.0]
-//             ]
-//         );
-//     }
-//
-//     #[test]
-//     fn test_interpolate_bilinear_extra() {
-//         let temperature2 = array![
-//             [1.0, 5.0],
-//             [2.0, 6.0],
-//             [3.0, 7.0],
-//             [4.0, 8.0],
-//             [5.0, 9.0],
-//             [6.0, 10.0]
-//         ];
-//         let interp_method = BilinearExtra(2, 3);
-//         // 1 2 3
-//         // 4 5 6
-//         let thermocouples: Vec<Thermocouple> =
-//             [(10, 10), (10, 11), (10, 12), (12, 10), (12, 11), (12, 12)]
-//                 .iter()
-//                 .enumerate()
-//                 .map(|(column_index, &position)| Thermocouple {
-//                     column_index,
-//                     position,
-//                 })
-//                 .collect();
-//         let area = (9, 9, 5, 5);
-//         let interpolator = Interpolator::new(temperature2, interp_method, area, &thermocouples);
-//         assert_relative_eq!(
-//             interpolator.interpolate_single_frame(0).unwrap(),
-//             array![
-//                 [-1.5, -0.5, 0.5, 1.5, 2.5],
-//                 [0.0, 1.0, 2.0, 3.0, 4.0],
-//                 [1.5, 2.5, 3.5, 4.5, 5.5],
-//                 [3.0, 4.0, 5.0, 6.0, 7.0],
-//                 [4.5, 5.5, 6.5, 7.5, 8.5]
-//             ]
-//         );
-//         assert_relative_eq!(
-//             interpolator.interpolate_single_frame(1).unwrap(),
-//             array![
-//                 [2.5, 3.5, 4.5, 5.5, 6.5],
-//                 [4.0, 5.0, 6.0, 7.0, 8.0],
-//                 [5.5, 6.5, 7.5, 8.5, 9.5],
-//                 [7.0, 8.0, 9.0, 10.0, 11.0],
-//                 [8.5, 9.5, 10.5, 11.5, 12.5]
-//             ]
-//         );
-//     }
-// }
+#[cfg(test)]
+mod test {
+    use approx::assert_relative_eq;
+
+    use super::*;
+
+    #[test]
+    fn test_interpolate_horizontal_no_extra() {
+        let daq_raw = array![
+            // 3 points 2 frames.
+            [1.0, 2.0, 3.0],
+            [5.0, 6.0, 7.0],
+        ];
+        let interp_meta = InterpMeta {
+            daq_path: Default::default(),
+            start_row: 0,
+            cal_num: 2,
+            area: (9, 9, 5, 5),
+            interp_method: Horizontal,
+            thermocouples: thermocouples_from_slice(&[
+                // 1 2 3
+                (10, 10),
+                (10, 11),
+                (10, 12),
+            ]),
+        };
+        let interpolator = interp(interp_meta, daq_raw.into_shared()).unwrap();
+        assert_relative_eq!(
+            interpolator.interp_single_frame(0).unwrap(),
+            array![
+                [1.0, 1.0, 2.0, 3.0, 3.0],
+                [1.0, 1.0, 2.0, 3.0, 3.0],
+                [1.0, 1.0, 2.0, 3.0, 3.0],
+                [1.0, 1.0, 2.0, 3.0, 3.0],
+                [1.0, 1.0, 2.0, 3.0, 3.0]
+            ]
+        );
+        assert_relative_eq!(
+            interpolator.interp_single_frame(1).unwrap(),
+            array![
+                [5.0, 5.0, 6.0, 7.0, 7.0],
+                [5.0, 5.0, 6.0, 7.0, 7.0],
+                [5.0, 5.0, 6.0, 7.0, 7.0],
+                [5.0, 5.0, 6.0, 7.0, 7.0],
+                [5.0, 5.0, 6.0, 7.0, 7.0]
+            ]
+        );
+    }
+
+    #[test]
+    fn test_interpolate_horizontal_extra() {
+        let daq_raw = array![
+            // 3 points 2 frames.
+            [1.0, 2.0, 3.0],
+            [5.0, 6.0, 7.0],
+        ];
+        let interp_meta = InterpMeta {
+            daq_path: Default::default(),
+            start_row: 0,
+            cal_num: 2,
+            area: (9, 9, 5, 5),
+            interp_method: HorizontalExtra,
+            thermocouples: thermocouples_from_slice(&[
+                // 1 2 3
+                (10, 10),
+                (10, 11),
+                (10, 12),
+            ]),
+        };
+        let interpolator = interp(interp_meta, daq_raw.into_shared()).unwrap();
+        assert_relative_eq!(
+            interpolator.interp_single_frame(0).unwrap(),
+            array![
+                [0.0, 1.0, 2.0, 3.0, 4.0],
+                [0.0, 1.0, 2.0, 3.0, 4.0],
+                [0.0, 1.0, 2.0, 3.0, 4.0],
+                [0.0, 1.0, 2.0, 3.0, 4.0],
+                [0.0, 1.0, 2.0, 3.0, 4.0]
+            ]
+        );
+        assert_relative_eq!(
+            interpolator.interp_single_frame(1).unwrap(),
+            array![
+                [4.0, 5.0, 6.0, 7.0, 8.0],
+                [4.0, 5.0, 6.0, 7.0, 8.0],
+                [4.0, 5.0, 6.0, 7.0, 8.0],
+                [4.0, 5.0, 6.0, 7.0, 8.0],
+                [4.0, 5.0, 6.0, 7.0, 8.0]
+            ]
+        );
+    }
+
+    #[test]
+    fn test_interpolate_vertical_no_extra() {
+        let daq_raw = array![
+            // 2 points 2 frames.
+            [1.0, 2.0],
+            [5.0, 6.0],
+        ];
+        let interp_meta = InterpMeta {
+            daq_path: Default::default(),
+            start_row: 0,
+            cal_num: 2,
+            area: (9, 9, 5, 5),
+            interp_method: Vertical,
+            thermocouples: thermocouples_from_slice(&[
+                // 1
+                // 2
+                (10, 10),
+                (12, 10),
+            ]),
+        };
+        let interpolator = interp(interp_meta, daq_raw.into_shared()).unwrap();
+        assert_relative_eq!(
+            interpolator.interp_single_frame(0).unwrap(),
+            array![
+                [1.0, 1.0, 1.0, 1.0, 1.0],
+                [1.0, 1.0, 1.0, 1.0, 1.0],
+                [1.5, 1.5, 1.5, 1.5, 1.5],
+                [2.0, 2.0, 2.0, 2.0, 2.0],
+                [2.0, 2.0, 2.0, 2.0, 2.0]
+            ]
+        );
+        assert_relative_eq!(
+            interpolator.interp_single_frame(1).unwrap(),
+            array![
+                [5.0, 5.0, 5.0, 5.0, 5.0],
+                [5.0, 5.0, 5.0, 5.0, 5.0],
+                [5.5, 5.5, 5.5, 5.5, 5.5],
+                [6.0, 6.0, 6.0, 6.0, 6.0],
+                [6.0, 6.0, 6.0, 6.0, 6.0]
+            ]
+        );
+    }
+
+    #[test]
+    fn test_interpolate_vertical_extra() {
+        let daq_raw = array![
+            // 2 points 2 frames.
+            [1.0, 2.0],
+            [5.0, 6.0],
+        ];
+        let interp_meta = InterpMeta {
+            daq_path: Default::default(),
+            start_row: 0,
+            cal_num: 2,
+            area: (9, 9, 5, 5),
+            interp_method: VerticalExtra,
+            thermocouples: thermocouples_from_slice(&[
+                // 1
+                // 2
+                (10, 10),
+                (12, 10),
+            ]),
+        };
+        let interpolator = interp(interp_meta, daq_raw.into_shared()).unwrap();
+        assert_relative_eq!(
+            interpolator.interp_single_frame(0).unwrap(),
+            array![
+                [0.5, 0.5, 0.5, 0.5, 0.5],
+                [1.0, 1.0, 1.0, 1.0, 1.0],
+                [1.5, 1.5, 1.5, 1.5, 1.5],
+                [2.0, 2.0, 2.0, 2.0, 2.0],
+                [2.5, 2.5, 2.5, 2.5, 2.5]
+            ]
+        );
+        assert_relative_eq!(
+            interpolator.interp_single_frame(1).unwrap(),
+            array![
+                [4.5, 4.5, 4.5, 4.5, 4.5],
+                [5.0, 5.0, 5.0, 5.0, 5.0],
+                [5.5, 5.5, 5.5, 5.5, 5.5],
+                [6.0, 6.0, 6.0, 6.0, 6.0],
+                [6.5, 6.5, 6.5, 6.5, 6.5]
+            ]
+        );
+    }
+
+    #[test]
+    fn test_interpolate_bilinear_no_extra() {
+        let daq_raw = array![
+            // 6 points 2 frames.
+            [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+            [5.0, 6.0, 7.0, 8.0, 9.0, 10.0]
+        ];
+        let interp_meta = InterpMeta {
+            daq_path: Default::default(),
+            start_row: 0,
+            cal_num: 2,
+            area: (9, 9, 5, 5),
+            interp_method: Bilinear(2, 3),
+            // 1 2 3
+            // 4 5 6
+            thermocouples: thermocouples_from_slice(&[
+                (10, 10),
+                (10, 11),
+                (10, 12),
+                (12, 10),
+                (12, 11),
+                (12, 12),
+            ]),
+        };
+        let interpolator = interp(interp_meta, daq_raw.into_shared()).unwrap();
+        assert_relative_eq!(
+            interpolator.interp_single_frame(0).unwrap(),
+            array![
+                [1.0, 1.0, 2.0, 3.0, 3.0],
+                [1.0, 1.0, 2.0, 3.0, 3.0],
+                [2.5, 2.5, 3.5, 4.5, 4.5],
+                [4.0, 4.0, 5.0, 6.0, 6.0],
+                [4.0, 4.0, 5.0, 6.0, 6.0]
+            ]
+        );
+        assert_relative_eq!(
+            interpolator.interp_single_frame(1).unwrap(),
+            array![
+                [5.0, 5.0, 6.0, 7.0, 7.0],
+                [5.0, 5.0, 6.0, 7.0, 7.0],
+                [6.5, 6.5, 7.5, 8.5, 8.5],
+                [8.0, 8.0, 9.0, 10.0, 10.0],
+                [8.0, 8.0, 9.0, 10.0, 10.0]
+            ]
+        );
+    }
+
+    #[test]
+    fn test_interpolate_bilinear_extra() {
+        let daq_raw = array![
+            // 6 points 2 frames.
+            [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+            [5.0, 6.0, 7.0, 8.0, 9.0, 10.0]
+        ];
+        let interp_meta = InterpMeta {
+            daq_path: Default::default(),
+            start_row: 0,
+            cal_num: 2,
+            area: (9, 9, 5, 5),
+            interp_method: BilinearExtra(2, 3),
+            thermocouples: thermocouples_from_slice(&[
+                // 1 2 3
+                // 4 5 6
+                (10, 10),
+                (10, 11),
+                (10, 12),
+                (12, 10),
+                (12, 11),
+                (12, 12),
+            ]),
+        };
+        let interpolator = interp(interp_meta, daq_raw.into_shared()).unwrap();
+        assert_relative_eq!(
+            interpolator.interp_single_frame(0).unwrap(),
+            array![
+                [-1.5, -0.5, 0.5, 1.5, 2.5],
+                [0.0, 1.0, 2.0, 3.0, 4.0],
+                [1.5, 2.5, 3.5, 4.5, 5.5],
+                [3.0, 4.0, 5.0, 6.0, 7.0],
+                [4.5, 5.5, 6.5, 7.5, 8.5]
+            ]
+        );
+        assert_relative_eq!(
+            interpolator.interp_single_frame(1).unwrap(),
+            array![
+                [2.5, 3.5, 4.5, 5.5, 6.5],
+                [4.0, 5.0, 6.0, 7.0, 8.0],
+                [5.5, 6.5, 7.5, 8.5, 9.5],
+                [7.0, 8.0, 9.0, 10.0, 11.0],
+                [8.5, 9.5, 10.5, 11.5, 12.5]
+            ]
+        );
+    }
+
+    fn thermocouples_from_slice(arr: &[(i32, i32)]) -> Vec<Thermocouple> {
+        arr.iter()
+            .enumerate()
+            .map(|(column_index, &position)| Thermocouple {
+                column_index,
+                position,
+            })
+            .collect()
+    }
+}

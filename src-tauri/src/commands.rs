@@ -2,14 +2,18 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use crossbeam::channel::Sender;
+use function_name::named;
 use ndarray::{ArcArray2, Array2};
 use serde::Serialize;
+use tokio::sync::oneshot::{self, error::RecvError};
 
 use crate::{
     daq::{DaqMeta, InterpMethod},
-    event::Event,
-    handlers,
     old_state::{CreateSettingRequest, GlobalState, NuData},
+    request::{
+        Request::{self, *},
+        Responder,
+    },
     setting::{SqliteSettingStorage, StartIndex},
     solve::IterationMethod,
     video::{FilterMethod, Progress, VideoMeta},
@@ -17,7 +21,7 @@ use crate::{
 
 type State<'a> = tauri::State<'a, GlobalState<SqliteSettingStorage>>;
 
-type EventSender<'a> = tauri::State<'a, Sender<Event>>;
+type EventSender<'a> = tauri::State<'a, Sender<Request>>;
 
 type TlcResult<T> = Result<T, String>;
 
@@ -41,26 +45,48 @@ pub async fn set_save_root_dir(save_root_dir: PathBuf, state: State<'_>) -> TlcR
     state.set_save_root_dir(save_root_dir).await.to()
 }
 
+#[named]
 #[tauri::command]
 pub async fn get_video_meta(event_sender: EventSender<'_>) -> TlcResult<VideoMeta> {
-    handlers::get_video_meta(&event_sender).await.to()
+    let (tx, rx) = oneshot::channel();
+    let _ = event_sender.try_send(GetVideoMeta {
+        responder: Responder::new(function_name!(), None, tx),
+    });
+    rx.await.to()
 }
 
+#[named]
 #[tauri::command]
 pub async fn set_video_path(video_path: PathBuf, event_sender: EventSender<'_>) -> TlcResult<()> {
-    handlers::set_video_path(video_path, &event_sender)
-        .await
-        .to()
+    let (tx, rx) = oneshot::channel();
+    let payload = format!("video_path: {video_path:?}");
+    let _ = event_sender.try_send(SetVideoPath {
+        video_path,
+        responder: Responder::new(function_name!(), Some(payload), tx),
+    });
+    rx.await.to()
 }
 
+#[named]
 #[tauri::command]
 pub async fn get_daq_meta(event_sender: EventSender<'_>) -> TlcResult<DaqMeta> {
-    handlers::get_daq_meta(&event_sender).await.to()
+    let (tx, rx) = oneshot::channel();
+    let _ = event_sender.try_send(GetDaqMeta {
+        responder: Responder::new(function_name!(), None, tx),
+    });
+    rx.await.to()
 }
 
+#[named]
 #[tauri::command]
 pub async fn set_daq_path(daq_path: PathBuf, event_sender: EventSender<'_>) -> TlcResult<()> {
-    handlers::set_daq_path(daq_path, &event_sender).await.to()
+    let (tx, rx) = oneshot::channel();
+    let payload = format!("daq_path: {daq_path:?}");
+    let _ = event_sender.try_send(SetDaqPath {
+        daq_path,
+        responder: Responder::new(function_name!(), Some(payload), tx),
+    });
+    rx.await.to()
 }
 
 #[tauri::command]
@@ -68,9 +94,14 @@ pub async fn read_single_frame_base64(frame_index: usize, state: State<'_>) -> T
     state.read_single_frame_base64(frame_index).await.to()
 }
 
+#[named]
 #[tauri::command]
 pub async fn get_daq_raw(event_sender: EventSender<'_>) -> TlcResult<ArcArray2<f64>> {
-    handlers::get_daq_raw(&event_sender).await.to()
+    let (tx, rx) = oneshot::channel();
+    let _ = event_sender.try_send(GetDaqRaw {
+        responder: Responder::new(function_name!(), None, tx),
+    });
+    rx.await.to()
 }
 
 #[tauri::command]
@@ -155,24 +186,34 @@ pub async fn get_interpolation_method(state: State<'_>) -> TlcResult<InterpMetho
     state.get_interpolation_method().await.to()
 }
 
+#[named]
 #[tauri::command]
 pub async fn set_interp_method(
-    interpolation_method: InterpMethod,
+    interp_method: InterpMethod,
     event_sender: EventSender<'_>,
 ) -> TlcResult<()> {
-    handlers::set_interp_method(interpolation_method, &event_sender)
-        .await
-        .to()
+    let (tx, rx) = oneshot::channel();
+    let payload = format!("interp_method: {interp_method:?}");
+    let _ = event_sender.try_send(SetInterpMethod {
+        interp_method,
+        responder: Responder::new(function_name!(), Some(payload), tx),
+    });
+    rx.await.to()
 }
 
+#[named]
 #[tauri::command]
 pub async fn interp_single_frame(
     frame_index: usize,
     event_sender: EventSender<'_>,
 ) -> TlcResult<Array2<f64>> {
-    handlers::interp_single_frame(frame_index, &event_sender)
-        .await
-        .to()
+    let (tx, rx) = oneshot::channel();
+    let payload = format!("frame_index: {frame_index}");
+    let _ = event_sender.try_send(InterpSingleFrame {
+        frame_index,
+        responder: Responder::new(function_name!(), Some(payload), tx),
+    });
+    rx.await.to()
 }
 
 #[tauri::command]
@@ -248,6 +289,12 @@ trait IntoTlcResult<T> {
 
 impl<T: Serialize> IntoTlcResult<T> for Result<T> {
     fn to(self) -> TlcResult<T> {
-        self.map_err(|e| format!("{e:?}"))
+        self.map_err(|e| e.to_string())
+    }
+}
+
+impl<T: Serialize> IntoTlcResult<T> for core::result::Result<Result<T>, RecvError> {
+    fn to(self) -> TlcResult<T> {
+        self.map_err(|e| e.to_string())?.to()
     }
 }

@@ -6,11 +6,11 @@ use tokio::sync::oneshot;
 use tracing::trace;
 
 use crate::{
-    daq::{DaqMeta, InterpMethod, Interpolator},
+    daq::{DaqMeta, InterpMethod},
     video::VideoMeta,
 };
 
-pub enum Event {
+pub enum Request {
     GetVideoMeta {
         responder: Responder<VideoMeta>,
     },
@@ -35,14 +35,6 @@ pub enum Event {
     InterpSingleFrame {
         frame_index: usize,
         responder: Responder<Array2<f64>>,
-    },
-
-    ReadDaq {
-        daq_meta: DaqMeta,
-        daq_raw: ArcArray2<f64>,
-    },
-    Interp {
-        interpolator: Interpolator,
     },
 }
 
@@ -94,7 +86,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test1() {
+    fn test_respond_log_output() {
         util::log::init();
 
         let (tx, _rx) = oneshot::channel::<Result<()>>();

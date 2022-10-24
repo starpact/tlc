@@ -188,7 +188,6 @@ pub trait SettingStorage: Send + 'static {
 
     fn interp_meta(&self) -> Result<InterpMeta> {
         let daq_path = self.daq_path()?;
-        let video_path = self.video_path()?;
         let start_row = self.start_index()?.start_row;
         let Green2Meta { cal_num, area, .. } = self.green2_meta()?;
         let thermocouples = self.thermocouples()?;
@@ -196,7 +195,6 @@ pub trait SettingStorage: Send + 'static {
 
         Ok(InterpMeta {
             daq_path,
-            video_path,
             start_row,
             cal_num,
             area,

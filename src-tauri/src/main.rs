@@ -5,17 +5,15 @@
 #![feature(test)]
 #![feature(array_windows)]
 #![feature(assert_matches)]
-#![feature(let_chains)]
 
-mod command;
+mod commands;
 mod daq;
-mod event;
-mod global_state;
-mod handlers;
 mod old_state;
-mod post;
+mod post_processing;
+mod request;
 mod setting;
 mod solve;
+mod state;
 mod util;
 mod video;
 
@@ -23,7 +21,7 @@ use crossbeam::channel::bounded;
 use setting::SqliteSettingStorage;
 use tracing::error;
 
-use command::*;
+use commands::*;
 use old_state::*;
 
 const SQLITE_FILEPATH: &str = "./var/db.sqlite3";
@@ -33,18 +31,15 @@ fn main() {
 
     ffmpeg::init().expect("Failed to init ffmpeg");
 
-    let (event_sender, event_receiver) = bounded(3);
-    {
-        let event_sender = event_sender.clone();
-        std::thread::spawn(move || global_state::main_loop(event_sender, event_receiver));
-    }
+    let (request_sender, request_receiver) = bounded(3);
+    std::thread::spawn(move || state::main_loop(request_receiver));
 
     let setting_storage = SqliteSettingStorage::new(SQLITE_FILEPATH);
     let global_state = GlobalState::new(setting_storage);
 
     tauri::Builder::default()
         .manage(global_state)
-        .manage(event_sender)
+        .manage(request_sender)
         .invoke_handler(tauri::generate_handler![
             create_setting,
             switch_setting,

@@ -275,7 +275,7 @@ mod tests {
                 / FIRST_FEW_TO_CAL_T0 as f64;
 
             let (sum, diff_sum) = temperatures
-                .array_windows::<2>()
+                .array_windows()
                 .take(gmax_frame_index)
                 .enumerate()
                 .fold(
