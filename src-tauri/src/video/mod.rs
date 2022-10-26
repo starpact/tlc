@@ -1,5 +1,6 @@
 mod decode;
 mod filter;
+mod pg1;
 mod pool;
 mod progress_bar;
 
