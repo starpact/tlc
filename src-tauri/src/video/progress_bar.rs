@@ -1,10 +1,13 @@
 use anyhow::{bail, Result};
 use serde::Serialize;
-use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::{
+    atomic::{AtomicI64, Ordering},
+    Arc,
+};
 use tracing::debug;
 
-#[derive(Debug, Default)]
-pub struct ProgressBar(AtomicI64);
+#[derive(Debug, Default, Clone)]
+pub struct ProgressBar(Arc<AtomicI64>);
 
 #[derive(Debug, Serialize)]
 pub enum Progress {

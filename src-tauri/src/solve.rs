@@ -178,8 +178,8 @@ fn newtow_down(
 }
 
 impl Default for IterationMethod {
-    fn default() -> Self {
-        Self::NewtonTangent {
+    fn default() -> IterationMethod {
+        IterationMethod::NewtonTangent {
             h0: 50.0,
             max_iter_num: 10,
         }
@@ -257,13 +257,12 @@ where
 #[cfg(test)]
 mod tests {
     extern crate test;
-
-    use crate::daq;
-
-    use super::*;
     use approx::assert_relative_eq;
     use ndarray::Array1;
     use test::Bencher;
+
+    use super::*;
+    use crate::daq;
 
     impl PointData<'_> {
         fn iter_no_simd(&self, h: f64, dt: f64, k: f64, a: f64, tw: f64) -> (f64, f64) {

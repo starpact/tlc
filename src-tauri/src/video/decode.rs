@@ -7,7 +7,7 @@ use std::{
 use anyhow::Result;
 use ffmpeg::{
     codec,
-    codec::packet::Packet,
+    codec::{packet::Packet, Parameters},
     format::Pixel::RGB24,
     software::{scaling, scaling::flag::Flags},
     util::frame::video::Video,
@@ -25,7 +25,7 @@ pub struct Decoder {
 }
 
 impl Decoder {
-    fn new(parameters: codec::Parameters) -> Result<Self> {
+    fn new(parameters: Parameters) -> Result<Self> {
         let codec_ctx = codec::Context::from_parameters(parameters)?
             .decoder()
             .video()?;
@@ -50,20 +50,21 @@ impl Decoder {
     }
 }
 
-/// DecoderManager maintains a thread-local style decoder pool to
-/// avoid frequent initialization of decoder.
-/// It should be used with thread pool with a small number of threads
-/// so that all the thread-local decoders can be reused efficiently.
+/// `DecoderManager` maintains a thread-local style decoder pool to avoid frequent
+/// initialization of decoder. It should be used with thread pool with a small
+/// number of threads so that the thread-local decoders can be reused efficiently.
 #[derive(Default)]
 pub struct DecoderManager {
-    parameters: Mutex<codec::Parameters>,
+    parameters: Mutex<Parameters>,
     decoders: ThreadLocal<RefCell<Decoder>>,
 }
 
 impl DecoderManager {
-    pub fn reset(&mut self, parameters: codec::Parameters) {
-        *self.parameters.lock().unwrap() = parameters;
-        self.decoders.clear();
+    pub fn new(parameters: Parameters) -> DecoderManager {
+        DecoderManager {
+            parameters: Mutex::new(parameters),
+            decoders: ThreadLocal::new(),
+        }
     }
 
     pub fn decoder(&self) -> Result<RefMut<Decoder>> {

@@ -44,7 +44,7 @@ pub struct CreateSettingRequest {
 }
 
 impl<S: SettingStorage> GlobalState<S> {
-    pub fn new(setting_storage: S) -> Self {
+    pub fn new(setting_storage: S) -> GlobalState<S> {
         let setting_storage = Arc::new(Mutex::new(setting_storage));
         let video_manager = VideoManager::new(setting_storage.clone());
 
@@ -68,10 +68,10 @@ impl<S: SettingStorage> GlobalState<S> {
         self.asyncify(|mut s| s.create_setting(create_request))
             .await?;
 
-        if let Err(e) = self.video_manager.spawn_read_video(Some(video_path)).await {
-            self.asyncify(|mut s| s.delete_setting()).await?;
-            return Err(e);
-        }
+        // if let Err(e) = self.video_manager.spawn_read_video(Some(video_path)).await {
+        //     self.asyncify(|mut s| s.delete_setting()).await?;
+        //     return Err(e);
+        // }
 
         Ok(())
     }
@@ -80,7 +80,7 @@ impl<S: SettingStorage> GlobalState<S> {
         self.asyncify(move |mut s| s.switch_setting(setting_id))
             .await?;
 
-        self.video_manager.spawn_read_video(None).await?;
+        // self.video_manager.spawn_read_video(None).await?;
 
         Ok(())
     }
@@ -315,7 +315,7 @@ impl<S: SettingStorage> GlobalState<S> {
 
             let setting_storage = setting_storage.lock().unwrap();
             let plot_path = setting_storage.plot_path()?;
-            let nu_plot_base64 = draw_area(&plot_path, nu_data.nu2.view(), edge_truncation)?;
+            let nu_plot_base64 = draw_area(plot_path, nu_data.nu2.view(), edge_truncation)?;
 
             nu_data.edge_truncation = edge_truncation;
             nu_data.nu_plot_base64 = nu_plot_base64;

@@ -21,7 +21,7 @@ use crate::{
 
 type State<'a> = tauri::State<'a, GlobalState<SqliteSettingStorage>>;
 
-type EventSender<'a> = tauri::State<'a, Sender<Request>>;
+type RequestSender<'a> = tauri::State<'a, Sender<Request>>;
 
 type TlcResult<T> = Result<T, String>;
 
@@ -35,21 +35,11 @@ pub async fn switch_setting(setting_id: i64, state: State<'_>) -> TlcResult<()> 
     state.switch_setting(setting_id).await.to()
 }
 
-#[tauri::command]
-pub async fn get_save_root_dir(state: State<'_>) -> TlcResult<PathBuf> {
-    state.get_save_root_dir().await.to()
-}
-
-#[tauri::command]
-pub async fn set_save_root_dir(save_root_dir: PathBuf, state: State<'_>) -> TlcResult<()> {
-    state.set_save_root_dir(save_root_dir).await.to()
-}
-
 #[named]
 #[tauri::command]
-pub async fn get_video_meta(event_sender: EventSender<'_>) -> TlcResult<VideoMeta> {
+pub async fn get_save_root_dir(request_sender: RequestSender<'_>) -> TlcResult<PathBuf> {
     let (tx, rx) = oneshot::channel();
-    let _ = event_sender.try_send(GetVideoMeta {
+    let _ = request_sender.try_send(GetSaveRootDir {
         responder: Responder::new(function_name!(), None, tx),
     });
     rx.await.to()
@@ -57,10 +47,38 @@ pub async fn get_video_meta(event_sender: EventSender<'_>) -> TlcResult<VideoMet
 
 #[named]
 #[tauri::command]
-pub async fn set_video_path(video_path: PathBuf, event_sender: EventSender<'_>) -> TlcResult<()> {
+pub async fn set_save_root_dir(
+    save_root_dir: PathBuf,
+    request_sender: RequestSender<'_>,
+) -> TlcResult<()> {
+    let (tx, rx) = oneshot::channel();
+    let payload = format!("save_root_dir: {save_root_dir:?}");
+    let _ = request_sender.try_send(SetSaveRootDir {
+        save_root_dir,
+        responder: Responder::new(function_name!(), Some(payload), tx),
+    });
+    rx.await.to()
+}
+
+#[named]
+#[tauri::command]
+pub async fn get_video_meta(request_sender: RequestSender<'_>) -> TlcResult<VideoMeta> {
+    let (tx, rx) = oneshot::channel();
+    let _ = request_sender.try_send(GetVideoMeta {
+        responder: Responder::new(function_name!(), None, tx),
+    });
+    rx.await.to()
+}
+
+#[named]
+#[tauri::command]
+pub async fn set_video_path(
+    video_path: PathBuf,
+    request_sender: RequestSender<'_>,
+) -> TlcResult<()> {
     let (tx, rx) = oneshot::channel();
     let payload = format!("video_path: {video_path:?}");
-    let _ = event_sender.try_send(SetVideoPath {
+    let _ = request_sender.try_send(SetVideoPath {
         video_path,
         responder: Responder::new(function_name!(), Some(payload), tx),
     });
@@ -69,9 +87,9 @@ pub async fn set_video_path(video_path: PathBuf, event_sender: EventSender<'_>) 
 
 #[named]
 #[tauri::command]
-pub async fn get_daq_meta(event_sender: EventSender<'_>) -> TlcResult<DaqMeta> {
+pub async fn get_daq_meta(request_sender: RequestSender<'_>) -> TlcResult<DaqMeta> {
     let (tx, rx) = oneshot::channel();
-    let _ = event_sender.try_send(GetDaqMeta {
+    let _ = request_sender.try_send(GetDaqMeta {
         responder: Responder::new(function_name!(), None, tx),
     });
     rx.await.to()
@@ -79,10 +97,10 @@ pub async fn get_daq_meta(event_sender: EventSender<'_>) -> TlcResult<DaqMeta> {
 
 #[named]
 #[tauri::command]
-pub async fn set_daq_path(daq_path: PathBuf, event_sender: EventSender<'_>) -> TlcResult<()> {
+pub async fn set_daq_path(daq_path: PathBuf, request_sender: RequestSender<'_>) -> TlcResult<()> {
     let (tx, rx) = oneshot::channel();
     let payload = format!("daq_path: {daq_path:?}");
-    let _ = event_sender.try_send(SetDaqPath {
+    let _ = request_sender.try_send(SetDaqPath {
         daq_path,
         responder: Responder::new(function_name!(), Some(payload), tx),
     });
@@ -96,9 +114,9 @@ pub async fn read_single_frame_base64(frame_index: usize, state: State<'_>) -> T
 
 #[named]
 #[tauri::command]
-pub async fn get_daq_raw(event_sender: EventSender<'_>) -> TlcResult<ArcArray2<f64>> {
+pub async fn get_daq_raw(request_sender: RequestSender<'_>) -> TlcResult<ArcArray2<f64>> {
     let (tx, rx) = oneshot::channel();
-    let _ = event_sender.try_send(GetDaqRaw {
+    let _ = request_sender.try_send(GetDaqRaw {
         responder: Responder::new(function_name!(), None, tx),
     });
     rx.await.to()
@@ -190,11 +208,11 @@ pub async fn get_interpolation_method(state: State<'_>) -> TlcResult<InterpMetho
 #[tauri::command]
 pub async fn set_interp_method(
     interp_method: InterpMethod,
-    event_sender: EventSender<'_>,
+    request_sender: RequestSender<'_>,
 ) -> TlcResult<()> {
     let (tx, rx) = oneshot::channel();
     let payload = format!("interp_method: {interp_method:?}");
-    let _ = event_sender.try_send(SetInterpMethod {
+    let _ = request_sender.try_send(SetInterpMethod {
         interp_method,
         responder: Responder::new(function_name!(), Some(payload), tx),
     });
@@ -205,11 +223,11 @@ pub async fn set_interp_method(
 #[tauri::command]
 pub async fn interp_single_frame(
     frame_index: usize,
-    event_sender: EventSender<'_>,
+    request_sender: RequestSender<'_>,
 ) -> TlcResult<Array2<f64>> {
     let (tx, rx) = oneshot::channel();
     let payload = format!("frame_index: {frame_index}");
-    let _ = event_sender.try_send(InterpSingleFrame {
+    let _ = request_sender.try_send(InterpSingleFrame {
         frame_index,
         responder: Responder::new(function_name!(), Some(payload), tx),
     });

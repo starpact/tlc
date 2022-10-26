@@ -1,120 +1,172 @@
-use std::path::PathBuf;
+use std::{path::PathBuf, time::Duration};
 
-use anyhow::Result;
+use anyhow::{bail, Result};
+use crossbeam::channel::{bounded, RecvTimeoutError, Sender};
 use ndarray::{ArcArray2, Array2};
-use tracing::warn;
+use tokio::sync::oneshot;
+use tracing::{error, info_span, warn};
 
 use super::{GlobalState, Outcome};
 use crate::{
-    daq::{self, DaqMeta, InterpMeta, InterpMethod},
+    daq::{interp, read_daq, DaqMeta, InterpMeta, InterpMethod},
     request::Responder,
     setting::SettingStorage,
-    video::VideoMeta,
+    video::{read_video, VideoMeta},
 };
 
 impl<S: SettingStorage> GlobalState<S> {
-    pub fn get_video_meta(&self) -> Result<VideoMeta> {
-        todo!()
+    pub fn on_get_save_root_dir(&self, responder: Responder<PathBuf>) {
+        responder.respond(self.setting_storage.save_root_dir());
     }
 
-    pub fn set_video_path(&self, _video_path: PathBuf, _responder: Responder<()>) {
-        todo!()
+    pub fn on_set_save_root_dir(&self, save_root_dir: PathBuf, responder: Responder<()>) {
+        responder.respond(self.setting_storage.set_save_root_dir(&save_root_dir));
     }
 
-    pub fn get_daq_meta(&self) -> Result<DaqMeta> {
-        let daq_path = self.setting_storage.daq_path()?;
-        let daq_data = self.daq_data()?;
-        if daq_data.daq_meta().path != daq_path {
-            warn!("new daq not loaded yet, return old data anyway");
+    pub fn on_get_video_meta(&self, responder: Responder<VideoMeta>) {
+        responder.respond(self.video_meta())
+    }
+
+    pub fn on_set_video_path(&self, video_path: PathBuf, responder: Responder<()>) {
+        if let Err(e) = self.setting_storage.set_video_path(&video_path) {
+            responder.respond_err(e);
+            return;
         }
 
-        Ok(daq_data.daq_meta().clone())
+        self.spawn(|outcome_sender| {
+            if let Err(e) = do_read_video(video_path, responder, outcome_sender) {
+                error!(?e);
+            }
+        });
     }
 
-    pub fn set_daq_path(&self, daq_path: PathBuf, responder: Responder<()>) {
+    pub fn on_get_daq_meta(&self, responder: Responder<DaqMeta>) {
+        responder.respond(self.daq_meta());
+    }
+
+    pub fn on_set_daq_path(&self, daq_path: PathBuf, responder: Responder<()>) {
         if let Err(e) = self.setting_storage.set_daq_path(&daq_path) {
             responder.respond_err(e);
             return;
         }
 
-        let event_sender = self.outcome_sender.clone();
-        std::thread::spawn(move || match make_event_read_daq(daq_path) {
-            Ok(event) => {
-                event_sender.send(event).unwrap();
-                responder.respond_ok(());
-            }
-            Err(e) => responder.respond_err(e),
+        self.spawn(|outcome_sender| {
+            dispatch_outcome(do_read_daq(daq_path), outcome_sender, responder)
         });
     }
 
-    pub fn get_daq_raw(&self) -> Result<ArcArray2<f64>> {
-        self.setting_storage.daq_path()?;
-        Ok(self.daq_data()?.daq_raw())
+    pub fn on_get_daq_raw(&self, responder: Responder<ArcArray2<f64>>) {
+        responder.respond(self.daq_raw())
     }
 
-    pub fn set_interp_method(&self, interp_method: InterpMethod, responder: Responder<()>) {
-        let daq_raw = match self.daq_data() {
-            Ok(daq_data) => daq_data.daq_raw(),
+    pub fn on_set_interp_method(&self, interp_method: InterpMethod, responder: Responder<()>) {
+        let (interp_meta, daq_raw) = match self.set_interp_method_and_prepare_interp(interp_method)
+        {
+            Ok(ret) => ret,
             Err(e) => {
                 responder.respond_err(e);
                 return;
             }
         };
 
-        let interp_meta = match self.setting_storage.interp_meta() {
-            Ok(mut interp_meta) => {
-                if interp_meta.interp_method == interp_method {
-                    responder.respond_ok(());
-                    return;
-                }
-                interp_meta.interp_method = interp_method;
-                interp_meta
-            }
-            Err(e) => {
-                responder.respond_err(e);
-                return;
-            }
-        };
-
-        if let Err(e) = self.setting_storage.set_interp_method(interp_method) {
-            responder.respond_err(e);
-            return;
-        }
-
-        let event_sender = self.outcome_sender.clone();
-        std::thread::spawn(move || match make_event_interp(interp_meta, daq_raw) {
-            Ok(event) => {
-                event_sender.send(event).unwrap();
-                responder.respond_ok(());
-            }
-            Err(e) => responder.respond_err(e),
+        self.spawn(|outcome_sender| {
+            dispatch_outcome(do_interp(interp_meta, daq_raw), outcome_sender, responder)
         });
     }
 
-    pub fn interp_single_frame(&self, frame_index: usize, responder: Responder<Array2<f64>>) {
+    pub fn on_interp_single_frame(&self, frame_index: usize, responder: Responder<Array2<f64>>) {
         match self.interpolator() {
             Ok(interpolator) => {
-                std::thread::spawn(
-                    move || match interpolator.interp_single_frame(frame_index) {
-                        Ok(temp2) => responder.respond_ok(temp2),
-                        Err(e) => responder.respond_err(e),
-                    },
-                );
+                std::thread::spawn(move || {
+                    responder.respond(interpolator.interp_single_frame(frame_index))
+                });
             }
             Err(e) => responder.respond_err(e),
         }
+    }
+
+    fn set_interp_method_and_prepare_interp(
+        &self,
+        interp_method: InterpMethod,
+    ) -> Result<(InterpMeta, ArcArray2<f64>)> {
+        let daq_raw = self.daq_data()?.daq_raw();
+
+        let mut interp_meta = self.setting_storage.interp_meta()?;
+        if interp_meta.interp_method == interp_method {
+            warn!("interp method unchanged, compute again anyway");
+        } else {
+            interp_meta.interp_method = interp_method;
+        }
+
+        self.setting_storage.set_interp_method(interp_method)?;
+
+        Ok((interp_meta, daq_raw))
     }
 }
 
-fn make_event_read_daq(daq_path: PathBuf) -> Result<Outcome> {
-    let (daq_meta, daq_raw) = daq::read_daq(daq_path)?;
+fn do_read_video(
+    video_path: PathBuf,
+    responder: Responder<()>,
+    outcome_sender: Sender<Outcome>,
+) -> Result<()> {
+    let (tx1, rx1) = oneshot::channel();
+    let (tx2, rx2) = bounded(3); // cap doesn't matter.
+
+    std::thread::spawn(|| read_video(video_path, tx1, tx2));
+    let (video_meta, parameters) = rx1.blocking_recv()?;
+    let nframes = video_meta.nframes;
+    outcome_sender
+        .send(Outcome::ReadVideoMeta {
+            video_meta,
+            parameters,
+        })
+        .unwrap();
+    responder.respond_ok(());
+
+    let _span = info_span!("receive_loaded_packets", nframes).entered();
+    for cnt in 1.. {
+        // This is an ideal cancel point.
+        match rx2.recv_timeout(Duration::from_secs(1)) {
+            Ok((video_path, packet)) => outcome_sender
+                .send(Outcome::LoadVideoPacket { video_path, packet })
+                .unwrap(),
+            Err(e) => match e {
+                RecvTimeoutError::Timeout => bail!("load packets got stuck for some reason"),
+                RecvTimeoutError::Disconnected => {
+                    debug_assert_eq!(cnt, nframes);
+                    break;
+                }
+            },
+        }
+        debug_assert!(cnt < nframes);
+    }
+
+    Ok(())
+}
+
+fn do_read_daq(daq_path: PathBuf) -> Result<Outcome> {
+    let (daq_meta, daq_raw) = read_daq(daq_path)?;
     Ok(Outcome::ReadDaq {
         daq_meta,
         daq_raw: daq_raw.into_shared(),
     })
 }
 
-fn make_event_interp(interp_meta: InterpMeta, daq_raw: ArcArray2<f64>) -> Result<Outcome> {
-    let interpolator = daq::interp(interp_meta, daq_raw)?;
+fn do_interp(interp_meta: InterpMeta, daq_raw: ArcArray2<f64>) -> Result<Outcome> {
+    let interpolator = interp(interp_meta, daq_raw)?;
     Ok(Outcome::Interp { interpolator })
+}
+
+fn dispatch_outcome(
+    outcome: Result<Outcome>,
+    outcome_sender: Sender<Outcome>,
+    responder: Responder<()>,
+) {
+    match outcome {
+        Ok(outcome) => {
+            outcome_sender.send(outcome).unwrap();
+            responder.respond_ok(());
+        }
+        Err(e) => responder.respond_err(e),
+    }
 }

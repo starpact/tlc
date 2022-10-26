@@ -21,7 +21,7 @@ pub struct SqliteSettingStorage {
 }
 
 impl SqliteSettingStorage {
-    pub fn new<P: AsRef<Path>>(path: P) -> Self {
+    pub fn new<P: AsRef<Path>>(path: P) -> SqliteSettingStorage {
         let conn = Connection::open(path)
             .unwrap_or_else(|e| panic!("Failed to create/open metadata db: {e}",));
         conn.execute(include_str!("../../db/schema.sql"), ())
@@ -34,12 +34,12 @@ impl SqliteSettingStorage {
     }
 
     #[cfg(test)]
-    pub fn new_in_memory() -> Self {
+    pub fn new_in_memory() -> SqliteSettingStorage {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute(include_str!("../../db/schema.sql"), ())
             .expect("Failed to create db");
 
-        Self {
+        SqliteSettingStorage {
             conn,
             setting_id: None,
         }

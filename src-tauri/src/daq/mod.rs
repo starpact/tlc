@@ -33,8 +33,8 @@ pub struct Thermocouple {
 }
 
 impl DaqData {
-    pub fn new(daq_meta: DaqMeta, daq_raw: ArcArray2<f64>) -> Self {
-        Self {
+    pub fn new(daq_meta: DaqMeta, daq_raw: ArcArray2<f64>) -> DaqData {
+        DaqData {
             daq_meta,
             daq_raw,
             interpolator: None,

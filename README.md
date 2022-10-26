@@ -5,23 +5,6 @@ Built with [Tauri](https://tauri.app).
 ## Architecture
 ![arch](.github/assets/tlc_architecture.png)
 
-```mermaid
-flowchart TD
-    A[Frontend] -->|IPC Request| B[Tauri Core]
-    B -->|IPC Response| A
-    B --> C((Query))
-    C -->|Read| E[Setting]
-    C -->|Read| F[Runtime Data]
-    B --> D((Command))
-    D -->|Read/Write| E
-    D -->|Trigger Once| G[Controller]
-    G -->|Read|E
-    G -->|Read|F
-    G -->|Reconcile|H[Compute]
-    H -->|Write| F
-    H -->|Succeed?| G
-```
-
 ## Development
 ### Linux
 First you need to installed [Nix](https://nixos.org/) and enable [Flake](https://nixos.wiki/wiki/Flakes).
@@ -44,7 +27,7 @@ Cross compile to Windows(TODO).
 # install tauri-cli
 cargo install tauri-cli
 
-# install `ffmpeg` via `vcpkg`, need to compile about 20 mins
+# install `ffmpeg` via `vcpkg`, need to compile for about 20 mins
 
 # let vcpkg expose ffmpeg headers
 
@@ -53,8 +36,10 @@ cargo install tauri-cli
 # install `cargo-vcpkg`
 ```
 
-## Misc
+## References
 - [Taking Advantage of Auto-Vectorization in Rust](https://www.nickwilcox.com/blog/autovec)
 - [Async: What is blocking?](https://ryhl.io/blog/async-what-is-blocking/)
 - [FFmpeg: Difference Between Frames and Packets](https://stackoverflow.com/questions/53574798/difference-between-frames-and-packets-in-ffmpeg)
 - [FFmpeg: multithread decoding](https://www.cnblogs.com/TaigaCon/p/10220356.html)
+- [Data as a mediator between computation and state](https://www.tedinski.com/2018/08/28/using-data-to-mutate-state.html)
+- [Matklad's reply on reddit](https://www.reddit.com/r/rust/comments/uf7yoy/comment/i6s4b8x/)

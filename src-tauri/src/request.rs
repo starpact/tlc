@@ -11,6 +11,13 @@ use crate::{
 };
 
 pub enum Request {
+    GetSaveRootDir {
+        responder: Responder<PathBuf>,
+    },
+    SetSaveRootDir {
+        save_root_dir: PathBuf,
+        responder: Responder<()>,
+    },
     GetVideoMeta {
         responder: Responder<VideoMeta>,
     },
