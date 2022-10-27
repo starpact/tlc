@@ -5,13 +5,13 @@ use crossbeam::channel::{bounded, RecvTimeoutError, Sender};
 use ndarray::{ArcArray2, Array2};
 use tokio::sync::oneshot;
 use tracing::{error, info_span, warn};
+use video::{read_video, ProgressBar, VideoMeta};
 
 use super::{GlobalState, Outcome};
 use crate::{
     daq::{interp, read_daq, DaqMeta, InterpMeta, InterpMethod},
     request::Responder,
     setting::SettingStorage,
-    video::{read_video, VideoMeta},
 };
 
 impl<S: SettingStorage> GlobalState<S> {
@@ -27,14 +27,15 @@ impl<S: SettingStorage> GlobalState<S> {
         responder.respond(self.video_meta())
     }
 
-    pub fn on_set_video_path(&self, video_path: PathBuf, responder: Responder<()>) {
+    pub fn on_set_video_path(&mut self, video_path: PathBuf, responder: Responder<()>) {
         if let Err(e) = self.setting_storage.set_video_path(&video_path) {
             responder.respond_err(e);
             return;
         }
 
+        let progress_bar = self.video_controller.prepare_read_video();
         self.spawn(|outcome_sender| {
-            if let Err(e) = do_read_video(video_path, responder, outcome_sender) {
+            if let Err(e) = do_read_video(video_path, responder, outcome_sender, progress_bar) {
                 error!(?e);
             }
         });
@@ -108,12 +109,13 @@ fn do_read_video(
     video_path: PathBuf,
     responder: Responder<()>,
     outcome_sender: Sender<Outcome>,
+    progress_bar: ProgressBar,
 ) -> Result<()> {
-    let (tx1, rx1) = oneshot::channel();
-    let (tx2, rx2) = bounded(3); // cap doesn't matter.
+    let (meta_tx, meta_rx) = oneshot::channel();
+    let (packet_tx, packet_rx) = bounded(3); // cap doesn't matter
 
-    std::thread::spawn(|| read_video(video_path, tx1, tx2));
-    let (video_meta, parameters) = rx1.blocking_recv()?;
+    std::thread::spawn(move || read_video(video_path, progress_bar, meta_tx, packet_tx));
+    let (video_meta, parameters) = meta_rx.blocking_recv()?;
     let nframes = video_meta.nframes;
     outcome_sender
         .send(Outcome::ReadVideoMeta {
@@ -126,7 +128,7 @@ fn do_read_video(
     let _span = info_span!("receive_loaded_packets", nframes).entered();
     for cnt in 1.. {
         // This is an ideal cancel point.
-        match rx2.recv_timeout(Duration::from_secs(1)) {
+        match packet_rx.recv_timeout(Duration::from_secs(1)) {
             Ok((video_path, packet)) => outcome_sender
                 .send(Outcome::LoadVideoPacket { video_path, packet })
                 .unwrap(),

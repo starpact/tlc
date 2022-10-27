@@ -4,11 +4,9 @@ use anyhow::Result;
 use ndarray::{ArcArray2, Array2};
 use tokio::sync::oneshot;
 use tracing::trace;
+use video::VideoMeta;
 
-use crate::{
-    daq::{DaqMeta, InterpMethod},
-    video::VideoMeta,
-};
+use crate::daq::{DaqMeta, InterpMethod};
 
 pub enum Request {
     GetSaveRootDir {

@@ -8,24 +8,27 @@ use crossbeam::{
     channel::{bounded, Receiver, Sender},
     select,
 };
-use ffmpeg::codec::{packet::Packet, Parameters};
 use ndarray::ArcArray2;
 use tracing::{error, warn};
+use video::{Packet, Parameters, VideoController, VideoData, VideoMeta};
 
 use crate::{
     daq::{DaqData, DaqMeta, Interpolator},
     request::Request,
     setting::{SettingStorage, SqliteSettingStorage},
-    video::{VideoData, VideoMeta},
 };
 
 const SQLITE_FILEPATH: &str = "./var/db.sqlite3";
 
 struct GlobalState<S: SettingStorage> {
     setting_storage: S,
+
     outcome_sender: Sender<Outcome>,
     outcome_receiver: Receiver<Outcome>,
+
     video_data: Option<VideoData>,
+    video_controller: VideoController,
+
     daq_data: Option<DaqData>,
 }
 
@@ -66,6 +69,7 @@ impl<S: SettingStorage> GlobalState<S> {
             outcome_receiver,
             video_data: None,
             daq_data: None,
+            video_controller: VideoController::default(),
         }
     }
 

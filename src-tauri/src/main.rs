@@ -15,7 +15,6 @@ mod setting;
 mod solve;
 mod state;
 mod util;
-mod video;
 
 use crossbeam::channel::bounded;
 use setting::SqliteSettingStorage;
@@ -28,8 +27,7 @@ const SQLITE_FILEPATH: &str = "./var/db.sqlite3";
 
 fn main() {
     util::log::init();
-
-    ffmpeg::init().expect("Failed to init ffmpeg");
+    video::init();
 
     let (request_sender, request_receiver) = bounded(3);
     std::thread::spawn(move || state::main_loop(request_receiver));

@@ -5,7 +5,9 @@ use ndarray::{parallel::prelude::*, prelude::*};
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
 
-use super::{progress_bar::ProgressBar, Green2Meta};
+use crate::Green2Meta;
+
+use super::controller::ProgressBar;
 
 #[derive(Debug, Default, Deserialize, Serialize, Clone, Copy, PartialEq)]
 pub enum FilterMethod {
@@ -32,7 +34,7 @@ pub fn filter_detect_peak(
     progress_bar: &ProgressBar,
 ) -> Result<Vec<usize>> {
     let total = green2.dim().1;
-    let _reset_guard = progress_bar.start(total as u32);
+    let _guard = progress_bar.start(total as u32);
 
     use FilterMethod::*;
     match filter_method {
@@ -47,7 +49,7 @@ pub fn filter_detect_peak(
 }
 
 #[instrument(skip(green1))]
-pub fn filter_single_point(filter_method: FilterMethod, green1: ArrayView1<u8>) -> Vec<u8> {
+pub fn filter_point(filter_method: FilterMethod, green1: ArrayView1<u8>) -> Vec<u8> {
     match filter_method {
         FilterMethod::No => green1.to_vec(),
         FilterMethod::Median { window_size } => filter_median(green1, window_size),

@@ -2,13 +2,13 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, bail, Result};
 use rusqlite::{params, Connection, Error::QueryReturnedNoRows};
+use video::{FilterMeta, FilterMethod, VideoMeta};
 
 use super::{CreateRequest, SettingStorage, StartIndex};
 use crate::{
     daq::{InterpMethod, Thermocouple},
     solve::{IterationMethod, PhysicalParam},
     util,
-    video::{FilterMeta, FilterMethod, VideoMeta},
 };
 
 #[derive(Debug)]
@@ -23,7 +23,7 @@ pub struct SqliteSettingStorage {
 impl SqliteSettingStorage {
     pub fn new<P: AsRef<Path>>(path: P) -> SqliteSettingStorage {
         let conn = Connection::open(path)
-            .unwrap_or_else(|e| panic!("Failed to create/open metadata db: {e}",));
+            .unwrap_or_else(|e| panic!("Failed to create/open metadata db: {e}"));
         conn.execute(include_str!("../../db/schema.sql"), ())
             .expect("Failed to create db");
 

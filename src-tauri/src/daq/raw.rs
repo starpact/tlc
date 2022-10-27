@@ -92,9 +92,9 @@ mod tests {
 
     use super::*;
 
-    const DAQ_PATH_LVM: &str = "./tests/imp_20000_1.lvm";
-    const DAQ_PATH_XLSX: &str = "./tests/imp_20000_1.xlsx";
-    const DAQ_PATH_UNSUPPORTED: &str = "./tests/imp_20000_1.csv";
+    const DAQ_PATH_LVM: &str = "../tests/imp_20000_1.lvm";
+    const DAQ_PATH_XLSX: &str = "../tests/imp_20000_1.xlsx";
+    const DAQ_PATH_UNSUPPORTED: &str = "../tests/imp_20000_1.csv";
 
     #[test]
     fn test_read_daq_lvm_and_xlsx() {

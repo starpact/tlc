@@ -10,11 +10,11 @@ use serde::{Deserialize, Serialize};
 pub use sqlite::SqliteSettingStorage;
 use tokio::io::AsyncWriteExt;
 use tracing::instrument;
+use video::{FilterMeta, FilterMethod, Green2Meta, VideoMeta};
 
 use crate::{
     daq::{DaqMeta, InterpMeta, InterpMethod, Thermocouple},
     solve::{IterationMethod, PhysicalParam},
-    video::{FilterMeta, FilterMethod, Green2Meta, VideoMeta},
 };
 
 #[cfg(test)]

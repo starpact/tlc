@@ -14,7 +14,6 @@
         glib.out
         gtk3
         llvmPackages_14.libclang.lib
-        pango.out
         openssl.out
         webkitgtk
       ];
@@ -26,7 +25,6 @@
         glib
         gtk3
         libsoup
-        mold
         nodejs
         openssl
         pkg-config

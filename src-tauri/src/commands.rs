@@ -6,6 +6,7 @@ use function_name::named;
 use ndarray::{ArcArray2, Array2};
 use serde::Serialize;
 use tokio::sync::oneshot::{self, error::RecvError};
+use video::{FilterMethod, Progress, VideoMeta};
 
 use crate::{
     daq::{DaqMeta, InterpMethod},
@@ -16,7 +17,6 @@ use crate::{
     },
     setting::{SqliteSettingStorage, StartIndex},
     solve::IterationMethod,
-    video::{FilterMethod, Progress, VideoMeta},
 };
 
 type State<'a> = tauri::State<'a, GlobalState<SqliteSettingStorage>>;
@@ -109,7 +109,8 @@ pub async fn set_daq_path(daq_path: PathBuf, request_sender: RequestSender<'_>) 
 
 #[tauri::command]
 pub async fn read_single_frame_base64(frame_index: usize, state: State<'_>) -> TlcResult<String> {
-    state.read_single_frame_base64(frame_index).await.to()
+    // state.read_single_frame_base64(frame_index).await.to()
+    todo!()
 }
 
 #[named]
@@ -141,12 +142,14 @@ pub async fn get_start_index(state: State<'_>) -> TlcResult<StartIndex> {
 
 #[tauri::command]
 pub async fn set_start_frame(start_frame: usize, state: State<'_>) -> TlcResult<()> {
-    state.set_start_frame(start_frame).await.to()
+    // state.set_start_frame(start_frame).await.to()
+    todo!()
 }
 
 #[tauri::command]
 pub async fn set_start_row(start_row: usize, state: State<'_>) -> TlcResult<()> {
-    state.set_start_row(start_row).await.to()
+    // state.set_start_row(start_row).await.to()
+    todo!()
 }
 
 #[tauri::command]
@@ -156,7 +159,8 @@ pub async fn get_area(state: State<'_>) -> TlcResult<(usize, usize, usize, usize
 
 #[tauri::command]
 pub async fn set_area(state: State<'_>, area: (usize, usize, usize, usize)) -> TlcResult<()> {
-    state.set_area(area).await.to()
+    // state.set_area(area).await.to()
+    todo!()
 }
 
 #[tauri::command]
@@ -166,12 +170,14 @@ pub fn set_thermocouples() -> TlcResult<()> {
 
 #[tauri::command]
 pub async fn build_green2(state: State<'_>) -> TlcResult<()> {
-    state.spawn_build_green2().await.to()
+    // state.spawn_build_green2().await.to()
+    todo!()
 }
 
 #[tauri::command]
 pub async fn get_build_green2_progress(state: State<'_>) -> TlcResult<Progress> {
-    Ok(state.get_build_green2_progress())
+    // Ok(state.get_build_green2_progress())
+    todo!()
 }
 
 #[tauri::command]
@@ -181,22 +187,26 @@ pub async fn get_filter_method(state: State<'_>) -> TlcResult<FilterMethod> {
 
 #[tauri::command]
 pub async fn set_filter_method(filter_method: FilterMethod, state: State<'_>) -> TlcResult<()> {
-    state.set_filter_method(filter_method).await.to()
+    // state.set_filter_method(filter_method).await.to()
+    todo!()
 }
 
 #[tauri::command]
 pub async fn filter_single_point(position: (usize, usize), state: State<'_>) -> TlcResult<Vec<u8>> {
-    state.filter_single_point(position).await.to()
+    // state.filter_single_point(position).await.to()
+    todo!()
 }
 
 #[tauri::command]
 pub async fn detect_peak(state: State<'_>) -> TlcResult<()> {
-    state.spawn_detect_peak().await.to()
+    // state.spawn_detect_peak().await.to()
+    todo!()
 }
 
 #[tauri::command]
 pub async fn get_detect_peak_progress(state: State<'_>) -> TlcResult<Progress> {
-    Ok(state.get_detect_peak_progress())
+    // Ok(state.get_detect_peak_progress())
+    todo!()
 }
 
 #[tauri::command]

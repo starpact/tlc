@@ -1,14 +1,13 @@
 use std::{path::PathBuf, sync::Arc};
 
 use anyhow::{anyhow, bail, Result};
-use ffmpeg::codec::{packet::Packet, Parameters};
 use ndarray::ArcArray2;
+use video::{Packet, Parameters, VideoData, VideoMeta};
 
 use super::GlobalState;
 use crate::{
     daq::{DaqData, DaqMeta, Interpolator},
     setting::SettingStorage,
-    video::{VideoData, VideoMeta},
 };
 
 impl<S: SettingStorage> GlobalState<S> {

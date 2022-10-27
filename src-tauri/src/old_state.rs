@@ -8,18 +8,18 @@ use anyhow::{anyhow, bail, Result};
 use ndarray::ArcArray2;
 use serde::{Deserialize, Serialize};
 use tauri::async_runtime::spawn_blocking;
+use video::{FilterMethod, Progress};
 
 use crate::{
     daq::InterpMethod,
     post_processing::draw_area,
     setting::{self, SettingStorage, StartIndex},
     solve::{IterationMethod, PhysicalParam},
-    video::{FilterMethod, Progress, VideoManager},
 };
 
 pub struct GlobalState<S: SettingStorage> {
     setting_storage: Arc<Mutex<S>>,
-    video_manager: VideoManager<S>,
+    // video_manager: VideoManager<S>,
     nu_data: Arc<Mutex<Option<NuData>>>,
 }
 
@@ -46,11 +46,11 @@ pub struct CreateSettingRequest {
 impl<S: SettingStorage> GlobalState<S> {
     pub fn new(setting_storage: S) -> GlobalState<S> {
         let setting_storage = Arc::new(Mutex::new(setting_storage));
-        let video_manager = VideoManager::new(setting_storage.clone());
+        // let video_manager = VideoManager::new(setting_storage.clone());
 
         GlobalState {
             setting_storage,
-            video_manager,
+            // video_manager,
             nu_data: Default::default(),
         }
     }
@@ -97,11 +97,11 @@ impl<S: SettingStorage> GlobalState<S> {
             .await
     }
 
-    pub async fn read_single_frame_base64(&self, frame_index: usize) -> Result<String> {
-        self.video_manager
-            .read_single_frame_base64(frame_index)
-            .await
-    }
+    // pub async fn read_single_frame_base64(&self, frame_index: usize) -> Result<String> {
+    //     self.video_manager
+    //         .read_single_frame_base64(frame_index)
+    //         .await
+    // }
 
     // pub async fn get_daq_raw(&self) -> Result<ArcArray2<f64>> {
     //     self.daq_manager
@@ -122,55 +122,55 @@ impl<S: SettingStorage> GlobalState<S> {
         self.asyncify(|s| s.start_index()).await
     }
 
-    pub async fn set_start_frame(&self, start_frame: usize) -> Result<()> {
-        self.asyncify(move |s| s.set_start_frame(start_frame))
-            .await?;
-        self.video_manager.spawn_build_green2().await
-    }
+    // pub async fn set_start_frame(&self, start_frame: usize) -> Result<()> {
+    //     self.asyncify(move |s| s.set_start_frame(start_frame))
+    //         .await?;
+    //     self.video_manager.spawn_build_green2().await
+    // }
 
-    pub async fn set_start_row(&self, start_row: usize) -> Result<()> {
-        self.asyncify(move |s| s.set_start_row(start_row)).await?;
-        self.video_manager.spawn_build_green2().await
-    }
+    // pub async fn set_start_row(&self, start_row: usize) -> Result<()> {
+    //     self.asyncify(move |s| s.set_start_row(start_row)).await?;
+    //     self.video_manager.spawn_build_green2().await
+    // }
 
     pub async fn get_area(&self) -> Result<(usize, usize, usize, usize)> {
         self.asyncify(|s| s.area()).await
     }
 
-    pub async fn set_area(&self, area: (usize, usize, usize, usize)) -> Result<()> {
-        self.asyncify(move |s| s.set_area(area)).await?;
-        self.video_manager.spawn_build_green2().await
-    }
+    // pub async fn set_area(&self, area: (usize, usize, usize, usize)) -> Result<()> {
+    //     self.asyncify(move |s| s.set_area(area)).await?;
+    //     self.video_manager.spawn_build_green2().await
+    // }
 
-    pub async fn spawn_build_green2(&self) -> Result<()> {
-        self.video_manager.spawn_build_green2().await
-    }
+    // pub async fn spawn_build_green2(&self) -> Result<()> {
+    //     self.video_manager.spawn_build_green2().await
+    // }
 
-    pub fn get_build_green2_progress(&self) -> Progress {
-        self.video_manager.build_green2_progress()
-    }
+    // pub fn get_build_green2_progress(&self) -> Progress {
+    //     self.video_manager.build_green2_progress()
+    // }
 
     pub async fn get_filter_method(&self) -> Result<FilterMethod> {
         self.asyncify(|s| Ok(s.filter_meta()?.filter_method)).await
     }
 
-    pub async fn set_filter_method(&self, filter_method: FilterMethod) -> Result<()> {
-        self.asyncify(move |s| s.set_filter_method(filter_method))
-            .await?;
-        self.video_manager.spawn_detect_peak().await
-    }
+    // pub async fn set_filter_method(&self, filter_method: FilterMethod) -> Result<()> {
+    //     self.asyncify(move |s| s.set_filter_method(filter_method))
+    //         .await?;
+    //     self.video_manager.spawn_detect_peak().await
+    // }
 
-    pub async fn filter_single_point(&self, position: (usize, usize)) -> Result<Vec<u8>> {
-        self.video_manager.filter_single_point(position).await
-    }
+    // pub async fn filter_single_point(&self, position: (usize, usize)) -> Result<Vec<u8>> {
+    //     self.video_manager.filter_single_point(position).await
+    // }
 
-    pub async fn spawn_detect_peak(&self) -> Result<()> {
-        self.video_manager.spawn_detect_peak().await
-    }
+    // pub async fn spawn_detect_peak(&self) -> Result<()> {
+    //     self.video_manager.spawn_detect_peak().await
+    // }
 
-    pub fn get_detect_peak_progress(&self) -> Progress {
-        self.video_manager.detect_peak_progress_bar()
-    }
+    // pub fn get_detect_peak_progress(&self) -> Progress {
+    //     self.video_manager.detect_peak_progress_bar()
+    // }
 
     pub async fn get_interpolation_method(&self) -> Result<InterpMethod> {
         self.asyncify(|s| s.interp_method()).await
