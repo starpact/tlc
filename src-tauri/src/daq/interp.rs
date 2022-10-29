@@ -12,7 +12,7 @@ pub struct InterpMeta {
     pub daq_path: PathBuf,
     pub start_row: usize,
     pub cal_num: usize,
-    pub area: (usize, usize, usize, usize),
+    pub area: (u32, u32, u32, u32),
     pub interp_method: InterpMethod,
     pub thermocouples: Vec<Thermocouple>,
 }
@@ -20,7 +20,7 @@ pub struct InterpMeta {
 #[derive(Debug, Clone)]
 pub struct Interpolator {
     interp_method: InterpMethod,
-    shape: (usize, usize),
+    shape: (u32, u32),
     /// horizontal: (cal_w, cal_num)
     /// vertical: (cal_h, cal_num)
     /// bilinear: (cal_h * cal_w, cal_num)
@@ -89,6 +89,7 @@ pub fn interp(interp_meta: InterpMeta, daq_raw: ArcArray2<f64>) -> Result<Interp
 impl Interpolator {
     pub fn interp_single_frame(&self, frame_index: usize) -> Result<Array2<f64>> {
         let (cal_h, cal_w) = self.shape;
+        let (cal_h, cal_w) = (cal_h as usize, cal_w as usize);
         let temp1 = self.data.column(frame_index);
         let temp2 = match self.interp_method {
             Horizontal | HorizontalExtra => temp1
@@ -110,15 +111,15 @@ impl Interpolator {
     /// point_index = y * w + x.
     pub fn interp_single_point(&self, point_index: usize) -> ArrayView1<f64> {
         let point_index = match self.interp_method {
-            Horizontal | HorizontalExtra => point_index / self.shape.1,
-            Vertical | VerticalExtra => point_index % self.shape.0,
+            Horizontal | HorizontalExtra => point_index / self.shape.1 as usize,
+            Vertical | VerticalExtra => point_index % self.shape.0 as usize,
             Bilinear(..) | BilinearExtra(..) => point_index,
         };
 
         self.data.row(point_index)
     }
 
-    pub fn shape(&self) -> (usize, usize) {
+    pub fn shape(&self) -> (u32, u32) {
         self.shape
     }
 
@@ -130,10 +131,11 @@ impl Interpolator {
 fn interp1(
     temp2: Array2<f64>,
     interp_method: InterpMethod,
-    area: (usize, usize, usize, usize),
+    area: (u32, u32, u32, u32),
     thermocouples: &[Thermocouple],
 ) -> Array2<f64> {
     let (tl_y, tl_x, cal_h, cal_w) = area;
+    let (tl_y, tl_x, cal_h, cal_w) = (tl_y as usize, tl_x as usize, cal_h as usize, cal_w as usize);
     let cal_num = temp2.ncols();
 
     let (interp_len, tc_pos): (_, Vec<_>) = match interp_method {
@@ -196,7 +198,7 @@ fn interp1(
 fn interp2(
     temp2: Array2<f64>,
     interp_method: InterpMethod,
-    area: (usize, usize, usize, usize),
+    area: (u32, u32, u32, u32),
     thermocouples: &[Thermocouple],
 ) -> Array2<f64> {
     let (tc_h, tc_w, do_extra) = match interp_method {
@@ -205,6 +207,7 @@ fn interp2(
         _ => unreachable!(),
     };
     let (tl_y, tl_x, cal_h, cal_w) = area;
+    let (tl_y, tl_x, cal_h, cal_w) = (tl_y as usize, tl_x as usize, cal_h as usize, cal_w as usize);
     let tc_x: Vec<_> = thermocouples
         .iter()
         .take(tc_w)

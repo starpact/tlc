@@ -8,9 +8,9 @@ use std::{
 use anyhow::{anyhow, bail, Result};
 use serde::{Deserialize, Serialize};
 pub use sqlite::SqliteSettingStorage;
+use tlc_video::{FilterMeta, FilterMethod, Green2Meta, VideoMeta};
 use tokio::io::AsyncWriteExt;
 use tracing::instrument;
-use video::{FilterMeta, FilterMethod, Green2Meta, VideoMeta};
 
 use crate::{
     daq::{DaqMeta, InterpMeta, InterpMethod, Thermocouple},
@@ -38,8 +38,8 @@ pub trait SettingStorage: Send + 'static {
     fn set_daq_path(&self, daq_path: &Path) -> Result<()>;
     fn start_index(&self) -> Result<StartIndex>;
     fn set_start_index(&self, start_frame: usize, start_row: usize) -> Result<()>;
-    fn area(&self) -> Result<(usize, usize, usize, usize)>;
-    fn set_area(&self, area: (usize, usize, usize, usize)) -> Result<()>;
+    fn area(&self) -> Result<(u32, u32, u32, u32)>;
+    fn set_area(&self, area: (u32, u32, u32, u32)) -> Result<()>;
     fn thermocouples_optional(&self) -> Result<Option<Vec<Thermocouple>>>;
     fn interp_method(&self) -> Result<InterpMethod>;
     fn set_interp_method(&self, interpolation_method: InterpMethod) -> Result<()>;

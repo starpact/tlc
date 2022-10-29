@@ -88,8 +88,6 @@ mod tests {
 
     use approx::assert_relative_eq;
 
-    use crate::util;
-
     use super::*;
 
     const DAQ_PATH_LVM: &str = "../tests/imp_20000_1.lvm";
@@ -98,7 +96,7 @@ mod tests {
 
     #[test]
     fn test_read_daq_lvm_and_xlsx() {
-        util::log::init();
+        tlc_util::log::init();
 
         let (daq_meta, daq_raw_lvm) = read_daq(DAQ_PATH_LVM).unwrap();
         assert_eq!(

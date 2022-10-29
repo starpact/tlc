@@ -35,7 +35,8 @@ rusqlite = { version = "0.28.0", features = ["bundled"] }
 thiserror = "1.0.37"
 crossbeam = "0.8.2"
 function_name = "0.3.0"
-video = { path = "../video" }
+tlc-video = { path = "../tlc-video" }
+tlc-util = { path = "../tlc-util" }
 
 [dev-dependencies]
 mockall = "0.11.2"

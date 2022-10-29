@@ -2,13 +2,13 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, bail, Result};
 use rusqlite::{params, Connection, Error::QueryReturnedNoRows};
-use video::{FilterMeta, FilterMethod, VideoMeta};
+use tlc_util::time::now_as_millis;
+use tlc_video::{FilterMeta, FilterMethod, VideoMeta};
 
 use super::{CreateRequest, SettingStorage, StartIndex};
 use crate::{
     daq::{InterpMethod, Thermocouple},
     solve::{IterationMethod, PhysicalParam},
-    util,
 };
 
 #[derive(Debug)]
@@ -69,7 +69,7 @@ impl SettingStorage for SqliteSettingStorage {
         } = request;
         let filter_method_str = serde_json::to_string(&filter_method)?;
         let iteration_method_str = serde_json::to_string(&iteration_method)?;
-        let created_at = util::time::now_as_millis();
+        let created_at = now_as_millis();
         let id = self
             .conn
             .prepare(
@@ -152,7 +152,7 @@ impl SettingStorage for SqliteSettingStorage {
 
     fn set_name(&self, name: &str) -> Result<()> {
         let id = self.setting_id()?;
-        let updated_at = util::time::now_as_millis();
+        let updated_at = now_as_millis();
         self.conn.execute(
             "UPDATE settings SET name = ?1, updated_at = ?2 WHERE id = ?3",
             params![name, updated_at, id],
@@ -178,7 +178,7 @@ impl SettingStorage for SqliteSettingStorage {
         let save_root_dir = save_root_dir
             .to_str()
             .ok_or_else(|| anyhow!("invalid save_root_dir: {save_root_dir:?}"))?;
-        let updated_at = util::time::now_as_millis();
+        let updated_at = now_as_millis();
         self.conn.execute(
             "UPDATE settings SET save_root_dir = ?1, updated_at = ?2 WHERE id = ?3",
             params![save_root_dir, updated_at, id],
@@ -215,7 +215,7 @@ impl SettingStorage for SqliteSettingStorage {
                 // than directly invalidate it because within a series of experiments the
                 // position settings should be similar.
                 let video_meta_str = serde_json::to_string(&video_meta)?;
-                let updated_at = util::time::now_as_millis();
+                let updated_at = now_as_millis();
                 // Reset start_frame and start_row but reuse area and thermocouples.
                 self.conn.execute(
                     "
@@ -238,7 +238,7 @@ impl SettingStorage for SqliteSettingStorage {
                 let (h, w) = video_meta.shape;
                 let area = (h / 4, w / 4, h / 2, w / 2);
                 let area_str = serde_json::to_string(&area)?;
-                let updated_at = util::time::now_as_millis();
+                let updated_at = now_as_millis();
                 // Reset start_frame, start_row, area and thermocouples.
                 self.conn.execute(
                     "
@@ -269,7 +269,7 @@ impl SettingStorage for SqliteSettingStorage {
     //         _ => {
     //             let thermocouples = self.thermocouples_optional()?;
     //             let daq_metadata_str = serde_json::to_string(&daq_metadata)?;
-    //             let updated_at = util::time::now_as_millis();
+    //             let updated_at = now_as_millis();
     //
     //             if let Some(thermocouples) = thermocouples {
     //                 if thermocouples
@@ -335,7 +335,7 @@ impl SettingStorage for SqliteSettingStorage {
 
     fn set_start_index(&self, start_frame: usize, start_row: usize) -> Result<()> {
         let id = self.setting_id()?;
-        let updated_at = util::time::now_as_millis();
+        let updated_at = now_as_millis();
         self.conn.execute(
             "UPDATE settings SET start_frame = ?1, start_row = ?2 updated_at = ?3 WHERE id = ?4",
             params![start_frame, start_row, updated_at, id],
@@ -344,7 +344,7 @@ impl SettingStorage for SqliteSettingStorage {
         Ok(())
     }
 
-    fn area(&self) -> Result<(usize, usize, usize, usize)> {
+    fn area(&self) -> Result<(u32, u32, u32, u32)> {
         let id = self.setting_id()?;
         let ret: Option<String> =
             self.conn
@@ -358,7 +358,7 @@ impl SettingStorage for SqliteSettingStorage {
         }
     }
 
-    fn set_area(&self, area: (usize, usize, usize, usize)) -> Result<()> {
+    fn set_area(&self, area: (u32, u32, u32, u32)) -> Result<()> {
         let id = self.setting_id()?;
         let (h, w) = self
             .video_meta_optional()?
@@ -373,7 +373,7 @@ impl SettingStorage for SqliteSettingStorage {
         }
         let area_str = serde_json::to_string(&area)?;
 
-        let updated_at = util::time::now_as_millis();
+        let updated_at = now_as_millis();
         self.conn.execute(
             "UPDATE settings SET area = ?1, updated_at = ?2 WHERE id = ?3",
             params![area_str, updated_at, id],
@@ -412,7 +412,7 @@ impl SettingStorage for SqliteSettingStorage {
     fn set_interp_method(&self, interp_method: InterpMethod) -> Result<()> {
         let id = self.setting_id()?;
         let interp_method_str = serde_json::to_string(&interp_method)?;
-        let updated_at = util::time::now_as_millis();
+        let updated_at = now_as_millis();
         self.conn.execute(
             "UPDATE settings SET interp_method = ?1 updated_at = ?2 WHERE id = ?3",
             params![interp_method_str, updated_at, id],
@@ -441,7 +441,7 @@ impl SettingStorage for SqliteSettingStorage {
     fn set_filter_method(&self, filter_method: FilterMethod) -> Result<()> {
         let id = self.setting_id()?;
         let filter_method_str = serde_json::to_string(&filter_method)?;
-        let updated_at = util::time::now_as_millis();
+        let updated_at = now_as_millis();
         self.conn.execute(
             "UPDATE settings SET filter_method = ?1, updated_at = ?2 WHERE id = ?3",
             params![filter_method_str, updated_at, id],
@@ -464,7 +464,7 @@ impl SettingStorage for SqliteSettingStorage {
     fn set_iteration_method(&self, iteration_method: IterationMethod) -> Result<()> {
         let id = self.setting_id()?;
         let iteration_method_str = serde_json::to_string(&iteration_method)?;
-        let updated_at = util::time::now_as_millis();
+        let updated_at = now_as_millis();
         self.conn.execute(
             "UPDATE settings SET iteration_method = ?1, updated_at = ?2 WHERE id = ?3",
             params![iteration_method_str, updated_at, id],
@@ -504,7 +504,7 @@ impl SettingStorage for SqliteSettingStorage {
 
     fn set_gmax_temperature(&self, gmax_temperature: f64) -> Result<()> {
         let id = self.setting_id()?;
-        let updated_at = util::time::now_as_millis();
+        let updated_at = now_as_millis();
         self.conn.execute(
             "UPDATE settings SET gmax_temperature = ?1, updated_at = ?2 WHERE id = ?3",
             params![gmax_temperature, updated_at, id],
@@ -515,7 +515,7 @@ impl SettingStorage for SqliteSettingStorage {
 
     fn set_solid_thermal_conductivity(&self, solid_thermal_conductivity: f64) -> Result<()> {
         let id = self.setting_id()?;
-        let updated_at = util::time::now_as_millis();
+        let updated_at = now_as_millis();
         self.conn.execute(
             "UPDATE settings SET solid_thermal_conductivity = ?1, updated_at = ?2 WHERE id = ?3",
             params![solid_thermal_conductivity, updated_at, id],
@@ -526,7 +526,7 @@ impl SettingStorage for SqliteSettingStorage {
 
     fn set_solid_thermal_diffusivity(&self, solid_thermal_diffusivity: f64) -> Result<()> {
         let id = self.setting_id()?;
-        let updated_at = util::time::now_as_millis();
+        let updated_at = now_as_millis();
         self.conn.execute(
             "UPDATE settings SET solid_thermal_diffusivity = ?1, updated_at = ?2 WHERE id = ?3",
             params![solid_thermal_diffusivity, updated_at, id],
@@ -537,7 +537,7 @@ impl SettingStorage for SqliteSettingStorage {
 
     fn set_characteristic_length(&self, characteristic_length: f64) -> Result<()> {
         let id = self.setting_id()?;
-        let updated_at = util::time::now_as_millis();
+        let updated_at = now_as_millis();
         self.conn.execute(
             "UPDATE settings SET characteristic_length = ?1, updated_at = ?2 WHERE id = ?3",
             params![characteristic_length, updated_at, id],
@@ -548,7 +548,7 @@ impl SettingStorage for SqliteSettingStorage {
 
     fn set_air_thermal_conductivity(&self, air_thermal_conductivity: f64) -> Result<()> {
         let id = self.setting_id()?;
-        let updated_at = util::time::now_as_millis();
+        let updated_at = now_as_millis();
         self.conn.execute(
             "UPDATE settings SET air_thermal_conductivity = ?1, updated_at = ?2 WHERE id = ?3",
             params![air_thermal_conductivity, updated_at, id],

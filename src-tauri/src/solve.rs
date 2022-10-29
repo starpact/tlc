@@ -196,6 +196,7 @@ pub fn solve(
 ) -> Array2<f64> {
     let dt = 1.0 / frame_rate as f64;
     let shape = interpolator.shape();
+    let shape = (shape.0 as usize, shape.1 as usize);
     let nu1 = match iteration_method {
         IterationMethod::NewtonTangent { h0, max_iter_num } => solve_inner(
             gmax_frame_indexes,
@@ -325,7 +326,7 @@ mod tests {
     }
 
     fn new_temps() -> Array1<f64> {
-        let daq_raw = daq::read_daq("./tests/imp_20000_1.lvm").unwrap().1;
+        let daq_raw = daq::read_daq("../tests/imp_20000_1.lvm").unwrap().1;
         daq_raw.column(3).to_owned()
     }
 

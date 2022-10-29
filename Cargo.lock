@@ -3982,11 +3982,41 @@ dependencies = [
  "tauri-build",
  "thiserror",
  "thread_local",
+ "tlc-util",
+ "tlc-video",
  "tokio",
  "toml",
  "tracing",
  "tracing-subscriber",
- "video",
+]
+
+[[package]]
+name = "tlc-util"
+version = "0.1.0"
+dependencies = [
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "tlc-video"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "base64",
+ "crossbeam",
+ "dwt",
+ "ffmpeg-next",
+ "image",
+ "median",
+ "ndarray",
+ "rayon",
+ "serde",
+ "thread_local",
+ "tlc-util",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -4213,26 +4243,6 @@ name = "version_check"
 version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "49874b5167b65d7193b8aba1567f5c7d93d001cafc34600cee003eda787e483f"
-
-[[package]]
-name = "video"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "base64",
- "crossbeam",
- "dwt",
- "ffmpeg-next",
- "image",
- "median",
- "ndarray",
- "rayon",
- "serde",
- "thread_local",
- "tokio",
- "tracing",
- "tracing-subscriber",
-]
 
 [[package]]
 name = "walkdir"

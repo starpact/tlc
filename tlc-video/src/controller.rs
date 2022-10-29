@@ -62,7 +62,7 @@ pub enum Progress {
 }
 
 impl ProgressBar {
-    fn get(&self) -> Progress {
+    pub(crate) fn get(&self) -> Progress {
         to_progress(self.0.load(Ordering::Relaxed))
     }
 

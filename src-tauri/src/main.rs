@@ -14,7 +14,6 @@ mod request;
 mod setting;
 mod solve;
 mod state;
-mod util;
 
 use crossbeam::channel::bounded;
 use setting::SqliteSettingStorage;
@@ -26,8 +25,8 @@ use old_state::*;
 const SQLITE_FILEPATH: &str = "./var/db.sqlite3";
 
 fn main() {
-    util::log::init();
-    video::init();
+    tlc_util::log::init();
+    tlc_video::init();
 
     let (request_sender, request_receiver) = bounded(3);
     std::thread::spawn(move || state::main_loop(request_receiver));
@@ -47,7 +46,7 @@ fn main() {
             set_video_path,
             get_daq_meta,
             set_daq_path,
-            read_single_frame_base64,
+            decode_frame_base64,
             get_daq_raw,
             synchronize_video_and_daq,
             get_start_index,

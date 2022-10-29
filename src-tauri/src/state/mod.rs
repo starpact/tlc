@@ -1,7 +1,7 @@
 mod outcome_handler;
 mod request_handler;
 
-use std::{path::PathBuf, sync::Arc};
+use std::sync::Arc;
 
 use anyhow::{anyhow, bail, Result};
 use crossbeam::{
@@ -9,8 +9,8 @@ use crossbeam::{
     select,
 };
 use ndarray::ArcArray2;
+use tlc_video::{Packet, Parameters, VideoController, VideoData, VideoMeta};
 use tracing::{error, warn};
-use video::{Packet, Parameters, VideoController, VideoData, VideoMeta};
 
 use crate::{
     daq::{DaqData, DaqMeta, Interpolator},
@@ -38,8 +38,8 @@ enum Outcome {
         parameters: Parameters,
     },
     LoadVideoPacket {
-        video_path: Arc<PathBuf>,
-        packet: Packet,
+        video_meta: Arc<VideoMeta>,
+        packet: Arc<Packet>,
     },
     ReadDaq {
         daq_meta: DaqMeta,
@@ -99,6 +99,10 @@ impl<S: SettingStorage> GlobalState<S> {
                 video_path,
                 responder,
             } => self.on_set_video_path(video_path, responder),
+            DecodeFrameBase64 {
+                frame_index,
+                responder,
+            } => self.on_decode_frame_base64(frame_index, responder),
             GetDaqMeta { responder } => self.on_get_daq_meta(responder),
             SetDaqPath {
                 daq_path,
@@ -123,8 +127,8 @@ impl<S: SettingStorage> GlobalState<S> {
                 video_meta,
                 parameters,
             } => self.on_complete_read_video_meta(video_meta, parameters)?,
-            LoadVideoPacket { video_path, packet } => {
-                self.on_complete_load_video_packet(video_path, packet)?;
+            LoadVideoPacket { video_meta, packet } => {
+                self.on_complete_load_video_packet(video_meta, packet)?;
             }
             ReadDaq { daq_meta, daq_raw } => self.on_complete_read_daq(daq_meta, daq_raw)?,
             Interp { interpolator } => self.on_complete_interp(interpolator)?,

@@ -2,9 +2,9 @@ use std::{path::PathBuf, time::Instant};
 
 use anyhow::Result;
 use ndarray::{ArcArray2, Array2};
+use tlc_video::VideoMeta;
 use tokio::sync::oneshot;
 use tracing::trace;
-use video::VideoMeta;
 
 use crate::daq::{DaqMeta, InterpMethod};
 
@@ -22,6 +22,10 @@ pub enum Request {
     SetVideoPath {
         video_path: PathBuf,
         responder: Responder<()>,
+    },
+    DecodeFrameBase64 {
+        frame_index: usize,
+        responder: Responder<String>,
     },
     GetDaqMeta {
         responder: Responder<DaqMeta>,
@@ -86,13 +90,11 @@ impl<T> Responder<T> {
 
 #[cfg(test)]
 mod tests {
-    use crate::util;
-
     use super::*;
 
     #[test]
     fn test_respond_log_output() {
-        util::log::init();
+        tlc_util::log::init();
 
         let (tx, _rx) = oneshot::channel::<Result<()>>();
         let payload = "some_payload: aaa".to_owned();

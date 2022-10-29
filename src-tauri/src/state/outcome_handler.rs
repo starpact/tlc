@@ -1,8 +1,8 @@
-use std::{path::PathBuf, sync::Arc};
+use std::sync::Arc;
 
 use anyhow::{anyhow, bail, Result};
 use ndarray::ArcArray2;
-use video::{Packet, Parameters, VideoData, VideoMeta};
+use tlc_video::{Packet, Parameters, VideoData, VideoMeta};
 
 use super::GlobalState;
 use crate::{
@@ -28,13 +28,17 @@ impl<S: SettingStorage> GlobalState<S> {
 
     pub fn on_complete_load_video_packet(
         &mut self,
-        video_path: Arc<PathBuf>,
-        packet: Packet,
+        video_meta: Arc<VideoMeta>,
+        packet: Arc<Packet>,
     ) -> Result<()> {
+        if self.setting_storage.video_path()? != *video_meta.path {
+            bail!("video path changed");
+        }
+
         self.video_data
             .as_mut()
             .ok_or_else(|| anyhow!("video not loaded yet"))?
-            .push_packet(&video_path, packet)
+            .push_packet(&video_meta, packet)
     }
 
     pub fn on_complete_read_daq(

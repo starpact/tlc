@@ -5,8 +5,8 @@ use crossbeam::channel::Sender;
 use function_name::named;
 use ndarray::{ArcArray2, Array2};
 use serde::Serialize;
+use tlc_video::{FilterMethod, Progress, VideoMeta};
 use tokio::sync::oneshot::{self, error::RecvError};
-use video::{FilterMethod, Progress, VideoMeta};
 
 use crate::{
     daq::{DaqMeta, InterpMethod},
@@ -108,7 +108,10 @@ pub async fn set_daq_path(daq_path: PathBuf, request_sender: RequestSender<'_>) 
 }
 
 #[tauri::command]
-pub async fn read_single_frame_base64(frame_index: usize, state: State<'_>) -> TlcResult<String> {
+pub async fn decode_frame_base64(
+    frame_index: usize,
+    request_sender: RequestSender<'_>,
+) -> TlcResult<String> {
     // state.read_single_frame_base64(frame_index).await.to()
     todo!()
 }
@@ -153,7 +156,7 @@ pub async fn set_start_row(start_row: usize, state: State<'_>) -> TlcResult<()> 
 }
 
 #[tauri::command]
-pub async fn get_area(state: State<'_>) -> TlcResult<(usize, usize, usize, usize)> {
+pub async fn get_area(state: State<'_>) -> TlcResult<(u32, u32, u32, u32)> {
     state.get_area().await.to()
 }
 

@@ -1,7 +1,7 @@
-use anyhow::Result;
+use anyhow::{bail, Result};
 use dwt::{transform, wavelet::Wavelet, Operation};
 use median::Filter;
-use ndarray::{parallel::prelude::*, prelude::*};
+use ndarray::{parallel::prelude::*, prelude::*, ArcArray2};
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
 
@@ -27,14 +27,14 @@ pub struct FilterMeta {
     pub green2_meta: Green2Meta,
 }
 
-#[instrument(skip(green2, progress_bar))]
+#[instrument(skip(green2, progress_bar), err)]
 pub fn filter_detect_peak(
-    green2: ArrayView2<u8>,
+    green2: ArcArray2<u8>,
     filter_method: FilterMethod,
-    progress_bar: &ProgressBar,
+    progress_bar: ProgressBar,
 ) -> Result<Vec<usize>> {
     let total = green2.dim().1;
-    let _guard = progress_bar.start(total as u32);
+    progress_bar.start(total as u32)?;
 
     use FilterMethod::*;
     match filter_method {
@@ -48,16 +48,33 @@ pub fn filter_detect_peak(
     }
 }
 
-#[instrument(skip(green1))]
-pub fn filter_point(filter_method: FilterMethod, green1: ArrayView1<u8>) -> Vec<u8> {
-    match filter_method {
+#[instrument(skip(green2), err)]
+pub fn filter_point(
+    green2: ArcArray2<u8>,
+    filter_method: FilterMethod,
+    area: (u32, u32, u32, u32),
+    (y, x): (usize, usize),
+) -> Result<Vec<u8>> {
+    let (h, w) = (area.2 as usize, area.3 as usize);
+    if y >= h {
+        bail!("y({y}) out of range({h})");
+    }
+    if x >= w {
+        bail!("x({x}) out of range({w})");
+    }
+    let position = y * w + x;
+    let green1 = green2.column(position);
+
+    let temp_history = match filter_method {
         FilterMethod::No => green1.to_vec(),
         FilterMethod::Median { window_size } => filter_median(green1, window_size),
         FilterMethod::Wavelet { threshold_ratio } => filter_wavelet(green1, threshold_ratio),
-    }
+    };
+
+    Ok(temp_history)
 }
 
-fn apply<F>(green2: ArrayView2<u8>, progress_bar: &ProgressBar, f: F) -> Result<Vec<usize>>
+fn apply<F>(green2: ArcArray2<u8>, progress_bar: ProgressBar, f: F) -> Result<Vec<usize>>
 where
     F: Fn(ArrayView1<u8>) -> usize + Send + Sync,
 {

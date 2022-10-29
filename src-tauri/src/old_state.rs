@@ -8,7 +8,7 @@ use anyhow::{anyhow, bail, Result};
 use ndarray::ArcArray2;
 use serde::{Deserialize, Serialize};
 use tauri::async_runtime::spawn_blocking;
-use video::{FilterMethod, Progress};
+use tlc_video::FilterMethod;
 
 use crate::{
     daq::InterpMethod,
@@ -133,7 +133,7 @@ impl<S: SettingStorage> GlobalState<S> {
     //     self.video_manager.spawn_build_green2().await
     // }
 
-    pub async fn get_area(&self) -> Result<(usize, usize, usize, usize)> {
+    pub async fn get_area(&self) -> Result<(u32, u32, u32, u32)> {
         self.asyncify(|s| s.area()).await
     }
 

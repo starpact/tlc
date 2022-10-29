@@ -1,11 +1,10 @@
-use std::{path::PathBuf, time::Duration};
+use std::{path::PathBuf, sync::Arc, time::Duration};
 
-use anyhow::{bail, Result};
-use crossbeam::channel::{bounded, RecvTimeoutError, Sender};
+use anyhow::Result;
+use crossbeam::channel::{RecvTimeoutError, Sender};
 use ndarray::{ArcArray2, Array2};
-use tokio::sync::oneshot;
+use tlc_video::{read_video, DecoderManager, Packet, ProgressBar, VideoMeta};
 use tracing::{error, info_span, warn};
-use video::{read_video, ProgressBar, VideoMeta};
 
 use super::{GlobalState, Outcome};
 use crate::{
@@ -35,10 +34,28 @@ impl<S: SettingStorage> GlobalState<S> {
 
         let progress_bar = self.video_controller.prepare_read_video();
         self.spawn(|outcome_sender| {
-            if let Err(e) = do_read_video(video_path, responder, outcome_sender, progress_bar) {
-                error!(?e);
-            }
+            do_read_video(video_path, responder, outcome_sender, progress_bar);
         });
+    }
+
+    pub fn on_decode_frame_base64(&self, frame_index: usize, responder: Responder<String>) {
+        let video_data = match self.video_data() {
+            Ok(video_data) => video_data,
+            Err(e) => {
+                responder.respond_err(e);
+                return;
+            }
+        };
+        let packet = match video_data.packet(frame_index) {
+            Ok(packet) => packet,
+            Err(e) => {
+                responder.respond_err(e);
+                return;
+            }
+        };
+        let decoder_manager = video_data.decoder_manager();
+
+        std::thread::spawn(move || responder.respond(decoder_manager.decode_frame_base64(packet)));
     }
 
     pub fn on_get_daq_meta(&self, responder: Responder<DaqMeta>) {
@@ -110,40 +127,44 @@ fn do_read_video(
     responder: Responder<()>,
     outcome_sender: Sender<Outcome>,
     progress_bar: ProgressBar,
-) -> Result<()> {
-    let (meta_tx, meta_rx) = oneshot::channel();
-    let (packet_tx, packet_rx) = bounded(3); // cap doesn't matter
+) {
+    let (video_meta, parameters, packet_rx) = match read_video(video_path, progress_bar) {
+        Ok(ret) => ret,
+        Err(e) => {
+            responder.respond_err(e);
+            return;
+        }
+    };
 
-    std::thread::spawn(move || read_video(video_path, progress_bar, meta_tx, packet_tx));
-    let (video_meta, parameters) = meta_rx.blocking_recv()?;
     let nframes = video_meta.nframes;
     outcome_sender
         .send(Outcome::ReadVideoMeta {
-            video_meta,
+            video_meta: video_meta.clone(),
             parameters,
         })
         .unwrap();
     responder.respond_ok(());
 
     let _span = info_span!("receive_loaded_packets", nframes).entered();
+    let video_meta = Arc::new(video_meta);
     for cnt in 1.. {
-        // This is an ideal cancel point.
         match packet_rx.recv_timeout(Duration::from_secs(1)) {
-            Ok((video_path, packet)) => outcome_sender
-                .send(Outcome::LoadVideoPacket { video_path, packet })
+            Ok(packet) => outcome_sender
+                .send(Outcome::LoadVideoPacket {
+                    video_meta: video_meta.clone(),
+                    packet: Arc::new(packet),
+                })
                 .unwrap(),
-            Err(e) => match e {
-                RecvTimeoutError::Timeout => bail!("load packets got stuck for some reason"),
-                RecvTimeoutError::Disconnected => {
-                    debug_assert_eq!(cnt, nframes);
-                    break;
+            Err(e) => {
+                match e {
+                    RecvTimeoutError::Timeout => error!("load packets got stuck for some reason"),
+                    RecvTimeoutError::Disconnected => debug_assert_eq!(cnt, nframes),
                 }
-            },
+                return;
+            }
         }
         debug_assert!(cnt < nframes);
     }
-
-    Ok(())
 }
 
 fn do_read_daq(daq_path: PathBuf) -> Result<Outcome> {
