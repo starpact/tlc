@@ -7,7 +7,7 @@ use once_cell::sync::OnceCell;
 use plotters::prelude::*;
 use tracing::instrument;
 
-#[instrument(skip(area), fields(plot_path = plot_path.as_ref().to_str().unwrap()), err)]
+#[instrument(skip(area), fields(plot_path = plot_path.as_ref().to_str().unwrap_or_default()), err)]
 pub fn draw_area<P: AsRef<Path>>(
     plot_path: P,
     area: ArrayView2<f64>,

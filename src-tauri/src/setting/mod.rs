@@ -5,16 +5,16 @@ use std::{
     time::Instant,
 };
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 pub use sqlite::SqliteSettingStorage;
+use tlc_video::{FilterMethod, VideoMeta};
 use tokio::io::AsyncWriteExt;
 use tracing::instrument;
 
 use crate::{
-    daq::{DaqMetadata, InterpolationMethod, Thermocouple},
+    daq::{DaqMeta, InterpMethod, Thermocouple},
     solve::{IterationMethod, PhysicalParam},
-    video::{FilterMetadata, FilterMethod, Green2Metadata, VideoMetadata},
 };
 
 #[cfg(test)]
@@ -30,18 +30,18 @@ pub trait SettingStorage: Send + 'static {
     fn set_name(&self, name: &str) -> Result<()>;
     fn save_root_dir(&self) -> Result<PathBuf>;
     fn set_save_root_dir(&self, save_root_dir: &Path) -> Result<()>;
-    fn video_metadata_optional(&self) -> Result<Option<VideoMetadata>>;
-    fn set_video_metadata(&self, video_metadata: &VideoMetadata) -> Result<()>;
-    fn daq_metadata_optional(&self) -> Result<Option<DaqMetadata>>;
-    fn set_daq_metadata(&self, daq_metadata: &DaqMetadata) -> Result<()>;
+    fn video_path(&self) -> Result<PathBuf>;
+    fn set_video_path(&self, video_path: &Path) -> Result<()>;
+    fn daq_path(&self) -> Result<PathBuf>;
+    fn set_daq_path(&self, daq_path: &Path) -> Result<()>;
     fn start_index(&self) -> Result<StartIndex>;
     fn set_start_index(&self, start_frame: usize, start_row: usize) -> Result<()>;
-    fn area(&self) -> Result<(usize, usize, usize, usize)>;
-    fn set_area(&self, area: (usize, usize, usize, usize)) -> Result<()>;
+    fn area(&self) -> Result<(u32, u32, u32, u32)>;
+    fn set_area(&self, area: (u32, u32, u32, u32)) -> Result<()>;
     fn thermocouples_optional(&self) -> Result<Option<Vec<Thermocouple>>>;
-    fn interpolation_method(&self) -> Result<InterpolationMethod>;
-    fn set_interpolation_method(&self, interpolation_method: InterpolationMethod) -> Result<()>;
-    fn filter_metadata(&self) -> Result<FilterMetadata>;
+    fn interp_method(&self) -> Result<InterpMethod>;
+    fn set_interp_method(&self, interpolation_method: InterpMethod) -> Result<()>;
+    fn filter_method(&self) -> Result<FilterMethod>;
     fn set_filter_method(&self, filter_method: FilterMethod) -> Result<()>;
     fn iteration_method(&self) -> Result<IterationMethod>;
     fn set_iteration_method(&self, iteration_method: IterationMethod) -> Result<()>;
@@ -70,174 +70,60 @@ pub trait SettingStorage: Send + 'static {
         Ok(self.output_file_stem()?.with_extension("toml"))
     }
 
-    fn video_metadata(&self) -> Result<VideoMetadata> {
-        self.video_metadata_optional()?
-            .ok_or_else(|| anyhow!("video metadata not loaded yet"))
-    }
-
-    fn daq_metadata(&self) -> Result<DaqMetadata> {
-        self.daq_metadata_optional()?
-            .ok_or_else(|| anyhow!("daq metadata not loaded yet"))
-    }
-
-    fn synchronize_video_and_daq(&self, start_frame: usize, start_row: usize) -> Result<()> {
-        let nframes = self
-            .video_metadata_optional()?
-            .ok_or_else(|| anyhow!("video path unset"))?
-            .nframes;
-        if start_frame >= nframes {
-            bail!("frame_index({start_frame}) out of range({nframes})");
-        }
-        let nrows = self
-            .daq_metadata_optional()?
-            .ok_or_else(|| anyhow!("daq  path unset"))?
-            .nrows;
-        if start_row >= nrows {
-            bail!("row_index({start_row}) out of range({nrows})");
-        }
-
-        self.set_start_index(start_frame, start_row)
-    }
-
-    fn set_start_frame(&self, start_frame: usize) -> Result<()> {
-        let nframes = self
-            .video_metadata_optional()?
-            .ok_or_else(|| anyhow!("video path unset"))?
-            .nframes;
-        if start_frame >= nframes {
-            bail!("frame_index({start_frame}) out of range({nframes})");
-        }
-
-        let StartIndex {
-            start_frame: old_start_frame,
-            start_row: old_start_row,
-        } = self.start_index()?;
-
-        let nrows = self
-            .daq_metadata_optional()?
-            .ok_or_else(|| anyhow!("daq  path unset"))?
-            .nrows;
-        if old_start_row + start_frame < old_start_frame {
-            bail!("invalid start_frame");
-        }
-
-        let start_row = old_start_row + start_frame - old_start_frame;
-        if start_row >= nrows {
-            bail!("row_index({start_row}) out of range({nrows})");
-        }
-
-        self.set_start_index(start_frame, start_row)
-    }
-
-    fn set_start_row(&self, start_row: usize) -> Result<()> {
-        let nrows = self
-            .daq_metadata_optional()?
-            .ok_or_else(|| anyhow!("daq  path unset"))?
-            .nrows;
-        if start_row >= nrows {
-            bail!("row_index({start_row}) out of range({nrows})");
-        }
-
-        let StartIndex {
-            start_frame: old_start_frame,
-            start_row: old_start_row,
-        } = self.start_index()?;
-
-        let nframes = self
-            .video_metadata_optional()?
-            .ok_or_else(|| anyhow!("video path unset"))?
-            .nframes;
-        if old_start_frame + start_row < old_start_row {
-            bail!("invalid start_row");
-        }
-        let start_frame = old_start_frame + start_row - old_start_row;
-        if start_frame >= nframes {
-            bail!("frames_index({start_frame}) out of range({nframes})");
-        }
-
-        self.set_start_index(start_frame, start_row)
-    }
-
-    fn green2_metadata(&self) -> Result<Green2Metadata> {
-        let video_metadata = self
-            .video_metadata_optional()?
-            .ok_or_else(|| anyhow!("video path unset"))?;
-        let nrows = self
-            .daq_metadata_optional()?
-            .ok_or_else(|| anyhow!("daq path unset"))?
-            .nrows;
-        let StartIndex {
-            start_frame,
-            start_row,
-        } = self.start_index()?;
-        let area = self.area()?;
-
-        let nframes = video_metadata.nframes;
-        let cal_num = (nframes - start_frame).min(nrows - start_row);
-
-        Ok(Green2Metadata {
-            start_frame,
-            cal_num,
-            area,
-            video_path: video_metadata.path,
-        })
-    }
-
     fn thermocouples(&self) -> Result<Vec<Thermocouple>> {
         self.thermocouples_optional()?
             .ok_or_else(|| anyhow!("thermocouples not selected yet"))
     }
 }
 
-struct Setting {
+pub struct Setting {
     /// Unique id of this experiment setting, opaque to users.
-    id: i64,
+    pub id: i64,
     /// User defined unique name of this experiment setting.
-    name: String,
+    pub name: String,
 
     /// Directory in which you save your data(parameters and results) of this experiment.
     /// * setting_path: {root_dir}/{expertiment_name}/setting.toml
     /// * nu_matrix_path: {root_dir}/{expertiment_name}/nu_matrix.csv
     /// * plot_matrix_path: {root_dir}/{expertiment_name}/nu_plot.png
-    save_root_dir: String,
+    pub save_root_dir: String,
 
     /// Path and some attributes of video.
-    video_metadata: String,
+    pub video_meta: String,
 
+    pub daq_path: Option<PathBuf>,
     /// Path and some attributes of data acquisition file.
-    daq_metadata: String,
+    pub daq_meta: String,
 
     /// Start frame of video involved in the calculation.
     /// Should be updated simultaneously with start_row.
-    start_frame: Option<usize>,
+    pub start_frame: Option<usize>,
     /// Start row of DAQ data involved in the calculation.
     /// Should be updated simultaneously with start_frame.
-    start_row: Option<usize>,
+    pub start_row: Option<usize>,
 
     /// Calculation area(top_left_y, top_left_x, area_height, area_width).
-    area: Option<String>,
+    pub area: Option<String>,
 
     /// Storage info and positions of thermocouples.
-    thermocouples: Option<String>,
+    pub thermocouples: Option<String>,
 
     /// Filter method of green matrix along the time axis.
-    filter_method: Option<String>,
+    pub filter_method: Option<String>,
 
     /// Interpolation method of thermocouple temperature distribution.
-    iteration_method: String,
+    pub iteration_method: String,
 
     /// All physical parameters used when solving heat transfer equation.
-    gmax_temperature: f64,
-    solid_thermal_conductivity: f64,
-    solid_thermal_diffusivity: f64,
-    characteristic_length: f64,
-    air_thermal_conductivity: f64,
+    pub gmax_temperature: f64,
+    pub solid_thermal_conductivity: f64,
+    pub solid_thermal_diffusivity: f64,
+    pub characteristic_length: f64,
+    pub air_thermal_conductivity: f64,
 
-    /// If process of current experiment has been completed.
-    completed: bool,
-
-    created_at: Instant,
-    updated_at: Instant,
+    pub completed_at: bool,
+    pub created_at: Instant,
+    pub updated_at: Instant,
 }
 
 #[derive(Debug)]
@@ -253,14 +139,14 @@ pub struct CreateRequest {
 #[derive(Debug, Serialize)]
 struct SettingSnapshot {
     save_root_dir: PathBuf,
-    video_metadata: VideoMetadata,
-    daq_metadata: DaqMetadata,
+    video_meta: VideoMeta,
+    daq_meta: DaqMeta,
     start_frame: usize,
     start_row: usize,
     area: (usize, usize, usize, usize),
     thermocouples: Vec<Thermocouple>,
     filter_method: FilterMethod,
-    interpolation_method: InterpolationMethod,
+    interp_method: InterpMethod,
     iteration_method: IterationMethod,
     physical_param: PhysicalParam,
 }

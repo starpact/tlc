@@ -9,6 +9,7 @@
       libraries = with pkgs;[
         dbus.lib
         cairo
+        ffmpeg-full
         gdk-pixbuf
         glib.out
         gtk3
@@ -17,13 +18,14 @@
         webkitgtk
       ];
       packages = with pkgs; [
-        cargo-tauri
         cargo-nextest
+        cargo-tauri
         dbus
-        ffmpeg
+        ffmpeg-full
         glib
         gtk3
         libsoup
+        nodejs
         openssl
         pkg-config
         sqlite
@@ -31,16 +33,19 @@
       ];
     in
     {
-      devShells.x86_64-linux.default = pkgs.mkShell.override { inherit stdenv; } {
-        buildInputs = packages;
-        shellHook =
-          let
-            joinLibs = libs: builtins.concatStringsSep ":" (builtins.map (x: "${x}/lib") libs);
-            libs = joinLibs libraries;
-          in
-          ''
-            export LD_LIBRARY_PATH=${libs}:$LD_LIBRARY_PATH
-          '';
+      devShells = {
+        x86_64-linux.default = pkgs.mkShell.override { inherit stdenv; } {
+          buildInputs = packages;
+          shellHook =
+            let
+              joinLibs = libs: builtins.concatStringsSep ":" (builtins.map (x: "${x}/lib") libs);
+              libs = joinLibs libraries;
+            in
+            ''
+              export LD_LIBRARY_PATH=${libs}:$LD_LIBRARY_PATH
+              export RUST_BACKTRACE=1
+            '';
+        };
       };
     };
 }

@@ -2,13 +2,13 @@ CREATE TABLE IF NOT EXISTS settings (
     id INTEGER PRIMARY KEY,
     name TEXT NOT NULL UNIQUE,
     save_root_dir TEXT NOT NULL,
-    video_metadata TEXT, -- JSON
-    daq_metadata TEXT, -- JSON
+    video_meta TEXT, -- JSON
+    daq_meta TEXT, -- JSON
     start_frame INTEGER,
     start_row INTEGER,
     area TEXT, -- JSON
     thermocouples TEXT, -- JSON
-    interpolation_method TEXT, --JSON
+    interp_method TEXT, --JSON
     filter_method TEXT NOT NULL, -- JSON
     iteration_method TEXT NOT NULL, -- JSON
     gmax_temperature REAL NOT NULL,

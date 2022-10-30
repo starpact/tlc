@@ -178,8 +178,8 @@ fn newtow_down(
 }
 
 impl Default for IterationMethod {
-    fn default() -> Self {
-        Self::NewtonTangent {
+    fn default() -> IterationMethod {
+        IterationMethod::NewtonTangent {
             h0: 50.0,
             max_iter_num: 10,
         }
@@ -196,6 +196,7 @@ pub fn solve(
 ) -> Array2<f64> {
     let dt = 1.0 / frame_rate as f64;
     let shape = interpolator.shape();
+    let shape = (shape.0 as usize, shape.1 as usize);
     let nu1 = match iteration_method {
         IterationMethod::NewtonTangent { h0, max_iter_num } => solve_inner(
             gmax_frame_indexes,
@@ -243,7 +244,7 @@ where
             if gmax_frame_index <= FIRST_FEW_TO_CAL_T0 {
                 return NAN;
             }
-            let temperatures = interpolator.interpolate_single_point(point_index);
+            let temperatures = interpolator.interp_single_point(point_index);
             let temperatures = temperatures.as_slice().unwrap();
             let point_data = PointData {
                 gmax_frame_index,
@@ -257,18 +258,12 @@ where
 #[cfg(test)]
 mod tests {
     extern crate test;
-    use std::{
-        path::PathBuf,
-        sync::{Arc, Mutex},
-    };
-
-    use crate::{daq::DaqManager, setting::MockSettingStorage};
-
-    use super::*;
     use approx::assert_relative_eq;
     use ndarray::Array1;
-    use tauri::async_runtime;
     use test::Bencher;
+
+    use super::*;
+    use crate::daq;
 
     impl PointData<'_> {
         fn iter_no_simd(&self, h: f64, dt: f64, k: f64, a: f64, tw: f64) -> (f64, f64) {
@@ -280,7 +275,7 @@ mod tests {
                 / FIRST_FEW_TO_CAL_T0 as f64;
 
             let (sum, diff_sum) = temperatures
-                .array_windows::<2>()
+                .array_windows()
                 .take(gmax_frame_index)
                 .enumerate()
                 .fold(
@@ -331,17 +326,8 @@ mod tests {
     }
 
     fn new_temps() -> Array1<f64> {
-        async_runtime::block_on(async {
-            let mut mock = MockSettingStorage::new();
-            mock.expect_set_daq_metadata().return_once(|_| Ok(()));
-
-            let daq_manager = DaqManager::new(Arc::new(Mutex::new(mock)));
-            daq_manager
-                .read_daq(Some(PathBuf::from("./tests/imp_20000_1.lvm")))
-                .await
-                .unwrap();
-            daq_manager.raw().unwrap().column(3).to_owned()
-        })
+        let daq_raw = daq::read_daq("../tests/imp_20000_1.lvm").unwrap().1;
+        daq_raw.column(3).to_owned()
     }
 
     const I: (f64, f64, f64, f64, f64) = (100.0, 0.04, 0.19, 1.091e-7, 35.48);

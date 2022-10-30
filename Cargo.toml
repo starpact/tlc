@@ -1,0 +1,13 @@
+[workspace]
+members = ["src-tauri", "tlc-video", "tlc-util"]
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "z"
+
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.dev]
+opt-level = 1

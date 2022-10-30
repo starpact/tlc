@@ -25,3 +25,8 @@ yarn-error.log*
 
 # user
 .direnv
+
+
+# Added by cargo
+
+/target
