@@ -2,11 +2,14 @@ use std::{path::PathBuf, time::Instant};
 
 use anyhow::Result;
 use ndarray::{ArcArray2, Array2};
-use tlc_video::VideoMeta;
+use tlc_video::{FilterMethod, Progress, VideoMeta};
 use tokio::sync::oneshot;
 use tracing::trace;
 
-use crate::daq::{DaqMeta, InterpMethod};
+use crate::{
+    daq::{DaqMeta, InterpMethod},
+    setting::StartIndex,
+};
 
 pub enum Request {
     GetSaveRootDir {
@@ -23,6 +26,9 @@ pub enum Request {
         video_path: PathBuf,
         responder: Responder<()>,
     },
+    GetReadVideoProgress {
+        responder: Responder<Progress>,
+    },
     DecodeFrameBase64 {
         frame_index: usize,
         responder: Responder<String>,
@@ -37,9 +43,45 @@ pub enum Request {
     GetDaqRaw {
         responder: Responder<ArcArray2<f64>>,
     },
+    SynchronizeVideoAndDaq {
+        start_frame: usize,
+        start_row: usize,
+        responder: Responder<()>,
+    },
+    GetStartIndex {
+        responder: Responder<StartIndex>,
+    },
+    SetStartFrame {
+        start_frame: usize,
+        responder: Responder<()>,
+    },
+    SetStartRow {
+        start_row: usize,
+        responder: Responder<()>,
+    },
     SetInterpMethod {
         interp_method: InterpMethod,
         responder: Responder<()>,
+    },
+    GetArea {
+        responder: Responder<(u32, u32, u32, u32)>,
+    },
+    SetArea {
+        area: (u32, u32, u32, u32),
+        responder: Responder<()>,
+    },
+    GetBuildGreen2Progress {
+        responder: Responder<Progress>,
+    },
+    GetFilterMethod {
+        responder: Responder<FilterMethod>,
+    },
+    SetFilterMethod {
+        filter_method: FilterMethod,
+        responder: Responder<()>,
+    },
+    GetDetectPeakProgress {
+        responder: Responder<Progress>,
     },
     InterpSingleFrame {
         frame_index: usize,

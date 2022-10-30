@@ -87,6 +87,31 @@ pub async fn set_video_path(
 
 #[named]
 #[tauri::command]
+pub async fn get_read_video_progress(request_sender: RequestSender<'_>) -> TlcResult<Progress> {
+    let (tx, rx) = oneshot::channel();
+    let _ = request_sender.try_send(GetReadVideoProgress {
+        responder: Responder::new(function_name!(), None, tx),
+    });
+    rx.await.to()
+}
+
+#[named]
+#[tauri::command]
+pub async fn decode_frame_base64(
+    frame_index: usize,
+    request_sender: RequestSender<'_>,
+) -> TlcResult<String> {
+    let (tx, rx) = oneshot::channel();
+    let payload = format!("frame_index: {frame_index}");
+    let _ = request_sender.try_send(DecodeFrameBase64 {
+        frame_index,
+        responder: Responder::new(function_name!(), Some(payload), tx),
+    });
+    rx.await.to()
+}
+
+#[named]
+#[tauri::command]
 pub async fn get_daq_meta(request_sender: RequestSender<'_>) -> TlcResult<DaqMeta> {
     let (tx, rx) = oneshot::channel();
     let _ = request_sender.try_send(GetDaqMeta {
@@ -107,15 +132,6 @@ pub async fn set_daq_path(daq_path: PathBuf, request_sender: RequestSender<'_>) 
     rx.await.to()
 }
 
-#[tauri::command]
-pub async fn decode_frame_base64(
-    frame_index: usize,
-    request_sender: RequestSender<'_>,
-) -> TlcResult<String> {
-    // state.read_single_frame_base64(frame_index).await.to()
-    todo!()
-}
-
 #[named]
 #[tauri::command]
 pub async fn get_daq_raw(request_sender: RequestSender<'_>) -> TlcResult<ArcArray2<f64>> {
@@ -126,89 +142,137 @@ pub async fn get_daq_raw(request_sender: RequestSender<'_>) -> TlcResult<ArcArra
     rx.await.to()
 }
 
+#[named]
 #[tauri::command]
 pub async fn synchronize_video_and_daq(
     start_frame: usize,
     start_row: usize,
-    state: State<'_>,
+    request_sender: RequestSender<'_>,
 ) -> TlcResult<()> {
-    state
-        .synchronize_video_and_daq(start_frame, start_row)
-        .await
-        .to()
+    let (tx, rx) = oneshot::channel();
+    let payload = format!("start_frame: {start_frame}, start_row: {start_row}");
+    let _ = request_sender.try_send(SynchronizeVideoAndDaq {
+        start_frame,
+        start_row,
+        responder: Responder::new(function_name!(), Some(payload), tx),
+    });
+    rx.await.to()
 }
 
+#[named]
 #[tauri::command]
-pub async fn get_start_index(state: State<'_>) -> TlcResult<StartIndex> {
-    state.get_start_index().await.to()
+pub async fn get_start_index(request_sender: RequestSender<'_>) -> TlcResult<StartIndex> {
+    let (tx, rx) = oneshot::channel();
+    let _ = request_sender.try_send(GetStartIndex {
+        responder: Responder::new(function_name!(), None, tx),
+    });
+    rx.await.to()
 }
 
+#[named]
 #[tauri::command]
-pub async fn set_start_frame(start_frame: usize, state: State<'_>) -> TlcResult<()> {
-    // state.set_start_frame(start_frame).await.to()
-    todo!()
+pub async fn set_start_frame(
+    start_frame: usize,
+    request_sender: RequestSender<'_>,
+) -> TlcResult<()> {
+    let (tx, rx) = oneshot::channel();
+    let payload = format!("start_frame: {start_frame}");
+    let _ = request_sender.try_send(SetStartFrame {
+        start_frame,
+        responder: Responder::new(function_name!(), Some(payload), tx),
+    });
+    rx.await.to()
 }
 
+#[named]
 #[tauri::command]
-pub async fn set_start_row(start_row: usize, state: State<'_>) -> TlcResult<()> {
-    // state.set_start_row(start_row).await.to()
-    todo!()
+pub async fn set_start_row(start_row: usize, request_sender: RequestSender<'_>) -> TlcResult<()> {
+    let (tx, rx) = oneshot::channel();
+    let payload = format!("start_row: {start_row}");
+    let _ = request_sender.try_send(SetStartRow {
+        start_row,
+        responder: Responder::new(function_name!(), Some(payload), tx),
+    });
+    rx.await.to()
 }
 
+#[named]
 #[tauri::command]
-pub async fn get_area(state: State<'_>) -> TlcResult<(u32, u32, u32, u32)> {
-    state.get_area().await.to()
+pub async fn get_area(request_sender: RequestSender<'_>) -> TlcResult<(u32, u32, u32, u32)> {
+    let (tx, rx) = oneshot::channel();
+    let _ = request_sender.try_send(GetArea {
+        responder: Responder::new(function_name!(), None, tx),
+    });
+    rx.await.to()
 }
 
+#[named]
 #[tauri::command]
-pub async fn set_area(state: State<'_>, area: (usize, usize, usize, usize)) -> TlcResult<()> {
-    // state.set_area(area).await.to()
-    todo!()
+pub async fn set_area(
+    area: (u32, u32, u32, u32),
+    request_sender: RequestSender<'_>,
+) -> TlcResult<()> {
+    let (tx, rx) = oneshot::channel();
+    let payload = format!("area: {area:?}");
+    let _ = request_sender.try_send(SetArea {
+        area,
+        responder: Responder::new(function_name!(), Some(payload), tx),
+    });
+    rx.await.to()
 }
 
+#[named]
 #[tauri::command]
-pub fn set_thermocouples() -> TlcResult<()> {
-    todo!()
+pub async fn get_build_green2_progress(request_sender: RequestSender<'_>) -> TlcResult<Progress> {
+    let (tx, rx) = oneshot::channel();
+    let _ = request_sender.try_send(GetBuildGreen2Progress {
+        responder: Responder::new(function_name!(), None, tx),
+    });
+    rx.await.to()
 }
 
+#[named]
 #[tauri::command]
-pub async fn build_green2(state: State<'_>) -> TlcResult<()> {
-    // state.spawn_build_green2().await.to()
-    todo!()
+pub async fn get_filter_method(request_sender: RequestSender<'_>) -> TlcResult<FilterMethod> {
+    let (tx, rx) = oneshot::channel();
+    let _ = request_sender.try_send(GetFilterMethod {
+        responder: Responder::new(function_name!(), None, tx),
+    });
+    rx.await.to()
 }
 
+#[named]
 #[tauri::command]
-pub async fn get_build_green2_progress(state: State<'_>) -> TlcResult<Progress> {
-    // Ok(state.get_build_green2_progress())
-    todo!()
-}
-
-#[tauri::command]
-pub async fn get_filter_method(state: State<'_>) -> TlcResult<FilterMethod> {
-    state.get_filter_method().await.to()
-}
-
-#[tauri::command]
-pub async fn set_filter_method(filter_method: FilterMethod, state: State<'_>) -> TlcResult<()> {
-    // state.set_filter_method(filter_method).await.to()
-    todo!()
+pub async fn set_filter_method(
+    filter_method: FilterMethod,
+    request_sender: RequestSender<'_>,
+) -> TlcResult<()> {
+    let (tx, rx) = oneshot::channel();
+    let payload = format!("filter_method: {filter_method:?}");
+    let _ = request_sender.try_send(SetFilterMethod {
+        filter_method,
+        responder: Responder::new(function_name!(), Some(payload), tx),
+    });
+    rx.await.to()
 }
 
 #[tauri::command]
 pub async fn filter_single_point(position: (usize, usize), state: State<'_>) -> TlcResult<Vec<u8>> {
-    // state.filter_single_point(position).await.to()
     todo!()
 }
 
+#[named]
 #[tauri::command]
-pub async fn detect_peak(state: State<'_>) -> TlcResult<()> {
-    // state.spawn_detect_peak().await.to()
-    todo!()
+pub async fn get_detect_peak_progress(request_sender: RequestSender<'_>) -> TlcResult<Progress> {
+    let (tx, rx) = oneshot::channel();
+    let _ = request_sender.try_send(GetDetectPeakProgress {
+        responder: Responder::new(function_name!(), None, tx),
+    });
+    rx.await.to()
 }
 
 #[tauri::command]
-pub async fn get_detect_peak_progress(state: State<'_>) -> TlcResult<Progress> {
-    // Ok(state.get_detect_peak_progress())
+pub fn set_thermocouples() -> TlcResult<()> {
     todo!()
 }
 

@@ -4,7 +4,7 @@ use std::{
     sync::{Arc, Mutex, MutexGuard},
 };
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, Result};
 use ndarray::ArcArray2;
 use serde::{Deserialize, Serialize};
 use tauri::async_runtime::spawn_blocking;
@@ -85,39 +85,6 @@ impl<S: SettingStorage> GlobalState<S> {
         Ok(())
     }
 
-    pub async fn get_save_root_dir(&self) -> Result<PathBuf> {
-        self.asyncify(move |s| s.save_root_dir()).await
-    }
-
-    pub async fn set_save_root_dir(&self, save_root_dir: PathBuf) -> Result<()> {
-        if !save_root_dir.is_dir() {
-            bail!("save_root_dir is not a valid directory: {save_root_dir:?}");
-        }
-        self.asyncify(move |s| s.set_save_root_dir(&save_root_dir))
-            .await
-    }
-
-    // pub async fn read_single_frame_base64(&self, frame_index: usize) -> Result<String> {
-    //     self.video_manager
-    //         .read_single_frame_base64(frame_index)
-    //         .await
-    // }
-
-    // pub async fn get_daq_raw(&self) -> Result<ArcArray2<f64>> {
-    //     self.daq_manager
-    //         .raw()
-    //         .ok_or_else(|| anyhow!("daq path unset"))
-    // }
-
-    pub async fn synchronize_video_and_daq(
-        &self,
-        start_frame: usize,
-        start_row: usize,
-    ) -> Result<()> {
-        self.asyncify(move |s| s.synchronize_video_and_daq(start_frame, start_row))
-            .await
-    }
-
     pub async fn get_start_index(&self) -> Result<StartIndex> {
         self.asyncify(|s| s.start_index()).await
     }
@@ -136,41 +103,6 @@ impl<S: SettingStorage> GlobalState<S> {
     pub async fn get_area(&self) -> Result<(u32, u32, u32, u32)> {
         self.asyncify(|s| s.area()).await
     }
-
-    // pub async fn set_area(&self, area: (usize, usize, usize, usize)) -> Result<()> {
-    //     self.asyncify(move |s| s.set_area(area)).await?;
-    //     self.video_manager.spawn_build_green2().await
-    // }
-
-    // pub async fn spawn_build_green2(&self) -> Result<()> {
-    //     self.video_manager.spawn_build_green2().await
-    // }
-
-    // pub fn get_build_green2_progress(&self) -> Progress {
-    //     self.video_manager.build_green2_progress()
-    // }
-
-    pub async fn get_filter_method(&self) -> Result<FilterMethod> {
-        self.asyncify(|s| Ok(s.filter_meta()?.filter_method)).await
-    }
-
-    // pub async fn set_filter_method(&self, filter_method: FilterMethod) -> Result<()> {
-    //     self.asyncify(move |s| s.set_filter_method(filter_method))
-    //         .await?;
-    //     self.video_manager.spawn_detect_peak().await
-    // }
-
-    // pub async fn filter_single_point(&self, position: (usize, usize)) -> Result<Vec<u8>> {
-    //     self.video_manager.filter_single_point(position).await
-    // }
-
-    // pub async fn spawn_detect_peak(&self) -> Result<()> {
-    //     self.video_manager.spawn_detect_peak().await
-    // }
-
-    // pub fn get_detect_peak_progress(&self) -> Progress {
-    //     self.video_manager.detect_peak_progress_bar()
-    // }
 
     pub async fn get_interpolation_method(&self) -> Result<InterpMethod> {
         self.asyncify(|s| s.interp_method()).await

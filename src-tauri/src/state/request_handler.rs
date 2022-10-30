@@ -3,14 +3,14 @@ use std::{path::PathBuf, sync::Arc, time::Duration};
 use anyhow::Result;
 use crossbeam::channel::{RecvTimeoutError, Sender};
 use ndarray::{ArcArray2, Array2};
-use tlc_video::{read_video, DecoderManager, Packet, ProgressBar, VideoMeta};
-use tracing::{error, info_span, warn};
+use tlc_video::{read_video, FilterMethod, Progress, ProgressBar, VideoMeta};
+use tracing::{error, info_span};
 
 use super::{GlobalState, Outcome};
 use crate::{
-    daq::{interp, read_daq, DaqMeta, InterpMeta, InterpMethod},
+    daq::{read_daq, DaqMeta, InterpMethod},
     request::Responder,
-    setting::SettingStorage,
+    setting::{SettingStorage, StartIndex},
 };
 
 impl<S: SettingStorage> GlobalState<S> {
@@ -18,7 +18,7 @@ impl<S: SettingStorage> GlobalState<S> {
         responder.respond(self.setting_storage.save_root_dir());
     }
 
-    pub fn on_set_save_root_dir(&self, save_root_dir: PathBuf, responder: Responder<()>) {
+    pub fn on_set_save_root_dir(&mut self, save_root_dir: PathBuf, responder: Responder<()>) {
         responder.respond(self.setting_storage.set_save_root_dir(&save_root_dir));
     }
 
@@ -38,16 +38,19 @@ impl<S: SettingStorage> GlobalState<S> {
         });
     }
 
+    pub fn on_get_read_video_progress(&self, responder: Responder<Progress>) {
+        responder.respond_ok(self.video_controller.read_video_progress());
+    }
+
     pub fn on_decode_frame_base64(&self, frame_index: usize, responder: Responder<String>) {
-        let video_data = match self.video_data() {
-            Ok(video_data) => video_data,
-            Err(e) => {
-                responder.respond_err(e);
-                return;
-            }
+        let f = || {
+            let video_data = self.video_data()?;
+            let packet = video_data.packet(frame_index)?;
+            Ok((video_data, packet))
         };
-        let packet = match video_data.packet(frame_index) {
-            Ok(packet) => packet,
+
+        let (video_data, packet) = match f() {
+            Ok(ret) => ret,
             Err(e) => {
                 responder.respond_err(e);
                 return;
@@ -62,14 +65,18 @@ impl<S: SettingStorage> GlobalState<S> {
         responder.respond(self.daq_meta());
     }
 
-    pub fn on_set_daq_path(&self, daq_path: PathBuf, responder: Responder<()>) {
+    pub fn on_set_daq_path(&mut self, daq_path: PathBuf, responder: Responder<()>) {
         if let Err(e) = self.setting_storage.set_daq_path(&daq_path) {
             responder.respond_err(e);
             return;
         }
 
-        self.spawn(|outcome_sender| {
-            dispatch_outcome(do_read_daq(daq_path), outcome_sender, responder)
+        self.spawn(|outcome_sender| match do_read_daq(daq_path) {
+            Ok(outcome) => {
+                outcome_sender.send(outcome).unwrap();
+                responder.respond_ok(());
+            }
+            Err(e) => responder.respond_err(e),
         });
     }
 
@@ -77,19 +84,77 @@ impl<S: SettingStorage> GlobalState<S> {
         responder.respond(self.daq_raw())
     }
 
-    pub fn on_set_interp_method(&self, interp_method: InterpMethod, responder: Responder<()>) {
-        let (interp_meta, daq_raw) = match self.set_interp_method_and_prepare_interp(interp_method)
-        {
-            Ok(ret) => ret,
-            Err(e) => {
-                responder.respond_err(e);
-                return;
-            }
-        };
+    pub fn on_synchronize_video_and_daq(
+        &mut self,
+        start_frame: usize,
+        start_row: usize,
+        responder: Responder<()>,
+    ) {
+        let ret = self.synchronize_video_and_daq(start_frame, start_row);
+        if ret.is_ok() {
+            let _ = self.spwan_build_green2();
+        }
+        responder.respond(ret);
+    }
 
-        self.spawn(|outcome_sender| {
-            dispatch_outcome(do_interp(interp_meta, daq_raw), outcome_sender, responder)
-        });
+    pub fn on_get_start_index(&self, responder: Responder<StartIndex>) {
+        responder.respond(self.setting_storage.start_index());
+    }
+
+    pub fn on_set_start_frame(&mut self, start_frame: usize, responder: Responder<()>) {
+        let ret = self.set_start_frame(start_frame);
+        if ret.is_ok() {
+            let _ = self.spwan_build_green2();
+        }
+        responder.respond(ret);
+    }
+
+    pub fn on_set_start_row(&mut self, start_row: usize, responder: Responder<()>) {
+        let ret = self.set_start_row(start_row);
+        if ret.is_ok() {
+            let _ = self.spwan_build_green2();
+        }
+        responder.respond(ret);
+    }
+
+    pub fn on_get_area(&self, responder: Responder<(u32, u32, u32, u32)>) {
+        responder.respond(self.setting_storage.area());
+    }
+
+    pub fn on_set_area(&mut self, area: (u32, u32, u32, u32), responder: Responder<()>) {
+        let ret = self.set_area(area);
+        if ret.is_ok() {
+            let _ = self.spwan_build_green2();
+        }
+        responder.respond(ret);
+    }
+
+    pub fn on_set_interp_method(&self, interp_method: InterpMethod, responder: Responder<()>) {
+        let ret = self.set_interp_method(interp_method);
+        if ret.is_ok() {
+            let _ = self.spawn_interp();
+        }
+        responder.respond(ret);
+    }
+
+    pub fn on_get_build_green2_progress(&self, responder: Responder<Progress>) {
+        responder.respond_ok(self.video_controller.build_green2_progress());
+    }
+
+    pub fn on_get_filter_method(&self, responder: Responder<FilterMethod>) {
+        responder.respond(self.setting_storage.filter_method());
+    }
+
+    pub fn on_set_filter_method(&mut self, filter_method: FilterMethod, responder: Responder<()>) {
+        let ret = self.set_filter_method(filter_method);
+        if ret.is_ok() {
+            let _ = self.spawn_detect_peak();
+        }
+        responder.respond(ret);
+    }
+
+    pub fn on_get_detect_peak_progress(&self, responder: Responder<Progress>) {
+        responder.respond_ok(self.video_controller.detect_peak_progress());
     }
 
     pub fn on_interp_single_frame(&self, frame_index: usize, responder: Responder<Array2<f64>>) {
@@ -101,24 +166,6 @@ impl<S: SettingStorage> GlobalState<S> {
             }
             Err(e) => responder.respond_err(e),
         }
-    }
-
-    fn set_interp_method_and_prepare_interp(
-        &self,
-        interp_method: InterpMethod,
-    ) -> Result<(InterpMeta, ArcArray2<f64>)> {
-        let daq_raw = self.daq_data()?.daq_raw();
-
-        let mut interp_meta = self.setting_storage.interp_meta()?;
-        if interp_meta.interp_method == interp_method {
-            warn!("interp method unchanged, compute again anyway");
-        } else {
-            interp_meta.interp_method = interp_method;
-        }
-
-        self.setting_storage.set_interp_method(interp_method)?;
-
-        Ok((interp_meta, daq_raw))
     }
 }
 
@@ -173,23 +220,4 @@ fn do_read_daq(daq_path: PathBuf) -> Result<Outcome> {
         daq_meta,
         daq_raw: daq_raw.into_shared(),
     })
-}
-
-fn do_interp(interp_meta: InterpMeta, daq_raw: ArcArray2<f64>) -> Result<Outcome> {
-    let interpolator = interp(interp_meta, daq_raw)?;
-    Ok(Outcome::Interp { interpolator })
-}
-
-fn dispatch_outcome(
-    outcome: Result<Outcome>,
-    outcome_sender: Sender<Outcome>,
-    responder: Responder<()>,
-) {
-    match outcome {
-        Ok(outcome) => {
-            outcome_sender.send(outcome).unwrap();
-            responder.respond_ok(());
-        }
-        Err(e) => responder.respond_err(e),
-    }
 }

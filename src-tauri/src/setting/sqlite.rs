@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{anyhow, bail, Result};
 use rusqlite::{params, Connection, Error::QueryReturnedNoRows};
 use tlc_util::time::now_as_millis;
-use tlc_video::{FilterMeta, FilterMethod, VideoMeta};
+use tlc_video::FilterMethod;
 
 use super::{CreateRequest, SettingStorage, StartIndex};
 use crate::{
@@ -191,73 +191,73 @@ impl SettingStorage for SqliteSettingStorage {
         todo!()
     }
 
-    fn video_meta_optional(&self) -> Result<Option<VideoMeta>> {
-        let id = self.setting_id()?;
-        let ret: Option<String> = self.conn.query_row(
-            "SELECT video_meta FROM settings WHERE id = ?1",
-            [id],
-            |row| row.get(0),
-        )?;
-
-        match ret {
-            Some(s) => Ok(Some(serde_json::from_str(&s)?)),
-            None => Ok(None),
-        }
-    }
-
-    /// Compare the new `video_metadata` with the old one to make minimal updates.
-    fn set_video_meta(&self, video_meta: &VideoMeta) -> Result<()> {
-        let id = self.setting_id()?;
-        match self.video_meta_optional()? {
-            Some(old_video_meta) if old_video_meta.path == video_meta.path => Ok(()),
-            Some(old_video_meta) if old_video_meta.shape == video_meta.shape => {
-                // Most of the time we can make use of the previous position setting rather
-                // than directly invalidate it because within a series of experiments the
-                // position settings should be similar.
-                let video_meta_str = serde_json::to_string(&video_meta)?;
-                let updated_at = now_as_millis();
-                // Reset start_frame and start_row but reuse area and thermocouples.
-                self.conn.execute(
-                    "
-                    UPDATE settings SET
-                        video_meta = ?1,
-                        start_frame = NULL,
-                        start_row = NULL,
-                        updated_at = ?2
-                    WHERE id = ?3
-                    ",
-                    params![video_meta_str, updated_at, id],
-                )?;
-                Ok(())
-            }
-            _ => {
-                // We will only get this point when working with a brand new setting
-                // or different camera parameters. Then we just put the select box in
-                // the center by default.
-                let video_meta_str = serde_json::to_string(&video_meta)?;
-                let (h, w) = video_meta.shape;
-                let area = (h / 4, w / 4, h / 2, w / 2);
-                let area_str = serde_json::to_string(&area)?;
-                let updated_at = now_as_millis();
-                // Reset start_frame, start_row, area and thermocouples.
-                self.conn.execute(
-                    "
-                    UPDATE settings SET
-                        video_meta = ?1,
-                        start_frame = NULL,
-                        start_row = NULL,
-                        area = ?2,
-                        thermocouples = NULL,
-                        updated_at = ?3
-                    WHERE id = ?4
-                    ",
-                    params![video_meta_str, area_str, updated_at, id],
-                )?;
-                Ok(())
-            }
-        }
-    }
-
+    // fn video_meta_optional(&self) -> Result<Option<VideoMeta>> {
+    //     let id = self.setting_id()?;
+    //     let ret: Option<String> = self.conn.query_row(
+    //         "SELECT video_meta FROM settings WHERE id = ?1",
+    //         [id],
+    //         |row| row.get(0),
+    //     )?;
+    //
+    //     match ret {
+    //         Some(s) => Ok(Some(serde_json::from_str(&s)?)),
+    //         None => Ok(None),
+    //     }
+    // }
+    //
+    // /// Compare the new `video_metadata` with the old one to make minimal updates.
+    // fn set_video_meta(&self, video_meta: &VideoMeta) -> Result<()> {
+    //     let id = self.setting_id()?;
+    //     match self.video_meta_optional()? {
+    //         Some(old_video_meta) if old_video_meta.path == video_meta.path => Ok(()),
+    //         Some(old_video_meta) if old_video_meta.shape == video_meta.shape => {
+    //             // Most of the time we can make use of the previous position setting rather
+    //             // than directly invalidate it because within a series of experiments the
+    //             // position settings should be similar.
+    //             let video_meta_str = serde_json::to_string(&video_meta)?;
+    //             let updated_at = now_as_millis();
+    //             // Reset start_frame and start_row but reuse area and thermocouples.
+    //             self.conn.execute(
+    //                 "
+    //                 UPDATE settings SET
+    //                     video_meta = ?1,
+    //                     start_frame = NULL,
+    //                     start_row = NULL,
+    //                     updated_at = ?2
+    //                 WHERE id = ?3
+    //                 ",
+    //                 params![video_meta_str, updated_at, id],
+    //             )?;
+    //             Ok(())
+    //         }
+    //         _ => {
+    //             // We will only get this point when working with a brand new setting
+    //             // or different camera parameters. Then we just put the select box in
+    //             // the center by default.
+    //             let video_meta_str = serde_json::to_string(&video_meta)?;
+    //             let (h, w) = video_meta.shape;
+    //             let area = (h / 4, w / 4, h / 2, w / 2);
+    //             let area_str = serde_json::to_string(&area)?;
+    //             let updated_at = now_as_millis();
+    //             // Reset start_frame, start_row, area and thermocouples.
+    //             self.conn.execute(
+    //                 "
+    //                 UPDATE settings SET
+    //                     video_meta = ?1,
+    //                     start_frame = NULL,
+    //                     start_row = NULL,
+    //                     area = ?2,
+    //                     thermocouples = NULL,
+    //                     updated_at = ?3
+    //                 WHERE id = ?4
+    //                 ",
+    //                 params![video_meta_str, area_str, updated_at, id],
+    //             )?;
+    //             Ok(())
+    //         }
+    //     }
+    // }
+    //
     fn set_video_path(&self, _video_path: &Path) -> Result<()> {
         todo!()
     }
@@ -360,17 +360,6 @@ impl SettingStorage for SqliteSettingStorage {
 
     fn set_area(&self, area: (u32, u32, u32, u32)) -> Result<()> {
         let id = self.setting_id()?;
-        let (h, w) = self
-            .video_meta_optional()?
-            .ok_or_else(|| anyhow!("video path unset"))?
-            .shape;
-        let (tl_y, tl_x, cal_h, cal_w) = area;
-        if tl_x + cal_w > w {
-            bail!("area X out of range: top_left_x({tl_x}) + width({cal_w}) > video_width({w})");
-        }
-        if tl_y + cal_h > h {
-            bail!("area Y out of range: top_left_y({tl_y}) + height({cal_h}) > video_height({h})");
-        }
         let area_str = serde_json::to_string(&area)?;
 
         let updated_at = now_as_millis();
@@ -421,7 +410,7 @@ impl SettingStorage for SqliteSettingStorage {
         Ok(())
     }
 
-    fn filter_meta(&self) -> Result<FilterMeta> {
+    fn filter_method(&self) -> Result<FilterMethod> {
         let id = self.setting_id()?;
         let filter_method_str: String = self.conn.query_row(
             "SELECT filter_method FROM settings WHERE id = ?1",
@@ -429,13 +418,7 @@ impl SettingStorage for SqliteSettingStorage {
             |row| row.get(0),
         )?;
 
-        let filter_method = serde_json::from_str(&filter_method_str)?;
-        let green2_meta = self.green2_meta()?;
-
-        Ok(FilterMeta {
-            filter_method,
-            green2_meta,
-        })
+        Ok(serde_json::from_str(&filter_method_str)?)
     }
 
     fn set_filter_method(&self, filter_method: FilterMethod) -> Result<()> {

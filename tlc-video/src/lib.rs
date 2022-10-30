@@ -9,11 +9,11 @@ use std::{path::PathBuf, sync::Arc};
 
 use anyhow::{anyhow, bail, Result};
 pub use ffmpeg::codec::{packet::Packet, Parameters};
-use ndarray::{prelude::*, ArcArray2};
+use ndarray::ArcArray2;
 use serde::{Deserialize, Serialize};
 
 pub use controller::{Progress, ProgressBar, VideoController};
-pub use detect_peak::{filter_detect_peak, filter_point, FilterMeta, FilterMethod};
+pub use detect_peak::{filter_detect_peak, filter_point, FilterMethod, GmaxMeta};
 pub use read_video::read_video;
 
 pub use decode::DecoderManager;
@@ -58,10 +58,10 @@ pub struct VideoMeta {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Green2Meta {
+    pub video_meta: VideoMeta,
     pub start_frame: usize,
     pub cal_num: usize,
     pub area: (u32, u32, u32, u32),
-    pub video_path: PathBuf,
 }
 
 pub fn init() {
@@ -97,6 +97,13 @@ impl VideoData {
             .ok_or_else(|| anyhow!("packet not loaded yet"))
     }
 
+    pub fn packets(&self) -> Result<Vec<Arc<Packet>>> {
+        if self.packets.len() < self.video_meta.nframes {
+            bail!("video not loaded yet");
+        }
+        Ok(self.packets.clone())
+    }
+
     pub fn decoder_manager(&self) -> DecoderManager {
         self.decoder_manager.clone()
     }
@@ -105,16 +112,16 @@ impl VideoData {
         self.green2.clone()
     }
 
-    pub fn set_green2(&mut self, green2: Array2<u8>) {
-        self.green2 = Some(green2.into_shared());
+    pub fn set_green2(&mut self, green2: Option<ArcArray2<u8>>) {
+        self.green2 = green2;
     }
 
     pub fn gmax_frame_indexes(&self) -> Option<Arc<Vec<usize>>> {
         self.gmax_frame_indexes.clone()
     }
 
-    pub fn set_gmax_frame_indexes(&mut self, gmax_frame_indexes: Vec<usize>) {
-        self.gmax_frame_indexes = Some(Arc::new(gmax_frame_indexes));
+    pub fn set_gmax_frame_indexes(&mut self, gmax_frame_indexes: Option<Arc<Vec<usize>>>) {
+        self.gmax_frame_indexes = gmax_frame_indexes;
     }
 
     pub fn push_packet(&mut self, video_meta: &VideoMeta, packet: Arc<Packet>) -> Result<()> {

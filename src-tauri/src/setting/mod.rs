@@ -5,15 +5,15 @@ use std::{
     time::Instant,
 };
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 pub use sqlite::SqliteSettingStorage;
-use tlc_video::{FilterMeta, FilterMethod, Green2Meta, VideoMeta};
+use tlc_video::{FilterMethod, VideoMeta};
 use tokio::io::AsyncWriteExt;
 use tracing::instrument;
 
 use crate::{
-    daq::{DaqMeta, InterpMeta, InterpMethod, Thermocouple},
+    daq::{DaqMeta, InterpMethod, Thermocouple},
     solve::{IterationMethod, PhysicalParam},
 };
 
@@ -31,8 +31,6 @@ pub trait SettingStorage: Send + 'static {
     fn save_root_dir(&self) -> Result<PathBuf>;
     fn set_save_root_dir(&self, save_root_dir: &Path) -> Result<()>;
     fn video_path(&self) -> Result<PathBuf>;
-    fn video_meta_optional(&self) -> Result<Option<VideoMeta>>;
-    fn set_video_meta(&self, video_meta: &VideoMeta) -> Result<()>;
     fn set_video_path(&self, video_path: &Path) -> Result<()>;
     fn daq_path(&self) -> Result<PathBuf>;
     fn set_daq_path(&self, daq_path: &Path) -> Result<()>;
@@ -43,7 +41,7 @@ pub trait SettingStorage: Send + 'static {
     fn thermocouples_optional(&self) -> Result<Option<Vec<Thermocouple>>>;
     fn interp_method(&self) -> Result<InterpMethod>;
     fn set_interp_method(&self, interpolation_method: InterpMethod) -> Result<()>;
-    fn filter_meta(&self) -> Result<FilterMeta>;
+    fn filter_method(&self) -> Result<FilterMethod>;
     fn set_filter_method(&self, filter_method: FilterMethod) -> Result<()>;
     fn iteration_method(&self) -> Result<IterationMethod>;
     fn set_iteration_method(&self, iteration_method: IterationMethod) -> Result<()>;
@@ -72,135 +70,9 @@ pub trait SettingStorage: Send + 'static {
         Ok(self.output_file_stem()?.with_extension("toml"))
     }
 
-    fn video_meta(&self) -> Result<VideoMeta> {
-        self.video_meta_optional()?
-            .ok_or_else(|| anyhow!("video meta not loaded yet"))
-    }
-
-    fn synchronize_video_and_daq(&self, start_frame: usize, start_row: usize) -> Result<()> {
-        let nframes = self
-            .video_meta_optional()?
-            .ok_or_else(|| anyhow!("video path unset"))?
-            .nframes;
-        if start_frame >= nframes {
-            bail!("frame_index({start_frame}) out of range({nframes})");
-        }
-        // let nrows = self
-        //     .daq_metadata_optional()?
-        //     .ok_or_else(|| anyhow!("daq  path unset"))?
-        //     .nrows;
-        // if start_row >= nrows {
-        //     bail!("row_index({start_row}) out of range({nrows})");
-        // }
-
-        self.set_start_index(start_frame, start_row)
-    }
-
-    fn set_start_frame(&self, start_frame: usize) -> Result<()> {
-        let nframes = self
-            .video_meta_optional()?
-            .ok_or_else(|| anyhow!("video path unset"))?
-            .nframes;
-        if start_frame >= nframes {
-            bail!("frame_index({start_frame}) out of range({nframes})");
-        }
-
-        let StartIndex {
-            start_frame: old_start_frame,
-            start_row: old_start_row,
-        } = self.start_index()?;
-
-        // let nrows = self
-        //     .daq_metadata_optional()?
-        //     .ok_or_else(|| anyhow!("daq  path unset"))?
-        //     .nrows;
-        if old_start_row + start_frame < old_start_frame {
-            bail!("invalid start_frame");
-        }
-
-        let start_row = old_start_row + start_frame - old_start_frame;
-        // if start_row >= nrows {
-        //     bail!("row_index({start_row}) out of range({nrows})");
-        // }
-
-        self.set_start_index(start_frame, start_row)
-    }
-
-    fn set_start_row(&self, start_row: usize) -> Result<()> {
-        // let nrows = self
-        //     .daq_metadata_optional()?
-        //     .ok_or_else(|| anyhow!("daq  path unset"))?
-        //     .nrows;
-        // if start_row >= nrows {
-        //     bail!("row_index({start_row}) out of range({nrows})");
-        // }
-
-        let StartIndex {
-            start_frame: old_start_frame,
-            start_row: old_start_row,
-        } = self.start_index()?;
-
-        let nframes = self
-            .video_meta_optional()?
-            .ok_or_else(|| anyhow!("video path unset"))?
-            .nframes;
-        if old_start_frame + start_row < old_start_row {
-            bail!("invalid start_row");
-        }
-        let start_frame = old_start_frame + start_row - old_start_row;
-        if start_frame >= nframes {
-            bail!("frames_index({start_frame}) out of range({nframes})");
-        }
-
-        self.set_start_index(start_frame, start_row)
-    }
-
-    fn green2_meta(&self) -> Result<Green2Meta> {
-        let video_meta = self
-            .video_meta_optional()?
-            .ok_or_else(|| anyhow!("video path unset"))?;
-        // let nrows = self
-        // .daq_metadata_optional()?
-        // .ok_or_else(|| anyhow!("daq path unset"))?
-        // .nrows;
-        let StartIndex {
-            start_frame,
-            start_row,
-        } = self.start_index()?;
-        let area = self.area()?;
-
-        let nframes = video_meta.nframes;
-        // let cal_num = (nframes - start_frame).min(nrows - start_row);
-        let cal_num = 1;
-
-        Ok(Green2Meta {
-            start_frame,
-            cal_num,
-            area,
-            video_path: video_meta.path,
-        })
-    }
-
     fn thermocouples(&self) -> Result<Vec<Thermocouple>> {
         self.thermocouples_optional()?
             .ok_or_else(|| anyhow!("thermocouples not selected yet"))
-    }
-
-    fn interp_meta(&self) -> Result<InterpMeta> {
-        let daq_path = self.daq_path()?;
-        let start_row = self.start_index()?.start_row;
-        let Green2Meta { cal_num, area, .. } = self.green2_meta()?;
-        let thermocouples = self.thermocouples()?;
-        let interp_method = self.interp_method()?;
-
-        Ok(InterpMeta {
-            daq_path,
-            start_row,
-            cal_num,
-            area,
-            interp_method,
-            thermocouples,
-        })
     }
 }
 

@@ -24,7 +24,7 @@ use thread_local::ThreadLocal;
 use tokio::sync::oneshot;
 use tracing::instrument;
 
-use crate::{Progress, ProgressBar};
+use crate::{Green2Meta, Progress, ProgressBar, VideoMeta};
 
 #[derive(Clone)]
 pub struct DecoderManager {
@@ -96,12 +96,17 @@ impl DecoderManager {
     pub fn decode_all(
         &self,
         packets: Vec<Arc<Packet>>,
-        start_frame: usize,
-        cal_num: usize,
-        shape: (u32, u32),
-        area: (u32, u32, u32, u32),
+        green2_meta: &Green2Meta,
         progress_bar: ProgressBar,
     ) -> Result<Array2<u8>> {
+        let Green2Meta {
+            video_meta: VideoMeta { shape, .. },
+            start_frame,
+            cal_num,
+            area,
+            ..
+        } = *green2_meta;
+
         self.inner
             .decode_all(packets, start_frame, cal_num, shape, area, progress_bar)
     }
@@ -334,15 +339,22 @@ mod tests {
 
         let packets = packet_rx.into_iter().map(Arc::new).collect();
         let progress_bar = ProgressBar::default();
+
+        let green2_meta = Green2Meta {
+            video_meta: VideoMeta {
+                path: Default::default(),
+                frame_rate: Default::default(),
+                nframes: Default::default(),
+                shape: (1024, 1280),
+                read_at: Default::default(),
+            },
+            start_frame,
+            cal_num,
+            area: (10, 10, 600, 800),
+        };
+
         decode_manager
-            .decode_all(
-                packets,
-                start_frame,
-                cal_num,
-                (1024, 1280),
-                (10, 10, 600, 800),
-                progress_bar,
-            )
+            .decode_all(packets, &green2_meta, progress_bar)
             .unwrap();
     }
 }
