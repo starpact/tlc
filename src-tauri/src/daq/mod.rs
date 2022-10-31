@@ -3,7 +3,6 @@ mod raw;
 
 use std::path::PathBuf;
 
-use anyhow::{bail, Result};
 use ndarray::ArcArray2;
 use serde::{Deserialize, Serialize};
 
@@ -53,12 +52,7 @@ impl DaqData {
         self.interpolator.as_ref()
     }
 
-    pub fn set_interpolator(&mut self, interpolator: Interpolator) -> Result<()> {
-        if self.daq_meta.path != interpolator.meta().daq_path {
-            bail!("daq path changed");
-        }
-        self.interpolator = Some(interpolator);
-
-        Ok(())
+    pub fn set_interpolator(&mut self, interpolator: Option<Interpolator>) {
+        self.interpolator = interpolator;
     }
 }

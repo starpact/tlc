@@ -8,7 +8,6 @@
 
 mod commands;
 mod daq;
-mod old_state;
 mod post_processing;
 mod request;
 mod setting;
@@ -32,6 +31,9 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             create_setting,
             switch_setting,
+            delete_setting,
+            get_name,
+            set_name,
             get_save_root_dir,
             set_save_root_dir,
             get_video_meta,
@@ -47,18 +49,20 @@ fn main() {
             set_start_row,
             get_area,
             set_area,
+            get_thermocouples,
             set_thermocouples,
             get_build_green2_progress,
             get_filter_method,
             set_filter_method,
-            filter_single_point,
+            filter_point,
             get_detect_peak_progress,
             get_detect_peak_progress,
-            get_interpolation_method,
+            get_interp_method,
             set_interp_method,
-            interp_single_frame,
+            interp_frame,
             get_iteration_method,
             set_iteration_method,
+            get_physical_param,
             set_gmax_temperature,
             set_solid_thermal_conductivity,
             set_solid_thermal_diffusivity,

@@ -9,30 +9,79 @@ use tlc_video::{FilterMethod, Progress, VideoMeta};
 use tokio::sync::oneshot::{self, error::RecvError};
 
 use crate::{
-    daq::{DaqMeta, InterpMethod},
-    old_state::{CreateSettingRequest, GlobalState, NuData},
+    daq::{DaqMeta, InterpMethod, Thermocouple},
     request::{
+        NuView,
         Request::{self, *},
-        Responder,
+        Responder, SettingData,
     },
-    setting::{SqliteSettingStorage, StartIndex},
-    solve::IterationMethod,
+    setting::StartIndex,
+    solve::{IterationMethod, PhysicalParam},
 };
-
-type State<'a> = tauri::State<'a, GlobalState<SqliteSettingStorage>>;
 
 type RequestSender<'a> = tauri::State<'a, Sender<Request>>;
 
 type TlcResult<T> = Result<T, String>;
 
+#[named]
 #[tauri::command]
-pub async fn create_setting(request: CreateSettingRequest, state: State<'_>) -> TlcResult<()> {
-    state.create_setting(request).await.to()
+pub async fn create_setting(
+    create_setting: SettingData,
+    request_sender: RequestSender<'_>,
+) -> TlcResult<()> {
+    let (tx, rx) = oneshot::channel();
+    let payload = format!("create_setting: {create_setting:?}");
+    let _ = request_sender.try_send(CreateSetting {
+        create_setting: Box::new(create_setting),
+        responder: Responder::new(function_name!(), Some(payload), tx),
+    });
+    rx.await.to()
 }
 
+#[named]
 #[tauri::command]
-pub async fn switch_setting(setting_id: i64, state: State<'_>) -> TlcResult<()> {
-    state.switch_setting(setting_id).await.to()
+pub async fn switch_setting(setting_id: i64, request_sender: RequestSender<'_>) -> TlcResult<()> {
+    let (tx, rx) = oneshot::channel();
+    let payload = format!("setting_id: {setting_id:?}");
+    let _ = request_sender.try_send(SwitchSetting {
+        setting_id,
+        responder: Responder::new(function_name!(), Some(payload), tx),
+    });
+    rx.await.to()
+}
+
+#[named]
+#[tauri::command]
+pub async fn delete_setting(setting_id: i64, request_sender: RequestSender<'_>) -> TlcResult<()> {
+    let (tx, rx) = oneshot::channel();
+    let payload = format!("setting_id: {setting_id:?}");
+    let _ = request_sender.try_send(DeleteSetting {
+        setting_id,
+        responder: Responder::new(function_name!(), Some(payload), tx),
+    });
+    rx.await.to()
+}
+
+#[named]
+#[tauri::command]
+pub async fn get_name(request_sender: RequestSender<'_>) -> TlcResult<String> {
+    let (tx, rx) = oneshot::channel();
+    let _ = request_sender.try_send(GetName {
+        responder: Responder::new(function_name!(), None, tx),
+    });
+    rx.await.to()
+}
+
+#[named]
+#[tauri::command]
+pub async fn set_name(name: String, request_sender: RequestSender<'_>) -> TlcResult<()> {
+    let (tx, rx) = oneshot::channel();
+    let payload = format!("name: {name:?}");
+    let _ = request_sender.try_send(SetName {
+        name,
+        responder: Responder::new(function_name!(), Some(payload), tx),
+    });
+    rx.await.to()
 }
 
 #[named]
@@ -256,11 +305,6 @@ pub async fn set_filter_method(
     rx.await.to()
 }
 
-#[tauri::command]
-pub async fn filter_single_point(position: (usize, usize), state: State<'_>) -> TlcResult<Vec<u8>> {
-    todo!()
-}
-
 #[named]
 #[tauri::command]
 pub async fn get_detect_peak_progress(request_sender: RequestSender<'_>) -> TlcResult<Progress> {
@@ -271,14 +315,54 @@ pub async fn get_detect_peak_progress(request_sender: RequestSender<'_>) -> TlcR
     rx.await.to()
 }
 
+#[named]
 #[tauri::command]
-pub fn set_thermocouples() -> TlcResult<()> {
-    todo!()
+pub async fn filter_point(
+    position: (usize, usize),
+    request_sender: RequestSender<'_>,
+) -> TlcResult<Vec<u8>> {
+    let (tx, rx) = oneshot::channel();
+    let payload = format!("position: {position:?}");
+    let _ = request_sender.try_send(FilterPoint {
+        position,
+        responder: Responder::new(function_name!(), Some(payload), tx),
+    });
+    rx.await.to()
 }
 
+#[named]
 #[tauri::command]
-pub async fn get_interpolation_method(state: State<'_>) -> TlcResult<InterpMethod> {
-    state.get_interpolation_method().await.to()
+pub async fn get_thermocouples(request_sender: RequestSender<'_>) -> TlcResult<Vec<Thermocouple>> {
+    let (tx, rx) = oneshot::channel();
+    let _ = request_sender.try_send(GetThermocouples {
+        responder: Responder::new(function_name!(), None, tx),
+    });
+    rx.await.to()
+}
+
+#[named]
+#[tauri::command]
+pub async fn set_thermocouples(
+    thermocouples: Vec<Thermocouple>,
+    request_sender: RequestSender<'_>,
+) -> TlcResult<()> {
+    let (tx, rx) = oneshot::channel();
+    let payload = format!("thermocouples: {thermocouples:?}");
+    let _ = request_sender.try_send(SetThermocouples {
+        thermocouples,
+        responder: Responder::new(function_name!(), Some(payload), tx),
+    });
+    rx.await.to()
+}
+
+#[named]
+#[tauri::command]
+pub async fn get_interp_method(request_sender: RequestSender<'_>) -> TlcResult<InterpMethod> {
+    let (tx, rx) = oneshot::channel();
+    let _ = request_sender.try_send(GetInterpMethod {
+        responder: Responder::new(function_name!(), None, tx),
+    });
+    rx.await.to()
 }
 
 #[named]
@@ -298,84 +382,142 @@ pub async fn set_interp_method(
 
 #[named]
 #[tauri::command]
-pub async fn interp_single_frame(
+pub async fn interp_frame(
     frame_index: usize,
     request_sender: RequestSender<'_>,
 ) -> TlcResult<Array2<f64>> {
     let (tx, rx) = oneshot::channel();
     let payload = format!("frame_index: {frame_index}");
-    let _ = request_sender.try_send(InterpSingleFrame {
+    let _ = request_sender.try_send(InterpFrame {
         frame_index,
         responder: Responder::new(function_name!(), Some(payload), tx),
     });
     rx.await.to()
 }
 
+#[named]
 #[tauri::command]
-pub async fn get_iteration_method(state: State<'_>) -> TlcResult<IterationMethod> {
-    state.get_iteration_method().await.to()
+pub async fn get_iteration_method(request_sender: RequestSender<'_>) -> TlcResult<IterationMethod> {
+    let (tx, rx) = oneshot::channel();
+    let _ = request_sender.try_send(GetIterationMethod {
+        responder: Responder::new(function_name!(), None, tx),
+    });
+    rx.await.to()
 }
 
+#[named]
 #[tauri::command]
 pub async fn set_iteration_method(
-    state: State<'_>,
     iteration_method: IterationMethod,
+    request_sender: RequestSender<'_>,
 ) -> TlcResult<()> {
-    state.set_iteration_method(iteration_method).await.to()
+    let (tx, rx) = oneshot::channel();
+    let payload = format!("iteration_method: {iteration_method:?}");
+    let _ = request_sender.try_send(SetIterationMethod {
+        iteration_method,
+        responder: Responder::new(function_name!(), Some(payload), tx),
+    });
+    rx.await.to()
 }
 
+#[named]
 #[tauri::command]
-pub async fn set_gmax_temperature(gmax_temperature: f64, state: State<'_>) -> TlcResult<()> {
-    state.set_gmax_temperature(gmax_temperature).await.to()
+pub async fn get_physical_param(request_sender: RequestSender<'_>) -> TlcResult<PhysicalParam> {
+    let (tx, rx) = oneshot::channel();
+    let _ = request_sender.try_send(GetPhysicalParam {
+        responder: Responder::new(function_name!(), None, tx),
+    });
+    rx.await.to()
 }
 
+#[named]
+#[tauri::command]
+pub async fn set_gmax_temperature(
+    gmax_temperature: f64,
+    request_sender: RequestSender<'_>,
+) -> TlcResult<()> {
+    let (tx, rx) = oneshot::channel();
+    let payload = format!("gmax_temperature: {gmax_temperature}");
+    let _ = request_sender.try_send(SetGmaxTemperature {
+        gmax_temperature,
+        responder: Responder::new(function_name!(), Some(payload), tx),
+    });
+    rx.await.to()
+}
+
+#[named]
 #[tauri::command]
 pub async fn set_solid_thermal_conductivity(
     solid_thermal_conductivity: f64,
-    state: State<'_>,
+    request_sender: RequestSender<'_>,
 ) -> TlcResult<()> {
-    state
-        .set_solid_thermal_conductivity(solid_thermal_conductivity)
-        .await
-        .to()
+    let (tx, rx) = oneshot::channel();
+    let payload = format!("solid_thermal_conductivity: {solid_thermal_conductivity}");
+    let _ = request_sender.try_send(SetSolidThermalConductivity {
+        solid_thermal_conductivity,
+        responder: Responder::new(function_name!(), Some(payload), tx),
+    });
+    rx.await.to()
 }
 
+#[named]
 #[tauri::command]
 pub async fn set_solid_thermal_diffusivity(
     solid_thermal_diffusivity: f64,
-    state: State<'_>,
+    request_sender: RequestSender<'_>,
 ) -> TlcResult<()> {
-    state
-        .set_solid_thermal_diffusivity(solid_thermal_diffusivity)
-        .await
-        .to()
+    let (tx, rx) = oneshot::channel();
+    let payload = format!("solid_thermal_diffusivity: {solid_thermal_diffusivity}");
+    let _ = request_sender.try_send(SetSolidThermalDiffusivity {
+        solid_thermal_diffusivity,
+        responder: Responder::new(function_name!(), Some(payload), tx),
+    });
+    rx.await.to()
 }
 
+#[named]
 #[tauri::command]
 pub async fn set_characteristic_length(
     characteristic_length: f64,
-    state: State<'_>,
+    request_sender: RequestSender<'_>,
 ) -> TlcResult<()> {
-    state
-        .set_characteristic_length(characteristic_length)
-        .await
-        .to()
+    let (tx, rx) = oneshot::channel();
+    let payload = format!("characteristic_length: {characteristic_length}");
+    let _ = request_sender.try_send(SetCharacteristicLength {
+        characteristic_length,
+        responder: Responder::new(function_name!(), Some(payload), tx),
+    });
+    rx.await.to()
 }
 
+#[named]
 #[tauri::command]
 pub async fn set_air_thermal_conductivity(
     air_thermal_conductivity: f64,
-    state: State<'_>,
+    request_sender: RequestSender<'_>,
 ) -> TlcResult<()> {
-    state
-        .set_air_thermal_conductivity(air_thermal_conductivity)
-        .await
-        .to()
+    let (tx, rx) = oneshot::channel();
+    let payload = format!("air_thermal_conductivity: {air_thermal_conductivity}");
+    let _ = request_sender.try_send(SetAirThermalConductivity {
+        air_thermal_conductivity,
+        responder: Responder::new(function_name!(), Some(payload), tx),
+    });
+    rx.await.to()
 }
 
+#[named]
 #[tauri::command]
-pub async fn get_nu(edge_truncation: Option<(f64, f64)>, state: State<'_>) -> TlcResult<NuData> {
-    state.get_nu(edge_truncation).await.to()
+pub async fn get_nu(
+    edge_truncation: Option<(f64, f64)>,
+    request_sender: RequestSender<'_>,
+) -> TlcResult<NuView> {
+    let (tx, rx) = oneshot::channel();
+    let payload = format!("edge_truncation: {edge_truncation:?}");
+    let _ = request_sender.try_send(GetNu {
+        edge_truncation,
+        responder: Responder::new(function_name!(), Some(payload), tx),
+    });
+    rx.await.to()
 }
 
 trait IntoTlcResult<T> {

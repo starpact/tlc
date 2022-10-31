@@ -7,7 +7,7 @@ use once_cell::sync::OnceCell;
 use plotters::prelude::*;
 use tracing::instrument;
 
-#[instrument(skip(area), fields(plot_path = plot_path.as_ref().to_str().unwrap_or_default()), err)]
+#[instrument(skip(area), fields(plot_path), err)]
 pub fn draw_area<P: AsRef<Path>>(
     plot_path: P,
     area: ArrayView2<f64>,
@@ -45,7 +45,7 @@ pub fn draw_area<P: AsRef<Path>>(
     Ok(plot_base64)
 }
 
-#[instrument(skip(data), fields(data_path = data_path.as_ref().to_str().unwrap()), err)]
+#[instrument(skip(data), fields(data_path), err)]
 pub fn save_matrix<P: AsRef<Path>>(data_path: P, data: ArrayView2<f64>) -> Result<()> {
     let mut wtr = csv::WriterBuilder::new()
         .has_headers(false)

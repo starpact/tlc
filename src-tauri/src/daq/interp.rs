@@ -1,5 +1,3 @@
-use std::path::PathBuf;
-
 use anyhow::{anyhow, Result};
 use ndarray::{parallel::prelude::*, prelude::*, ArcArray2};
 use packed_simd::f64x4;
@@ -9,7 +7,7 @@ use crate::daq::Thermocouple;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct InterpMeta {
-    pub daq_path: PathBuf,
+    pub daq_meta: DaqMeta,
     pub start_row: usize,
     pub cal_num: usize,
     pub area: (u32, u32, u32, u32),
@@ -39,6 +37,8 @@ pub enum InterpMethod {
 }
 
 use InterpMethod::*;
+
+use super::DaqMeta;
 
 pub fn interp(interp_meta: InterpMeta, daq_raw: ArcArray2<f64>) -> Result<Interpolator> {
     let InterpMeta {
@@ -87,7 +87,7 @@ pub fn interp(interp_meta: InterpMeta, daq_raw: ArcArray2<f64>) -> Result<Interp
 }
 
 impl Interpolator {
-    pub fn interp_single_frame(&self, frame_index: usize) -> Result<Array2<f64>> {
+    pub fn interp_frame(&self, frame_index: usize) -> Result<Array2<f64>> {
         let (cal_h, cal_w) = self.shape;
         let (cal_h, cal_w) = (cal_h as usize, cal_w as usize);
         let temp1 = self.data.column(frame_index);
@@ -109,7 +109,7 @@ impl Interpolator {
     }
 
     /// point_index = y * w + x.
-    pub fn interp_single_point(&self, point_index: usize) -> ArrayView1<f64> {
+    pub fn interp_point(&self, point_index: usize) -> ArrayView1<f64> {
         let point_index = match self.interp_method {
             Horizontal | HorizontalExtra => point_index / self.shape.1 as usize,
             Vertical | VerticalExtra => point_index % self.shape.0 as usize,
@@ -289,6 +289,8 @@ fn interp2(
 
 #[cfg(test)]
 mod test {
+    use std::path::PathBuf;
+
     use approx::assert_relative_eq;
 
     use super::*;
@@ -301,7 +303,7 @@ mod test {
             [5.0, 6.0, 7.0],
         ];
         let interp_meta = InterpMeta {
-            daq_path: Default::default(),
+            daq_meta: fake_daq_meta(),
             start_row: 0,
             cal_num: 2,
             area: (9, 9, 5, 5),
@@ -315,7 +317,7 @@ mod test {
         };
         let interpolator = interp(interp_meta, daq_raw.into_shared()).unwrap();
         assert_relative_eq!(
-            interpolator.interp_single_frame(0).unwrap(),
+            interpolator.interp_frame(0).unwrap(),
             array![
                 [1.0, 1.0, 2.0, 3.0, 3.0],
                 [1.0, 1.0, 2.0, 3.0, 3.0],
@@ -325,7 +327,7 @@ mod test {
             ]
         );
         assert_relative_eq!(
-            interpolator.interp_single_frame(1).unwrap(),
+            interpolator.interp_frame(1).unwrap(),
             array![
                 [5.0, 5.0, 6.0, 7.0, 7.0],
                 [5.0, 5.0, 6.0, 7.0, 7.0],
@@ -344,7 +346,7 @@ mod test {
             [5.0, 6.0, 7.0],
         ];
         let interp_meta = InterpMeta {
-            daq_path: Default::default(),
+            daq_meta: fake_daq_meta(),
             start_row: 0,
             cal_num: 2,
             area: (9, 9, 5, 5),
@@ -358,7 +360,7 @@ mod test {
         };
         let interpolator = interp(interp_meta, daq_raw.into_shared()).unwrap();
         assert_relative_eq!(
-            interpolator.interp_single_frame(0).unwrap(),
+            interpolator.interp_frame(0).unwrap(),
             array![
                 [0.0, 1.0, 2.0, 3.0, 4.0],
                 [0.0, 1.0, 2.0, 3.0, 4.0],
@@ -368,7 +370,7 @@ mod test {
             ]
         );
         assert_relative_eq!(
-            interpolator.interp_single_frame(1).unwrap(),
+            interpolator.interp_frame(1).unwrap(),
             array![
                 [4.0, 5.0, 6.0, 7.0, 8.0],
                 [4.0, 5.0, 6.0, 7.0, 8.0],
@@ -387,7 +389,7 @@ mod test {
             [5.0, 6.0],
         ];
         let interp_meta = InterpMeta {
-            daq_path: Default::default(),
+            daq_meta: fake_daq_meta(),
             start_row: 0,
             cal_num: 2,
             area: (9, 9, 5, 5),
@@ -401,7 +403,7 @@ mod test {
         };
         let interpolator = interp(interp_meta, daq_raw.into_shared()).unwrap();
         assert_relative_eq!(
-            interpolator.interp_single_frame(0).unwrap(),
+            interpolator.interp_frame(0).unwrap(),
             array![
                 [1.0, 1.0, 1.0, 1.0, 1.0],
                 [1.0, 1.0, 1.0, 1.0, 1.0],
@@ -411,7 +413,7 @@ mod test {
             ]
         );
         assert_relative_eq!(
-            interpolator.interp_single_frame(1).unwrap(),
+            interpolator.interp_frame(1).unwrap(),
             array![
                 [5.0, 5.0, 5.0, 5.0, 5.0],
                 [5.0, 5.0, 5.0, 5.0, 5.0],
@@ -430,7 +432,7 @@ mod test {
             [5.0, 6.0],
         ];
         let interp_meta = InterpMeta {
-            daq_path: Default::default(),
+            daq_meta: fake_daq_meta(),
             start_row: 0,
             cal_num: 2,
             area: (9, 9, 5, 5),
@@ -444,7 +446,7 @@ mod test {
         };
         let interpolator = interp(interp_meta, daq_raw.into_shared()).unwrap();
         assert_relative_eq!(
-            interpolator.interp_single_frame(0).unwrap(),
+            interpolator.interp_frame(0).unwrap(),
             array![
                 [0.5, 0.5, 0.5, 0.5, 0.5],
                 [1.0, 1.0, 1.0, 1.0, 1.0],
@@ -454,7 +456,7 @@ mod test {
             ]
         );
         assert_relative_eq!(
-            interpolator.interp_single_frame(1).unwrap(),
+            interpolator.interp_frame(1).unwrap(),
             array![
                 [4.5, 4.5, 4.5, 4.5, 4.5],
                 [5.0, 5.0, 5.0, 5.0, 5.0],
@@ -473,7 +475,7 @@ mod test {
             [5.0, 6.0, 7.0, 8.0, 9.0, 10.0]
         ];
         let interp_meta = InterpMeta {
-            daq_path: Default::default(),
+            daq_meta: fake_daq_meta(),
             start_row: 0,
             cal_num: 2,
             area: (9, 9, 5, 5),
@@ -491,7 +493,7 @@ mod test {
         };
         let interpolator = interp(interp_meta, daq_raw.into_shared()).unwrap();
         assert_relative_eq!(
-            interpolator.interp_single_frame(0).unwrap(),
+            interpolator.interp_frame(0).unwrap(),
             array![
                 [1.0, 1.0, 2.0, 3.0, 3.0],
                 [1.0, 1.0, 2.0, 3.0, 3.0],
@@ -501,7 +503,7 @@ mod test {
             ]
         );
         assert_relative_eq!(
-            interpolator.interp_single_frame(1).unwrap(),
+            interpolator.interp_frame(1).unwrap(),
             array![
                 [5.0, 5.0, 6.0, 7.0, 7.0],
                 [5.0, 5.0, 6.0, 7.0, 7.0],
@@ -520,7 +522,7 @@ mod test {
             [5.0, 6.0, 7.0, 8.0, 9.0, 10.0]
         ];
         let interp_meta = InterpMeta {
-            daq_path: Default::default(),
+            daq_meta: fake_daq_meta(),
             start_row: 0,
             cal_num: 2,
             area: (9, 9, 5, 5),
@@ -538,7 +540,7 @@ mod test {
         };
         let interpolator = interp(interp_meta, daq_raw.into_shared()).unwrap();
         assert_relative_eq!(
-            interpolator.interp_single_frame(0).unwrap(),
+            interpolator.interp_frame(0).unwrap(),
             array![
                 [-1.5, -0.5, 0.5, 1.5, 2.5],
                 [0.0, 1.0, 2.0, 3.0, 4.0],
@@ -548,7 +550,7 @@ mod test {
             ]
         );
         assert_relative_eq!(
-            interpolator.interp_single_frame(1).unwrap(),
+            interpolator.interp_frame(1).unwrap(),
             array![
                 [2.5, 3.5, 4.5, 5.5, 6.5],
                 [4.0, 5.0, 6.0, 7.0, 8.0],
@@ -567,5 +569,13 @@ mod test {
                 position,
             })
             .collect()
+    }
+
+    fn fake_daq_meta() -> DaqMeta {
+        DaqMeta {
+            path: PathBuf::default(),
+            nrows: 0,
+            ncols: 0,
+        }
     }
 }

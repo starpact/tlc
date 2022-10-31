@@ -13,10 +13,9 @@ use ndarray::ArcArray2;
 use serde::{Deserialize, Serialize};
 
 pub use controller::{Progress, ProgressBar, VideoController};
+pub use decode::{DecoderManager, Green2Meta};
 pub use detect_peak::{filter_detect_peak, filter_point, FilterMethod, GmaxMeta};
 pub use read_video::read_video;
-
-pub use decode::DecoderManager;
 
 pub struct VideoData {
     video_meta: VideoMeta,
@@ -54,14 +53,6 @@ pub struct VideoMeta {
     pub shape: (u32, u32),
     /// In milliseconds, used to distinguish two reads of the same video.
     pub read_at: u64,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct Green2Meta {
-    pub video_meta: VideoMeta,
-    pub start_frame: usize,
-    pub cal_num: usize,
-    pub area: (u32, u32, u32, u32),
 }
 
 pub fn init() {
@@ -112,16 +103,21 @@ impl VideoData {
         self.green2.clone()
     }
 
-    pub fn set_green2(&mut self, green2: Option<ArcArray2<u8>>) {
+    pub fn set_green2(&mut self, green2: Option<ArcArray2<u8>>) -> &mut Self {
         self.green2 = green2;
+        self
     }
 
     pub fn gmax_frame_indexes(&self) -> Option<Arc<Vec<usize>>> {
         self.gmax_frame_indexes.clone()
     }
 
-    pub fn set_gmax_frame_indexes(&mut self, gmax_frame_indexes: Option<Arc<Vec<usize>>>) {
+    pub fn set_gmax_frame_indexes(
+        &mut self,
+        gmax_frame_indexes: Option<Arc<Vec<usize>>>,
+    ) -> &mut Self {
         self.gmax_frame_indexes = gmax_frame_indexes;
+        self
     }
 
     pub fn push_packet(&mut self, video_meta: &VideoMeta, packet: Arc<Packet>) -> Result<()> {

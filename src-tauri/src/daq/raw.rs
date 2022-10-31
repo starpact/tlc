@@ -7,7 +7,7 @@ use tracing::instrument;
 
 use super::DaqMeta;
 
-#[instrument(fields(daq_path = daq_path.as_ref().to_str().unwrap()), err)]
+#[instrument(fields(daq_path), err)]
 pub fn read_daq<P: AsRef<Path>>(daq_path: P) -> Result<(DaqMeta, Array2<f64>)> {
     let daq_path = daq_path.as_ref();
     let daq_raw = match daq_path

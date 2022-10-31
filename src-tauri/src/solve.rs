@@ -4,16 +4,22 @@ use std::{
 };
 
 use libm::erfc;
-use ndarray::{Array2, ArrayView, Dimension};
+use ndarray::{ArcArray2, Array2, ArrayView, Dimension};
 use packed_simd::{f64x4, Simd};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
+use tlc_video::GmaxMeta;
 use tracing::{debug, instrument};
 
-use crate::daq::Interpolator;
+use crate::daq::{InterpMeta, Interpolator};
 
-#[derive(Debug, Deserialize, Serialize, Clone, Copy)]
-#[cfg_attr(test, derive(Default))]
+#[derive(Clone)]
+pub struct NuData {
+    pub nu2: ArcArray2<f64>,
+    pub nu_nan_mean: f64,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq)]
 pub struct PhysicalParam {
     pub gmax_temperature: f64,
     pub solid_thermal_conductivity: f64,
@@ -22,10 +28,18 @@ pub struct PhysicalParam {
     pub air_thermal_conductivity: f64,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq)]
 pub enum IterationMethod {
     NewtonTangent { h0: f64, max_iter_num: usize },
     NewtonDown { h0: f64, max_iter_num: usize },
+}
+
+#[derive(Debug, PartialEq)]
+pub struct SolveMeta {
+    pub interp_meta: InterpMeta,
+    pub gmax_meta: GmaxMeta,
+    pub iteration_method: IterationMethod,
+    pub physical_param: PhysicalParam,
 }
 
 struct PointData<'a> {
@@ -189,7 +203,7 @@ impl Default for IterationMethod {
 #[instrument(skip(gmax_frame_indexes, interpolator))]
 pub fn solve(
     gmax_frame_indexes: Arc<Vec<usize>>,
-    interpolator: Interpolator,
+    interpolator: &Interpolator,
     physical_param: PhysicalParam,
     iteration_method: IterationMethod,
     frame_rate: usize,
@@ -230,7 +244,7 @@ pub fn nan_mean<D: Dimension>(data: ArrayView<f64, D>) -> f64 {
 
 fn solve_inner<F>(
     gmax_frame_indexes: Arc<Vec<usize>>,
-    interpolator: Interpolator,
+    interpolator: &Interpolator,
     solve_single_point: F,
 ) -> Vec<f64>
 where
@@ -244,7 +258,7 @@ where
             if gmax_frame_index <= FIRST_FEW_TO_CAL_T0 {
                 return NAN;
             }
-            let temperatures = interpolator.interp_single_point(point_index);
+            let temperatures = interpolator.interp_point(point_index);
             let temperatures = temperatures.as_slice().unwrap();
             let point_data = PointData {
                 gmax_frame_index,

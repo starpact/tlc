@@ -24,7 +24,15 @@ use thread_local::ThreadLocal;
 use tokio::sync::oneshot;
 use tracing::instrument;
 
-use crate::{Green2Meta, Progress, ProgressBar, VideoMeta};
+use crate::{Progress, ProgressBar, VideoMeta};
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Green2Meta {
+    pub video_meta: VideoMeta,
+    pub start_frame: usize,
+    pub cal_num: usize,
+    pub area: (u32, u32, u32, u32),
+}
 
 #[derive(Clone)]
 pub struct DecoderManager {

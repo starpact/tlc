@@ -21,7 +21,7 @@ pub enum FilterMethod {
     },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct GmaxMeta {
     pub filter_method: FilterMethod,
     pub green2_meta: Green2Meta,

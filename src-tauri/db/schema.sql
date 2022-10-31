@@ -2,15 +2,15 @@ CREATE TABLE IF NOT EXISTS settings (
     id INTEGER PRIMARY KEY,
     name TEXT NOT NULL UNIQUE,
     save_root_dir TEXT NOT NULL,
-    video_meta TEXT, -- JSON
-    daq_meta TEXT, -- JSON
+    video_path TEXT,
+    daq_path TEXT,
     start_frame INTEGER,
     start_row INTEGER,
-    area TEXT, -- JSON
-    thermocouples TEXT, -- JSON
-    interp_method TEXT, --JSON
-    filter_method TEXT NOT NULL, -- JSON
-    iteration_method TEXT NOT NULL, -- JSON
+    area TEXT,
+    thermocouples TEXT,
+    interp_method TEXT,
+    filter_method TEXT NOT NULL,
+    iteration_method TEXT NOT NULL,
     gmax_temperature REAL NOT NULL,
     solid_thermal_conductivity REAL NOT NULL,
     solid_thermal_diffusivity REAL NOT NULL,
