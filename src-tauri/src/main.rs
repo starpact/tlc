@@ -16,13 +16,9 @@ mod solve;
 mod state;
 
 use crossbeam::channel::bounded;
-use setting::SqliteSettingStorage;
 use tracing::error;
 
 use commands::*;
-use old_state::*;
-
-const SQLITE_FILEPATH: &str = "./var/db.sqlite3";
 
 fn main() {
     tlc_util::log::init();
@@ -31,11 +27,7 @@ fn main() {
     let (request_sender, request_receiver) = bounded(3);
     std::thread::spawn(move || state::main_loop(request_receiver));
 
-    let setting_storage = SqliteSettingStorage::new(SQLITE_FILEPATH);
-    let global_state = GlobalState::new(setting_storage);
-
     tauri::Builder::default()
-        .manage(global_state)
         .manage(request_sender)
         .invoke_handler(tauri::generate_handler![
             create_setting,
