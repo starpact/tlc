@@ -28,4 +28,5 @@ yarn-error.log*
 
 # user
 .direnv
-var
+var/*
+!var/.gitkeep
