@@ -1,6 +1,7 @@
 use std::{
     assert_matches::debug_assert_matches,
     cell::{RefCell, RefMut},
+    hash::{Hash, Hasher},
     ops::{Deref, DerefMut},
     sync::{Arc, Mutex},
 };
@@ -24,14 +25,22 @@ use thread_local::ThreadLocal;
 use tokio::sync::oneshot;
 use tracing::instrument;
 
-use crate::{Progress, ProgressBar, VideoMeta};
+use crate::{Progress, ProgressBar, VideoId};
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct Green2Meta {
-    pub video_meta: VideoMeta,
+#[derive(Debug, Clone, PartialEq, Hash)]
+pub struct Green2Id {
+    pub video_id: VideoId,
     pub start_frame: usize,
     pub cal_num: usize,
     pub area: (u32, u32, u32, u32),
+}
+
+impl Green2Id {
+    pub fn eval_hash(&self) -> u64 {
+        let mut hasher = ahash::AHasher::default();
+        self.hash(&mut hasher);
+        hasher.finish()
+    }
 }
 
 #[derive(Clone)]
@@ -104,19 +113,13 @@ impl DecoderManager {
     pub fn decode_all(
         &self,
         packets: Vec<Arc<Packet>>,
-        green2_meta: &Green2Meta,
+        start_frame: usize,
+        cal_num: usize,
+        area: (u32, u32, u32, u32),
         progress_bar: ProgressBar,
     ) -> Result<Array2<u8>> {
-        let Green2Meta {
-            video_meta: VideoMeta { shape, .. },
-            start_frame,
-            cal_num,
-            area,
-            ..
-        } = *green2_meta;
-
         self.inner
-            .decode_all(packets, start_frame, cal_num, shape, area, progress_bar)
+            .decode_all(packets, start_frame, cal_num, area, progress_bar)
     }
 
     fn decode_frame_worker(&self, task_notifier: Receiver<()>) {
@@ -160,11 +163,10 @@ impl DecoderManagerInner {
         packets: Vec<Arc<Packet>>,
         start_frame: usize,
         cal_num: usize,
-        shape: (u32, u32),
         area: (u32, u32, u32, u32),
         progress_bar: ProgressBar,
     ) -> Result<Array2<u8>> {
-        let byte_w = shape.1 as usize * 3;
+        let byte_w = self.decoder()?.shape().1 as usize * 3;
         let (tl_y, tl_x, cal_h, cal_w) = area;
         let (tl_y, tl_x, cal_h, cal_w) =
             (tl_y as usize, tl_x as usize, cal_h as usize, cal_w as usize);
@@ -348,21 +350,14 @@ mod tests {
         let packets = packet_rx.into_iter().map(Arc::new).collect();
         let progress_bar = ProgressBar::default();
 
-        let green2_meta = Green2Meta {
-            video_meta: VideoMeta {
-                path: Default::default(),
-                frame_rate: Default::default(),
-                nframes: Default::default(),
-                shape: (1024, 1280),
-                read_at: Default::default(),
-            },
-            start_frame,
-            cal_num,
-            area: (10, 10, 600, 800),
-        };
-
         decode_manager
-            .decode_all(packets, &green2_meta, progress_bar)
+            .decode_all(
+                packets,
+                start_frame,
+                cal_num,
+                (10, 10, 600, 800),
+                progress_bar,
+            )
             .unwrap();
     }
 }

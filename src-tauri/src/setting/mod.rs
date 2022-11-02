@@ -60,9 +60,9 @@ pub struct SettingSnapshot {
     /// * nu_matrix_path: {root_dir}/{expertiment_name}/nu_matrix.csv
     /// * plot_matrix_path: {root_dir}/{expertiment_name}/nu_plot.png
     pub save_root_dir: PathBuf,
-    /// Path and some attributes of video.
+    pub video_path: PathBuf,
     pub video_meta: VideoMeta,
-    /// Path and some attributes of data acquisition file.
+    pub daq_path: PathBuf,
     pub daq_meta: DaqMeta,
     /// Start frame of video involved in the calculation.
     /// Updated simultaneously with start_row.

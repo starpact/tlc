@@ -1,5 +1,6 @@
 use std::{
     f64::{consts::PI, NAN},
+    hash::{Hash, Hasher},
     sync::Arc,
 };
 
@@ -8,10 +9,10 @@ use ndarray::{ArcArray2, Array2, ArrayView, Dimension};
 use packed_simd::{f64x4, Simd};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
-use tlc_video::GmaxMeta;
+use tlc_video::GmaxId;
 use tracing::{debug, instrument};
 
-use crate::daq::{InterpMeta, Interpolator};
+use crate::daq::{InterpId, Interpolator};
 
 #[derive(Clone)]
 pub struct NuData {
@@ -19,7 +20,7 @@ pub struct NuData {
     pub nu_nan_mean: f64,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq)]
+#[derive(Debug, Deserialize, Serialize, Clone, Copy)]
 pub struct PhysicalParam {
     pub gmax_temperature: f64,
     pub solid_thermal_conductivity: f64,
@@ -28,18 +29,92 @@ pub struct PhysicalParam {
     pub air_thermal_conductivity: f64,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq)]
+impl PartialEq for PhysicalParam {
+    fn eq(&self, other: &Self) -> bool {
+        self.gmax_temperature == other.gmax_temperature
+            && self.solid_thermal_conductivity == other.solid_thermal_conductivity
+            && self.solid_thermal_diffusivity == other.solid_thermal_diffusivity
+            && self.characteristic_length == other.characteristic_length
+            && self.air_thermal_conductivity == other.air_thermal_conductivity
+    }
+}
+
+impl Hash for PhysicalParam {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        state.write_u64(self.gmax_temperature.to_bits());
+        state.write_u64(self.solid_thermal_conductivity.to_bits());
+        state.write_u64(self.solid_thermal_diffusivity.to_bits());
+        state.write_u64(self.characteristic_length.to_bits());
+        state.write_u64(self.air_thermal_conductivity.to_bits());
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 pub enum IterationMethod {
     NewtonTangent { h0: f64, max_iter_num: usize },
     NewtonDown { h0: f64, max_iter_num: usize },
 }
 
-#[derive(Debug, PartialEq)]
-pub struct SolveMeta {
-    pub interp_meta: InterpMeta,
-    pub gmax_meta: GmaxMeta,
+impl PartialEq for IterationMethod {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (
+                IterationMethod::NewtonTangent {
+                    h0: h01,
+                    max_iter_num: max_iter_num1,
+                },
+                IterationMethod::NewtonTangent {
+                    h0: h02,
+                    max_iter_num: max_iter_num2,
+                },
+            ) => h01 == h02 && max_iter_num1 == max_iter_num2,
+            (
+                IterationMethod::NewtonDown {
+                    h0: h01,
+                    max_iter_num: max_iter_num1,
+                },
+                IterationMethod::NewtonDown {
+                    h0: h02,
+                    max_iter_num: max_iter_num2,
+                },
+            ) => h01 == h02 && max_iter_num1 == max_iter_num2,
+            _ => false,
+        }
+    }
+}
+
+impl Hash for IterationMethod {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        match self {
+            IterationMethod::NewtonTangent { h0, max_iter_num } => {
+                state.write_u8(0);
+                state.write_u64(h0.to_bits());
+                state.write_u64(*max_iter_num as u64)
+            }
+            IterationMethod::NewtonDown { h0, max_iter_num } => {
+                state.write_u8(1);
+                state.write_u64(h0.to_bits());
+                state.write_u64(*max_iter_num as u64)
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Hash)]
+pub struct SolveId {
+    pub gmax_id: GmaxId,
+    pub interp_id: InterpId,
+    pub frame_rate: usize,
     pub iteration_method: IterationMethod,
     pub physical_param: PhysicalParam,
+}
+
+impl SolveId {
+    pub fn eval_hash(&self) -> u64 {
+        let mut hasher = ahash::AHasher::default();
+        self.hash(&mut hasher);
+        hasher.finish()
+    }
 }
 
 struct PointData<'a> {

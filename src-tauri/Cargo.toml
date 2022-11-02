@@ -37,9 +37,9 @@ crossbeam = "0.8.2"
 function_name = "0.3.0"
 tlc-video = { path = "../tlc-video" }
 tlc-util = { path = "../tlc-util" }
+ahash = "0.8"
 
 [dev-dependencies]
-mockall = "0.11.2"
 approx = "0.5"
 
 [features]

@@ -22,11 +22,7 @@ pub fn read_daq<P: AsRef<Path>>(daq_path: P) -> Result<(DaqMeta, Array2<f64>)> {
 
     let nrows = daq_raw.nrows();
     let ncols = daq_raw.ncols();
-    let daq_meta = DaqMeta {
-        path: daq_path.to_owned(),
-        nrows,
-        ncols,
-    };
+    let daq_meta = DaqMeta { nrows, ncols };
 
     Ok((daq_meta, daq_raw))
 }
@@ -84,8 +80,6 @@ fn read_daq_excel(daq_path: &Path) -> Result<Array2<f64>> {
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
-
     use approx::assert_relative_eq;
 
     use super::*;
@@ -102,7 +96,6 @@ mod tests {
         assert_eq!(
             daq_meta,
             DaqMeta {
-                path: PathBuf::from(DAQ_PATH_LVM),
                 nrows: 2589,
                 ncols: 10,
             }
@@ -112,7 +105,6 @@ mod tests {
         assert_eq!(
             daq_meta,
             DaqMeta {
-                path: PathBuf::from(DAQ_PATH_XLSX),
                 nrows: 2589,
                 ncols: 10,
             }

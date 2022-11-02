@@ -1,12 +1,15 @@
 mod interp;
 mod raw;
 
-use std::path::PathBuf;
+use std::{
+    hash::{Hash, Hasher},
+    path::PathBuf,
+};
 
 use ndarray::ArcArray2;
 use serde::{Deserialize, Serialize};
 
-pub use interp::{interp, InterpMeta, InterpMethod, Interpolator};
+pub use interp::{interp, InterpId, InterpMethod, Interpolator};
 pub use raw::read_daq;
 
 pub struct DaqData {
@@ -15,14 +18,26 @@ pub struct DaqData {
     interpolator: Option<Interpolator>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, Hash)]
+pub struct DaqId {
+    pub daq_path: PathBuf,
+}
+
+impl DaqId {
+    pub fn eval_hash(&self) -> u64 {
+        let mut hasher = ahash::AHasher::default();
+        self.hash(&mut hasher);
+        hasher.finish()
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq)]
 pub struct DaqMeta {
-    pub path: PathBuf,
     pub nrows: usize,
     pub ncols: usize,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq)]
+#[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Hash)]
 pub struct Thermocouple {
     /// Column index of this thermocouple in the DAQ file.
     pub column_index: usize,
@@ -40,8 +55,8 @@ impl DaqData {
         }
     }
 
-    pub fn daq_meta(&self) -> &DaqMeta {
-        &self.daq_meta
+    pub fn daq_meta(&self) -> DaqMeta {
+        self.daq_meta
     }
 
     pub fn daq_raw(&self) -> ArcArray2<f64> {

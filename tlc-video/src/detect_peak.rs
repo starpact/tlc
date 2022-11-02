@@ -1,3 +1,5 @@
+use std::hash::{Hash, Hasher};
+
 use anyhow::{bail, Result};
 use dwt::{transform, wavelet::Wavelet, Operation};
 use median::Filter;
@@ -5,11 +7,11 @@ use ndarray::{parallel::prelude::*, prelude::*, ArcArray2};
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
 
-use crate::Green2Meta;
+use crate::Green2Id;
 
 use super::controller::ProgressBar;
 
-#[derive(Debug, Default, Deserialize, Serialize, Clone, Copy, PartialEq)]
+#[derive(Debug, Default, Deserialize, Serialize, Clone, Copy)]
 pub enum FilterMethod {
     #[default]
     No,
@@ -21,10 +23,59 @@ pub enum FilterMethod {
     },
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct GmaxMeta {
+impl PartialEq for FilterMethod {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (FilterMethod::No, FilterMethod::No) => true,
+            (
+                FilterMethod::Median {
+                    window_size: window_size1,
+                },
+                FilterMethod::Median {
+                    window_size: window_size2,
+                },
+            ) => window_size1 == window_size2,
+            (
+                FilterMethod::Wavelet {
+                    threshold_ratio: threshold_ratio1,
+                },
+                FilterMethod::Wavelet {
+                    threshold_ratio: threshold_ratio2,
+                },
+            ) => threshold_ratio1 == threshold_ratio2,
+            _ => false,
+        }
+    }
+}
+
+impl Hash for FilterMethod {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        match self {
+            FilterMethod::No => state.write_u8(0),
+            FilterMethod::Median { window_size } => {
+                state.write_u8(1);
+                state.write_u64(*window_size as u64);
+            }
+            FilterMethod::Wavelet { threshold_ratio } => {
+                state.write_u8(1);
+                state.write_u64(threshold_ratio.to_bits());
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Hash, PartialEq)]
+pub struct GmaxId {
+    pub green2_id: Green2Id,
     pub filter_method: FilterMethod,
-    pub green2_meta: Green2Meta,
+}
+
+impl GmaxId {
+    pub fn eval_hash(&self) -> u64 {
+        let mut hasher = ahash::AHasher::default();
+        self.hash(&mut hasher);
+        hasher.finish()
+    }
 }
 
 #[instrument(skip(green2, progress_bar), err)]

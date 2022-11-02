@@ -247,12 +247,20 @@ impl Setting {
         }
     }
 
-    pub fn set_start_index(&self, conn: &Connection, start_index: StartIndex) -> Result<()> {
+    pub fn set_start_index(
+        &self,
+        conn: &Connection,
+        start_index: Option<StartIndex>,
+    ) -> Result<()> {
         let id = self.id()?;
-        let StartIndex {
-            start_frame,
-            start_row,
-        } = start_index;
+        let (start_frame, start_row) = match start_index {
+            Some(StartIndex {
+                start_frame,
+                start_row,
+            }) => (Some(start_frame), Some(start_row)),
+            None => (None, None),
+        };
+
         let updated_at = now_as_millis();
         conn.execute(
             "UPDATE settings SET start_frame = ?1, start_row = ?2, updated_at = ?3 WHERE id = ?4",
@@ -275,7 +283,7 @@ impl Setting {
         }
     }
 
-    pub fn set_area(&self, conn: &Connection, area: (u32, u32, u32, u32)) -> Result<()> {
+    pub fn set_area(&self, conn: &Connection, area: Option<(u32, u32, u32, u32)>) -> Result<()> {
         let id = self.id()?;
         let area_str = serde_json::to_string(&area)?;
 
@@ -305,10 +313,13 @@ impl Setting {
     pub fn set_thermocouples(
         &self,
         conn: &Connection,
-        thermocouples: &[Thermocouple],
+        thermocouples: Option<&[Thermocouple]>,
     ) -> Result<()> {
         let id = self.id()?;
-        let thermocouples_str = serde_json::to_string(thermocouples)?;
+        let thermocouples_str = match thermocouples {
+            Some(thermocouples) => Some(serde_json::to_string(thermocouples)?),
+            None => None,
+        };
         let updated_at = now_as_millis();
         conn.execute(
             "UPDATE settings SET thermocouples = ?1, updated_at = ?2 WHERE id = ?3",
@@ -587,7 +598,7 @@ mod tests {
             start_frame: 10,
             start_row: 20,
         };
-        setting.set_start_index(&db, start_index).unwrap();
+        setting.set_start_index(&db, Some(start_index)).unwrap();
         assert_eq!(setting.start_index(&db).unwrap().unwrap(), start_index);
     }
 
@@ -595,7 +606,7 @@ mod tests {
     fn test_rw_area() {
         let (setting, db) = _new_db();
         let area = (1, 2, 9, 18);
-        setting.set_area(&db, area).unwrap();
+        setting.set_area(&db, Some(area)).unwrap();
         assert_eq!(setting.area(&db).unwrap().unwrap(), area);
     }
 
@@ -612,7 +623,9 @@ mod tests {
                 position: (0, 50),
             },
         ];
-        setting.set_thermocouples(&db, &thermocouples).unwrap();
+        setting
+            .set_thermocouples(&db, Some(&thermocouples))
+            .unwrap();
         assert_eq!(setting.thermocouples(&db).unwrap().unwrap(), thermocouples);
     }
 

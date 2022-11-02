@@ -1,137 +1,23 @@
 use std::{
     path::{Path, PathBuf},
-    sync::Arc,
-    time::Duration,
+    thread::spawn,
 };
 
 use anyhow::{anyhow, bail, Result};
-use crossbeam::channel::{RecvTimeoutError, Sender};
 use ndarray::{ArcArray2, Array2};
-use tlc_video::{filter_point, read_video, FilterMethod, Progress, ProgressBar, VideoMeta};
-use tracing::{error, info_span, warn};
+use tlc_video::{filter_point, FilterMethod, Progress, VideoId, VideoMeta};
+use tracing::warn;
 
-use super::{GlobalState, Outcome};
+use super::GlobalState;
 use crate::{
-    daq::{read_daq, DaqMeta, InterpMethod, Thermocouple},
+    daq::{DaqId, DaqMeta, InterpMethod, Thermocouple},
     post_processing::draw_area,
-    request::{NuView, Request, Responder, SettingData},
+    request::{NuView, Responder, SettingData},
     setting::StartIndex,
     solve::{IterationMethod, NuData, PhysicalParam},
 };
 
 impl GlobalState {
-    pub fn handle_request(&mut self, request: Request) {
-        use Request::*;
-        match request {
-            CreateSetting {
-                create_setting,
-                responder,
-            } => self.on_create_setting(create_setting, responder),
-            SwitchSetting {
-                setting_id,
-                responder,
-            } => self.on_switch_setting(setting_id, responder),
-            DeleteSetting {
-                setting_id,
-                responder,
-            } => self.on_delete_setting(setting_id, responder),
-            GetName { responder } => self.on_get_name(responder),
-            SetName { name, responder } => self.on_set_name(name, responder),
-            GetSaveRootDir { responder } => self.on_get_save_root_dir(responder),
-            SetSaveRootDir {
-                save_root_dir,
-                responder,
-            } => self.on_set_save_root_dir(save_root_dir, responder),
-            GetVideoMeta { responder } => self.on_get_video_meta(responder),
-            SetVideoPath {
-                video_path,
-                responder,
-            } => self.on_set_video_path(video_path, responder),
-            GetReadVideoProgress { responder } => self.on_get_read_video_progress(responder),
-            DecodeFrameBase64 {
-                frame_index,
-                responder,
-            } => self.on_decode_frame_base64(frame_index, responder),
-            GetDaqMeta { responder } => self.on_get_daq_meta(responder),
-            SetDaqPath {
-                daq_path,
-                responder,
-            } => self.on_set_daq_path(daq_path, responder),
-            GetDaqRaw { responder } => self.on_get_daq_raw(responder),
-            GetStartIndex { responder } => self.on_get_start_index(responder),
-            SynchronizeVideoAndDaq {
-                start_frame,
-                start_row,
-                responder,
-            } => self.on_synchronize_video_and_daq(start_frame, start_row, responder),
-            SetStartFrame {
-                start_frame,
-                responder,
-            } => self.on_set_start_frame(start_frame, responder),
-            SetStartRow {
-                start_row,
-                responder,
-            } => self.on_set_start_row(start_row, responder),
-            GetArea { responder } => self.on_get_area(responder),
-            SetArea { area, responder } => self.on_set_area(area, responder),
-            GetBuildGreen2Progress { responder } => self.on_get_build_green2_progress(responder),
-            GetFilterMethod { responder } => self.on_get_filter_method(responder),
-            SetFilterMethod {
-                filter_method,
-                responder,
-            } => self.on_set_filter_method(filter_method, responder),
-            GetDetectPeakProgress { responder } => self.on_get_detect_peak_progress(responder),
-            FilterPoint {
-                position,
-                responder,
-            } => self.on_filter_point(position, responder),
-            GetThermocouples { responder } => self.on_get_thermocouples(responder),
-            SetThermocouples {
-                thermocouples,
-                responder,
-            } => self.on_set_thermocouples(thermocouples, responder),
-            GetInterpMethod { responder } => self.on_get_interp_method(responder),
-            SetInterpMethod {
-                interp_method,
-                responder,
-            } => self.on_set_interp_method(interp_method, responder),
-            InterpFrame {
-                frame_index,
-                responder,
-            } => self.on_interp_frame(frame_index, responder),
-            GetIterationMethod { responder } => self.on_get_iteration_method(responder),
-            SetIterationMethod {
-                iteration_method,
-                responder,
-            } => self.on_set_iteration_method(iteration_method, responder),
-            GetPhysicalParam { responder } => self.on_get_physical_param(responder),
-            SetGmaxTemperature {
-                gmax_temperature,
-                responder,
-            } => self.on_set_gmax_temperature(gmax_temperature, responder),
-            SetSolidThermalConductivity {
-                solid_thermal_conductivity,
-                responder,
-            } => self.on_set_solid_thermal_conductivity(solid_thermal_conductivity, responder),
-            SetSolidThermalDiffusivity {
-                solid_thermal_diffusivity,
-                responder,
-            } => self.on_set_solid_thermal_diffusivity(solid_thermal_diffusivity, responder),
-            SetCharacteristicLength {
-                characteristic_length,
-                responder,
-            } => self.on_set_characteristic_length(characteristic_length, responder),
-            SetAirThermalConductivity {
-                air_thermal_conductivity,
-                responder,
-            } => self.on_set_air_thermal_conductivity(air_thermal_conductivity, responder),
-            GetNu {
-                edge_truncation,
-                responder,
-            } => self.on_get_nu(edge_truncation, responder),
-        }
-    }
-
     pub fn on_create_setting(
         &mut self,
         create_setting: Box<SettingData>,
@@ -171,7 +57,7 @@ impl GlobalState {
     }
 
     pub fn on_get_video_meta(&self, responder: Responder<VideoMeta>) {
-        responder.respond(self.video_meta())
+        responder.respond(self.video_data().map(|video_data| video_data.video_meta()))
     }
 
     pub fn on_set_video_path(&mut self, video_path: PathBuf, responder: Responder<()>) {
@@ -180,22 +66,22 @@ impl GlobalState {
             return;
         }
 
-        let progress_bar = self.video_controller.prepare_read_video();
-        self.spawn(|outcome_sender| {
-            do_read_video(video_path, responder, outcome_sender, progress_bar);
-        });
+        self.spawn_read_video(VideoId { video_path }, Some(responder));
     }
 
     fn set_video_path(&mut self, video_path: &Path) -> Result<()> {
         let tx = self.db.transaction()?;
         self.setting.set_video_path(&tx, video_path)?;
-        self.video_data = None;
-        self.daq_data
-            .as_mut()
-            .ok_or_else(|| anyhow!("daq not loaded yet"))?
-            .set_interpolator(None);
-        self.nu_data = None;
+        self.setting.set_area(&tx, None)?;
+        self.setting.set_start_index(&tx, None)?;
+        self.setting.set_thermocouples(&tx, None)?;
         tx.commit()?;
+
+        self.video_data = None;
+        if let Some(daq_data) = self.daq_data.as_mut() {
+            daq_data.set_interpolator(None);
+        }
+        self.nu_data = None;
 
         Ok(())
     }
@@ -220,11 +106,11 @@ impl GlobalState {
         };
         let decoder_manager = video_data.decoder_manager();
 
-        std::thread::spawn(move || responder.respond(decoder_manager.decode_frame_base64(packet)));
+        spawn(move || responder.respond(decoder_manager.decode_frame_base64(packet)));
     }
 
     pub fn on_get_daq_meta(&self, responder: Responder<DaqMeta>) {
-        responder.respond(self.daq_meta());
+        responder.respond(self.daq_data().map(|daq_data| daq_data.daq_meta()));
     }
 
     pub fn on_set_daq_path(&mut self, daq_path: PathBuf, responder: Responder<()>) {
@@ -233,34 +119,27 @@ impl GlobalState {
             return;
         }
 
-        self.spawn(|outcome_sender| match read_daq(daq_path) {
-            Ok((daq_meta, daq_raw)) => {
-                outcome_sender
-                    .send(Outcome::ReadDaq { daq_meta, daq_raw })
-                    .unwrap();
-                responder.respond_ok(());
-            }
-            Err(e) => responder.respond_err(e),
-        });
+        self.spawn_read_daq(DaqId { daq_path }, Some(responder));
     }
 
     fn set_daq_path(&mut self, daq_path: &Path) -> Result<()> {
         let tx = self.db.transaction()?;
         self.setting.set_daq_path(&tx, daq_path)?;
-        self.daq_data = None;
-        self.video_data
-            .as_mut()
-            .ok_or_else(|| anyhow!("video not loaded yet"))?
-            .set_green2(None)
-            .set_gmax_frame_indexes(None);
-        self.nu_data = None;
+        self.setting.set_start_index(&tx, None)?;
+        self.setting.set_thermocouples(&tx, None)?;
         tx.commit()?;
+
+        self.daq_data = None;
+        if let Some(video_data) = self.video_data.as_mut() {
+            video_data.set_green2(None).set_gmax_frame_indexes(None);
+        }
+        self.nu_data = None;
 
         Ok(())
     }
 
     pub fn on_get_daq_raw(&self, responder: Responder<ArcArray2<f64>>) {
-        responder.respond(self.daq_raw())
+        responder.respond(self.daq_data().map(|daq_data| daq_data.daq_raw()))
     }
 
     pub fn on_get_start_index(&self, responder: Responder<StartIndex>) {
@@ -273,11 +152,7 @@ impl GlobalState {
         start_row: usize,
         responder: Responder<()>,
     ) {
-        let ret = self.synchronize_video_and_daq(start_frame, start_row);
-        if ret.is_ok() {
-            let _ = self.spwan_build_green2();
-        }
-        responder.respond(ret);
+        responder.respond(self.synchronize_video_and_daq(start_frame, start_row));
     }
 
     fn synchronize_video_and_daq(&mut self, start_frame: usize, start_row: usize) -> Result<()> {
@@ -290,30 +165,31 @@ impl GlobalState {
             bail!("row_index({start_row}) out of range({nrows})");
         }
 
-        let tx = self.db.transaction()?;
         self.setting.set_start_index(
-            &tx,
-            StartIndex {
+            &self.db,
+            Some(StartIndex {
                 start_frame,
                 start_row,
-            },
+            }),
         )?;
         self.video_data
             .as_mut()
-            .ok_or_else(|| anyhow!("video not loaded yet"))?
+            .unwrap() // already checked above
             .set_green2(None)
             .set_gmax_frame_indexes(None);
-        tx.commit()?;
+        self.daq_data
+            .as_mut()
+            .unwrap() // already checked above
+            .set_interpolator(None);
+        self.nu_data = None;
+
+        self.reconcile();
 
         Ok(())
     }
 
     pub fn on_set_start_frame(&mut self, start_frame: usize, responder: Responder<()>) {
-        let ret = self.set_start_frame(start_frame);
-        if ret.is_ok() {
-            let _ = self.spwan_build_green2();
-        }
-        responder.respond(ret);
+        responder.respond(self.set_start_frame(start_frame));
     }
 
     fn set_start_frame(&mut self, start_frame: usize) -> Result<()> {
@@ -334,31 +210,31 @@ impl GlobalState {
             bail!("row_index({start_row}) out of range({nrows})");
         }
 
-        let tx = self.db.transaction()?;
         self.setting.set_start_index(
-            &tx,
-            StartIndex {
+            &self.db,
+            Some(StartIndex {
                 start_frame,
                 start_row,
-            },
+            }),
         )?;
         self.video_data
             .as_mut()
-            .ok_or_else(|| anyhow!("video not loaded yet"))?
+            .unwrap() // already checked above
             .set_green2(None)
             .set_gmax_frame_indexes(None);
+        self.daq_data
+            .as_mut()
+            .unwrap() // already checked above
+            .set_interpolator(None);
         self.nu_data = None;
-        tx.commit()?;
+
+        self.reconcile();
 
         Ok(())
     }
 
     pub fn on_set_start_row(&mut self, start_row: usize, responder: Responder<()>) {
-        let ret = self.set_start_row(start_row);
-        if ret.is_ok() {
-            let _ = self.spwan_build_green2();
-        }
-        responder.respond(ret);
+        responder.respond(self.set_start_row(start_row));
     }
 
     fn set_start_row(&mut self, start_row: usize) -> Result<()> {
@@ -379,34 +255,35 @@ impl GlobalState {
             bail!("frames_index({start_frame}) out of range({nframes})");
         }
 
-        let tx = self.db.transaction()?;
         self.setting.set_start_index(
-            &tx,
-            StartIndex {
+            &self.db,
+            Some(StartIndex {
                 start_frame,
                 start_row,
-            },
+            }),
         )?;
         self.video_data
             .as_mut()
-            .ok_or_else(|| anyhow!("video not loaded yet"))?
+            .unwrap() // already checked above
             .set_green2(None)
             .set_gmax_frame_indexes(None);
+        self.daq_data
+            .as_mut()
+            .unwrap() // already checked above
+            .set_interpolator(None);
         self.nu_data = None;
-        tx.commit()?;
+
+        self.reconcile();
 
         Ok(())
     }
+
     pub fn on_get_area(&self, responder: Responder<(u32, u32, u32, u32)>) {
         responder.respond(self.area());
     }
 
     pub fn on_set_area(&mut self, area: (u32, u32, u32, u32), responder: Responder<()>) {
-        let ret = self.set_area(area);
-        if ret.is_ok() {
-            let _ = self.spwan_build_green2();
-        }
-        responder.respond(ret);
+        responder.respond(self.set_area(area));
     }
 
     fn set_area(&mut self, area: (u32, u32, u32, u32)) -> Result<()> {
@@ -419,15 +296,18 @@ impl GlobalState {
             bail!("area Y out of range: top_left_y({tl_y}) + height({cal_h}) > video_height({h})");
         }
 
-        let tx = self.db.transaction()?;
-        self.setting.set_area(&tx, area)?;
+        self.setting.set_area(&self.db, Some(area))?;
         self.video_data
             .as_mut()
-            .ok_or_else(|| anyhow!("video not loaded yet"))?
+            .unwrap() // already checked above
             .set_green2(None)
             .set_gmax_frame_indexes(None);
+        if let Some(daq_data) = self.daq_data.as_mut() {
+            daq_data.set_interpolator(None);
+        }
         self.nu_data = None;
-        tx.commit()?;
+
+        self.reconcile();
 
         Ok(())
     }
@@ -441,22 +321,17 @@ impl GlobalState {
     }
 
     pub fn on_set_filter_method(&mut self, filter_method: FilterMethod, responder: Responder<()>) {
-        let ret = self.set_filter_method(filter_method);
-        if ret.is_ok() {
-            let _ = self.spawn_detect_peak();
-        }
-        responder.respond(ret);
+        responder.respond(self.set_filter_method(filter_method));
     }
 
     fn set_filter_method(&mut self, filter_method: FilterMethod) -> Result<()> {
-        let tx = self.db.transaction()?;
-        self.setting.set_filter_method(&tx, filter_method)?;
-        self.video_data
-            .as_mut()
-            .ok_or_else(|| anyhow!("video not loaded yet"))?
-            .set_gmax_frame_indexes(None);
+        self.setting.set_filter_method(&self.db, filter_method)?;
+        if let Some(video_data) = self.video_data.as_mut() {
+            video_data.set_gmax_frame_indexes(None);
+        }
         self.nu_data = None;
-        tx.commit()?;
+
+        self.reconcile();
 
         Ok(())
     }
@@ -485,9 +360,7 @@ impl GlobalState {
             }
         };
 
-        std::thread::spawn(move || {
-            responder.respond(filter_point(green2, filter_method, area, position))
-        });
+        spawn(move || responder.respond(filter_point(green2, filter_method, area, position)));
     }
 
     pub fn on_get_thermocouples(&self, responder: Responder<Vec<Thermocouple>>) {
@@ -504,7 +377,7 @@ impl GlobalState {
 
     fn set_thermocouples(&mut self, thermocouples: &[Thermocouple]) -> Result<()> {
         let tx = self.db.transaction()?;
-        self.setting.set_thermocouples(&tx, thermocouples)?;
+        self.setting.set_thermocouples(&tx, Some(thermocouples))?;
         self.daq_data
             .as_mut()
             .ok_or_else(|| anyhow!("daq not loaded yet"))?
@@ -512,7 +385,7 @@ impl GlobalState {
         self.nu_data = None;
         tx.commit()?;
 
-        let _ = self.spawn_interp();
+        self.reconcile();
 
         Ok(())
     }
@@ -522,15 +395,11 @@ impl GlobalState {
     }
 
     pub fn on_set_interp_method(&mut self, interp_method: InterpMethod, responder: Responder<()>) {
-        let ret = self.set_interp_method(interp_method);
-        if ret.is_ok() {
-            let _ = self.spawn_interp();
-        }
-        responder.respond(ret);
+        responder.respond(self.set_interp_method(interp_method));
     }
 
     fn set_interp_method(&mut self, interp_method: InterpMethod) -> Result<()> {
-        let mut interp_meta = self.interp_meta()?;
+        let mut interp_meta = self.interp_id()?;
         if interp_meta.interp_method == interp_method {
             warn!("interp method unchanged, compute again anyway");
         } else {
@@ -546,15 +415,15 @@ impl GlobalState {
         self.nu_data = None;
         tx.commit()?;
 
+        self.reconcile();
+
         Ok(())
     }
 
     pub fn on_interp_frame(&self, frame_index: usize, responder: Responder<Array2<f64>>) {
         match self.interpolator() {
             Ok(interpolator) => {
-                std::thread::spawn(move || {
-                    responder.respond(interpolator.interp_frame(frame_index))
-                });
+                spawn(move || responder.respond(interpolator.interp_frame(frame_index)));
             }
             Err(e) => responder.respond_err(e),
         }
@@ -576,7 +445,9 @@ impl GlobalState {
         self.setting
             .set_iteration_method(&self.db, iteration_method)?;
         self.nu_data = None;
-        let _ = self.spawn_solve();
+
+        self.reconcile();
+
         Ok(())
     }
 
@@ -592,7 +463,9 @@ impl GlobalState {
         self.setting
             .set_gmax_temperature(&self.db, gmax_temperature)?;
         self.nu_data = None;
-        let _ = self.spawn_solve();
+
+        self.reconcile();
+
         Ok(())
     }
 
@@ -608,7 +481,9 @@ impl GlobalState {
         self.setting
             .set_solid_thermal_conductivity(&self.db, solid_thermal_conductivity)?;
         self.nu_data = None;
-        let _ = self.spawn_solve();
+
+        self.reconcile();
+
         Ok(())
     }
 
@@ -618,6 +493,16 @@ impl GlobalState {
         responder: Responder<()>,
     ) {
         responder.respond(self.set_solid_thermal_diffusivity(solid_thermal_diffusivity));
+    }
+
+    fn set_solid_thermal_diffusivity(&mut self, solid_thermal_diffusivity: f64) -> Result<()> {
+        self.setting
+            .set_solid_thermal_diffusivity(&self.db, solid_thermal_diffusivity)?;
+        self.nu_data = None;
+
+        self.reconcile();
+
+        Ok(())
     }
 
     pub fn on_set_characteristic_length(
@@ -632,7 +517,9 @@ impl GlobalState {
         self.setting
             .set_characteristic_length(&self.db, characteristic_length)?;
         self.nu_data = None;
-        let _ = self.spawn_solve();
+
+        self.reconcile();
+
         Ok(())
     }
 
@@ -648,7 +535,9 @@ impl GlobalState {
         self.setting
             .set_air_thermal_conductivity(&self.db, air_thermal_conductivity)?;
         self.nu_data = None;
-        let _ = self.spawn_solve();
+
+        self.reconcile();
+
         Ok(())
     }
 
@@ -671,7 +560,7 @@ impl GlobalState {
             }
         };
 
-        std::thread::spawn(move || {
+        spawn(move || {
             let NuData { nu2, nu_nan_mean } = nu_data;
             let edge_truncation = edge_truncation.unwrap_or((nu_nan_mean * 0.6, nu_nan_mean * 2.0));
             match draw_area(plot_path, nu2.view(), edge_truncation) {
@@ -684,50 +573,5 @@ impl GlobalState {
                 Err(e) => responder.respond_err(e),
             }
         });
-    }
-}
-
-fn do_read_video(
-    video_path: PathBuf,
-    responder: Responder<()>,
-    outcome_sender: Sender<Outcome>,
-    progress_bar: ProgressBar,
-) {
-    let (video_meta, parameters, packet_rx) = match read_video(video_path, progress_bar) {
-        Ok(ret) => ret,
-        Err(e) => {
-            responder.respond_err(e);
-            return;
-        }
-    };
-
-    let nframes = video_meta.nframes;
-    outcome_sender
-        .send(Outcome::ReadVideoMeta {
-            video_meta: video_meta.clone(),
-            parameters,
-        })
-        .unwrap();
-    responder.respond_ok(());
-
-    let _span = info_span!("receive_loaded_packets", nframes).entered();
-    let video_meta = Arc::new(video_meta);
-    for cnt in 1.. {
-        match packet_rx.recv_timeout(Duration::from_secs(1)) {
-            Ok(packet) => outcome_sender
-                .send(Outcome::LoadVideoPacket {
-                    video_meta: video_meta.clone(),
-                    packet,
-                })
-                .unwrap(),
-            Err(e) => {
-                match e {
-                    RecvTimeoutError::Timeout => error!("load packets got stuck for some reason"),
-                    RecvTimeoutError::Disconnected => debug_assert_eq!(cnt, nframes),
-                }
-                return;
-            }
-        }
-        debug_assert!(cnt < nframes);
     }
 }

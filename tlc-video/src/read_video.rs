@@ -4,7 +4,6 @@ use anyhow::{anyhow, Result};
 use crossbeam::channel::{bounded, Receiver};
 use ffmpeg::codec;
 pub use ffmpeg::codec::{packet::Packet, Parameters};
-use tlc_util::time::now_as_millis;
 use tracing::{error, info_span, instrument};
 
 use crate::{ProgressBar, VideoMeta};
@@ -38,11 +37,9 @@ pub fn read_video<P: AsRef<Path>>(
     progress_bar.start(nframes as u32)?;
     let (tx, rx) = bounded(3); // cap doesn't really matter
     let video_meta = VideoMeta {
-        path: video_path,
         frame_rate,
         nframes,
         shape,
-        read_at: now_as_millis(),
     };
 
     std::thread::spawn(move || {
@@ -115,7 +112,6 @@ mod tests {
     fn _read_video(video_path: &str, expected_video_meta: VideoMeta) {
         let progress_bar = ProgressBar::default();
         let (video_meta, _, packet_rx) = read_video(video_path, progress_bar).unwrap();
-        assert_eq!(video_meta.path, expected_video_meta.path);
         assert_eq!(video_meta.frame_rate, expected_video_meta.frame_rate);
         assert_eq!(video_meta.shape, expected_video_meta.shape);
         assert_eq!(video_meta.nframes, expected_video_meta.nframes);

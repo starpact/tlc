@@ -5,7 +5,11 @@ mod decode;
 mod detect_peak;
 mod read_video;
 
-use std::{path::PathBuf, sync::Arc};
+use std::{
+    hash::{Hash, Hasher},
+    path::PathBuf,
+    sync::Arc,
+};
 
 use anyhow::{anyhow, bail, Result};
 pub use ffmpeg::codec::{packet::Packet, Parameters};
@@ -13,8 +17,8 @@ use ndarray::ArcArray2;
 use serde::{Deserialize, Serialize};
 
 pub use controller::{Progress, ProgressBar, VideoController};
-pub use decode::{DecoderManager, Green2Meta};
-pub use detect_peak::{filter_detect_peak, filter_point, FilterMethod, GmaxMeta};
+pub use decode::{DecoderManager, Green2Id};
+pub use detect_peak::{filter_detect_peak, filter_point, FilterMethod, GmaxId};
 pub use read_video::read_video;
 
 pub struct VideoData {
@@ -30,8 +34,8 @@ pub struct VideoData {
     /// decoding [much easier](https://www.cnblogs.com/TaigaCon/p/10220356.html).
     /// 2. Why not cache the frame data, which should be more straight forward?
     /// This is because packet is *compressed*. Specifically, a typical video
-    /// in our experiments of 1.9GB will expend to 9.1GB if decoded to rgb byte
-    /// array, which may cause some trouble on PC.
+    /// in our experiments of 1.9GB will expend to 9.1GB if decompressed to rgb
+    /// byte array, which may cause some trouble on PC.
     packets: Vec<Arc<Packet>>,
 
     /// Manage thread-local decoders.
@@ -44,15 +48,25 @@ pub struct VideoData {
     gmax_frame_indexes: Option<Arc<Vec<usize>>>,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, Hash)]
+pub struct VideoId {
+    pub video_path: PathBuf,
+}
+
+impl VideoId {
+    pub fn eval_hash(&self) -> u64 {
+        let mut hasher = ahash::AHasher::default();
+        self.hash(&mut hasher);
+        hasher.finish()
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq)]
 pub struct VideoMeta {
-    pub path: PathBuf,
     pub frame_rate: usize,
     pub nframes: usize,
     /// (video_height, video_width)
     pub shape: (u32, u32),
-    /// In milliseconds, used to distinguish two reads of the same video.
-    pub read_at: u64,
 }
 
 pub fn init() {
@@ -77,8 +91,8 @@ impl VideoData {
         }
     }
 
-    pub fn video_meta(&self) -> &VideoMeta {
-        &self.video_meta
+    pub fn video_meta(&self) -> VideoMeta {
+        self.video_meta
     }
 
     pub fn packet(&self, frame_index: usize) -> Result<Arc<Packet>> {
@@ -120,11 +134,10 @@ impl VideoData {
         self
     }
 
-    pub fn push_packet(&mut self, video_meta: &VideoMeta, packet: Arc<Packet>) -> Result<()> {
-        if self.video_meta != *video_meta {
-            bail!("video path changed");
+    pub fn push_packet(&mut self, packet: Arc<Packet>) -> Result<()> {
+        if packet.dts().unwrap() as usize + 1 != self.packets.len() {
+            bail!("wrong packet");
         }
-
         self.packets.push(packet);
 
         Ok(())
@@ -133,31 +146,24 @@ impl VideoData {
 
 #[cfg(test)]
 mod test_util {
-    use std::path::PathBuf;
-
     use crate::VideoMeta;
 
     pub const VIDEO_PATH_SAMPLE: &str = "../tests/almost_empty.avi";
-
     pub const VIDEO_PATH_REAL: &str = "/home/yhj/Downloads/EXP/imp/videos/imp_20000_1_up.avi";
 
     pub fn video_meta_sample() -> VideoMeta {
         VideoMeta {
-            path: PathBuf::from(VIDEO_PATH_SAMPLE),
             frame_rate: 25,
             nframes: 3,
             shape: (1024, 1280),
-            read_at: 0,
         }
     }
 
     pub fn video_meta_real() -> VideoMeta {
         VideoMeta {
-            path: PathBuf::from(VIDEO_PATH_REAL),
             frame_rate: 25,
             nframes: 2444,
             shape: (1024, 1280),
-            read_at: 0,
         }
     }
 }
