@@ -9,34 +9,24 @@ Built with [Tauri](https://tauri.app).
 ### Setting Mapping to Runtime Data 
 ```mermaid
 flowchart
-    video_path[Video Path] --> packets[Packets]
-    video_path --> decoder_manager[Decoder Manager]
-    packets --> green2[Green2]
+    video_path[Video Path] --> packets((Packets))
+    video_path --> decoder_manager((Decoder Manager))
+    packets --> green2((Green2))
     decoder_manager --> green2
     start_frame[Start Frame] --> green2
     area[Area] --> green2
     area --> interpolator
-    green2 --> gmax_frame_indexes[Gmax Frame Indexes]
+    green2 --> gmax_frame_indexes((Gmax Frame Indexes))
     daq_path[DAQ Path] --> daq_raw[DAQ Raw]
     daq_raw --> interpolator
     start_row[Start Row] --> interpolator
-    thermocouples[Thermocouples] --> interpolator[Interpolator]
+    thermocouples[Thermocouples] --> interpolator((Interpolator))
     interp_method[Interpolation Method] --> interpolator
     filter_method[Filter Method] --> gmax_frame_indexes
-    iteration_method[Iteration Method] --> nu2[Nu2]
+    iteration_method[Iteration Method] --> nu2((Nu2))
     gmax_frame_indexes --> nu2
     interpolator --> nu2
     physical_param[Physical Parameters] --> nu2
-    style video_path fill:#bbf
-    style daq_path fill:#bbf
-    style start_frame fill:#bbf
-    style start_row fill:#bbf
-    style area fill:#bbf
-    style thermocouples fill:#bbf
-    style interp_method fill:#bbf
-    style filter_method fill:#bbf
-    style iteration_method fill:#bbf
-    style physical_param fill:#bbf
 ```
 
 ### Logic Dependencies within Setting
@@ -49,12 +39,6 @@ flowchart
     daq_path[DAQ Path] --> start_frame
     daq_path[DAQ Path] --> start_row
     daq_path[DAQ Path] --> thermocouples
-    style video_path fill:#bbf
-    style daq_path fill:#bbf
-    style start_frame fill:#bbf
-    style start_row fill:#bbf
-    style area fill:#bbf
-    style thermocouples fill:#bbf
 ```
 
 
