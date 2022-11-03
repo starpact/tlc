@@ -48,7 +48,7 @@ impl VideoController {
 #[derive(Default, Clone)]
 pub struct ProgressBar(Arc<AtomicI64>);
 
-#[derive(Debug, Default, Serialize, Clone, Copy)]
+#[derive(Debug, Default, Serialize, Clone, Copy, PartialEq)]
 pub enum Progress {
     #[default]
     Uninitialized,

@@ -1,10 +1,7 @@
 mod interp;
 mod raw;
 
-use std::{
-    hash::{Hash, Hasher},
-    path::PathBuf,
-};
+use std::path::PathBuf;
 
 use ndarray::ArcArray2;
 use serde::{Deserialize, Serialize};
@@ -18,17 +15,9 @@ pub struct DaqData {
     interpolator: Option<Interpolator>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Hash)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct DaqId {
     pub daq_path: PathBuf,
-}
-
-impl DaqId {
-    pub fn eval_hash(&self) -> u64 {
-        let mut hasher = ahash::AHasher::default();
-        self.hash(&mut hasher);
-        hasher.finish()
-    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq)]

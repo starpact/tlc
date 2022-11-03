@@ -5,11 +5,7 @@ mod decode;
 mod detect_peak;
 mod read_video;
 
-use std::{
-    hash::{Hash, Hasher},
-    path::PathBuf,
-    sync::Arc,
-};
+use std::{path::PathBuf, sync::Arc};
 
 use anyhow::{anyhow, bail, Result};
 pub use ffmpeg::codec::{packet::Packet, Parameters};
@@ -48,17 +44,9 @@ pub struct VideoData {
     gmax_frame_indexes: Option<Arc<Vec<usize>>>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Hash)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct VideoId {
     pub video_path: PathBuf,
-}
-
-impl VideoId {
-    pub fn eval_hash(&self) -> u64 {
-        let mut hasher = ahash::AHasher::default();
-        self.hash(&mut hasher);
-        hasher.finish()
-    }
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq)]
@@ -99,12 +87,12 @@ impl VideoData {
         self.packets
             .get(frame_index)
             .cloned()
-            .ok_or_else(|| anyhow!("packet not loaded yet"))
+            .ok_or_else(|| anyhow!("packet(frame_index = {frame_index}) not loaded yet"))
     }
 
     pub fn packets(&self) -> Result<Vec<Arc<Packet>>> {
         if self.packets.len() < self.video_meta.nframes {
-            bail!("video not loaded yet");
+            bail!("loading packets not finished yet");
         }
         Ok(self.packets.clone())
     }
@@ -135,7 +123,7 @@ impl VideoData {
     }
 
     pub fn push_packet(&mut self, packet: Arc<Packet>) -> Result<()> {
-        if packet.dts().unwrap() as usize + 1 != self.packets.len() {
+        if packet.dts() != Some(self.packets.len() as i64) {
             bail!("wrong packet");
         }
         self.packets.push(packet);

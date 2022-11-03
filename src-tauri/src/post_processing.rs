@@ -5,7 +5,7 @@ use image::ColorType::Rgb8;
 use ndarray::prelude::*;
 use once_cell::sync::OnceCell;
 use plotters::prelude::*;
-use tracing::instrument;
+use tracing::{instrument, warn};
 
 #[instrument(skip(area), fields(plot_path), err)]
 pub fn draw_area<P: AsRef<Path>>(
@@ -39,7 +39,11 @@ pub fn draw_area<P: AsRef<Path>>(
         }
     }
 
-    image::save_buffer(&plot_path, &buf, w as u32, h as u32, Rgb8)?;
+    let plot_path = plot_path.as_ref();
+    if plot_path.exists() {
+        warn!("overwrite: {plot_path:?}")
+    }
+    image::save_buffer(plot_path, &buf, w as u32, h as u32, Rgb8)?;
     let plot_base64 = base64::encode(&buf);
 
     Ok(plot_base64)

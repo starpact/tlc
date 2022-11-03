@@ -6,7 +6,7 @@ use std::{
 use anyhow::{anyhow, bail, Result};
 use ndarray::{ArcArray2, Array2};
 use tlc_video::{filter_point, FilterMethod, Progress, VideoId, VideoMeta};
-use tracing::warn;
+use tracing::{instrument, warn};
 
 use super::GlobalState;
 use crate::{
@@ -18,6 +18,7 @@ use crate::{
 };
 
 impl GlobalState {
+    #[instrument(level = "trace", skip(self, responder))]
     pub fn on_create_setting(
         &mut self,
         create_setting: Box<SettingData>,
@@ -27,39 +28,47 @@ impl GlobalState {
             self.setting
                 .create_setting(&self.db, (*create_setting).into()),
         );
-        // TODO
+        self.reconcile();
     }
 
+    #[instrument(level = "trace", skip(self, responder))]
     pub fn on_switch_setting(&mut self, setting_id: i64, responder: Responder<()>) {
         responder.respond(self.setting.switch_setting(&self.db, setting_id));
-        // TODO
+        self.reconcile();
     }
 
+    #[instrument(level = "trace", skip(self, responder))]
     pub fn on_delete_setting(&mut self, setting_id: i64, responder: Responder<()>) {
         responder.respond(self.setting.delete_setting(&self.db, setting_id));
-        // TODO
+        self.reconcile();
     }
 
+    #[instrument(level = "trace", skip(self, responder))]
     pub fn on_get_name(&self, responder: Responder<String>) {
         responder.respond(self.setting.name(&self.db));
     }
 
+    #[instrument(level = "trace", skip(self, responder))]
     pub fn on_set_name(&self, name: String, responder: Responder<()>) {
         responder.respond(self.setting.set_name(&self.db, &name));
     }
 
+    #[instrument(level = "trace", skip(self, responder))]
     pub fn on_get_save_root_dir(&self, responder: Responder<PathBuf>) {
         responder.respond(self.setting.save_root_dir(&self.db));
     }
 
+    #[instrument(level = "trace", skip(self, responder))]
     pub fn on_set_save_root_dir(&mut self, save_root_dir: PathBuf, responder: Responder<()>) {
         responder.respond(self.setting.set_save_root_dir(&self.db, &save_root_dir));
     }
 
-    pub fn on_get_video_meta(&self, responder: Responder<VideoMeta>) {
-        responder.respond(self.video_data().map(|video_data| video_data.video_meta()))
+    #[instrument(level = "trace", skip(self, responder))]
+    pub fn on_get_video_path(&self, responder: Responder<PathBuf>) {
+        responder.respond(self.setting.video_path(&self.db))
     }
 
+    #[instrument(level = "trace", skip(self, responder))]
     pub fn on_set_video_path(&mut self, video_path: PathBuf, responder: Responder<()>) {
         if let Err(e) = self.set_video_path(&video_path) {
             responder.respond_err(e);
@@ -86,13 +95,24 @@ impl GlobalState {
         Ok(())
     }
 
+    #[instrument(level = "trace", skip(self, responder))]
+    pub fn on_get_video_meta(&self, responder: Responder<VideoMeta>) {
+        responder.respond(self.video_data().map(|video_data| video_data.video_meta()))
+    }
+
+    #[instrument(level = "trace", skip(self, responder))]
     pub fn on_get_read_video_progress(&self, responder: Responder<Progress>) {
         responder.respond_ok(self.video_controller.read_video_progress());
     }
 
+    #[instrument(level = "trace", skip(self, responder))]
     pub fn on_decode_frame_base64(&self, frame_index: usize, responder: Responder<String>) {
         let f = || {
             let video_data = self.video_data()?;
+            let nframes = video_data.video_meta().nframes;
+            if frame_index >= nframes {
+                bail!("frame_index({frame_index}) exceeds nframes({nframes})");
+            }
             let packet = video_data.packet(frame_index)?;
             Ok((video_data, packet))
         };
@@ -106,13 +126,15 @@ impl GlobalState {
         };
         let decoder_manager = video_data.decoder_manager();
 
-        spawn(move || responder.respond(decoder_manager.decode_frame_base64(packet)));
+        spawn(move || responder.respond_no_result_log(decoder_manager.decode_frame_base64(packet)));
     }
 
-    pub fn on_get_daq_meta(&self, responder: Responder<DaqMeta>) {
-        responder.respond(self.daq_data().map(|daq_data| daq_data.daq_meta()));
+    #[instrument(level = "trace", skip(self, responder))]
+    pub fn on_get_daq_path(&self, responder: Responder<PathBuf>) {
+        responder.respond(self.setting.daq_path(&self.db));
     }
 
+    #[instrument(level = "trace", skip(self, responder))]
     pub fn on_set_daq_path(&mut self, daq_path: PathBuf, responder: Responder<()>) {
         if let Err(e) = self.set_daq_path(&daq_path) {
             responder.respond_err(e);
@@ -120,6 +142,11 @@ impl GlobalState {
         }
 
         self.spawn_read_daq(DaqId { daq_path }, Some(responder));
+    }
+
+    #[instrument(level = "trace", skip(self, responder))]
+    pub fn on_get_daq_meta(&self, responder: Responder<DaqMeta>) {
+        responder.respond(self.daq_data().map(|daq_data| daq_data.daq_meta()));
     }
 
     fn set_daq_path(&mut self, daq_path: &Path) -> Result<()> {
@@ -138,14 +165,17 @@ impl GlobalState {
         Ok(())
     }
 
+    #[instrument(level = "trace", skip(self, responder))]
     pub fn on_get_daq_raw(&self, responder: Responder<ArcArray2<f64>>) {
-        responder.respond(self.daq_data().map(|daq_data| daq_data.daq_raw()))
+        responder.respond_no_result_log(self.daq_data().map(|daq_data| daq_data.daq_raw()))
     }
 
+    #[instrument(level = "trace", skip(self, responder))]
     pub fn on_get_start_index(&self, responder: Responder<StartIndex>) {
         responder.respond(self.start_index());
     }
 
+    #[instrument(level = "trace", skip(self, responder))]
     pub fn on_synchronize_video_and_daq(
         &mut self,
         start_frame: usize,
@@ -188,6 +218,7 @@ impl GlobalState {
         Ok(())
     }
 
+    #[instrument(level = "trace", skip(self, responder))]
     pub fn on_set_start_frame(&mut self, start_frame: usize, responder: Responder<()>) {
         responder.respond(self.set_start_frame(start_frame));
     }
@@ -233,6 +264,7 @@ impl GlobalState {
         Ok(())
     }
 
+    #[instrument(level = "trace", skip(self, responder))]
     pub fn on_set_start_row(&mut self, start_row: usize, responder: Responder<()>) {
         responder.respond(self.set_start_row(start_row));
     }
@@ -278,10 +310,12 @@ impl GlobalState {
         Ok(())
     }
 
+    #[instrument(level = "trace", skip(self, responder))]
     pub fn on_get_area(&self, responder: Responder<(u32, u32, u32, u32)>) {
         responder.respond(self.area());
     }
 
+    #[instrument(level = "trace", skip(self, responder))]
     pub fn on_set_area(&mut self, area: (u32, u32, u32, u32), responder: Responder<()>) {
         responder.respond(self.set_area(area));
     }
@@ -312,14 +346,17 @@ impl GlobalState {
         Ok(())
     }
 
+    #[instrument(level = "trace", skip(self, responder))]
     pub fn on_get_build_green2_progress(&self, responder: Responder<Progress>) {
         responder.respond_ok(self.video_controller.build_green2_progress());
     }
 
+    #[instrument(level = "trace", skip(self, responder))]
     pub fn on_get_filter_method(&self, responder: Responder<FilterMethod>) {
         responder.respond(self.setting.filter_method(&self.db));
     }
 
+    #[instrument(level = "trace", skip(self, responder))]
     pub fn on_set_filter_method(&mut self, filter_method: FilterMethod, responder: Responder<()>) {
         responder.respond(self.set_filter_method(filter_method));
     }
@@ -336,10 +373,12 @@ impl GlobalState {
         Ok(())
     }
 
+    #[instrument(level = "trace", skip(self, responder))]
     pub fn on_get_detect_peak_progress(&self, responder: Responder<Progress>) {
         responder.respond_ok(self.video_controller.detect_peak_progress());
     }
 
+    #[instrument(level = "trace", skip(self, responder))]
     pub fn on_filter_point(&self, position: (usize, usize), responder: Responder<Vec<u8>>) {
         let f = || {
             let green2 = self
@@ -363,10 +402,12 @@ impl GlobalState {
         spawn(move || responder.respond(filter_point(green2, filter_method, area, position)));
     }
 
+    #[instrument(level = "trace", skip(self, responder))]
     pub fn on_get_thermocouples(&self, responder: Responder<Vec<Thermocouple>>) {
         responder.respond(self.thermocouples());
     }
 
+    #[instrument(level = "trace", skip(self, responder))]
     pub fn on_set_thermocouples(
         &mut self,
         thermocouples: Vec<Thermocouple>,
@@ -376,6 +417,10 @@ impl GlobalState {
     }
 
     fn set_thermocouples(&mut self, thermocouples: &[Thermocouple]) -> Result<()> {
+        if thermocouples.len() == 1 {
+            bail!("there must be at least two thermocouples");
+        }
+
         let tx = self.db.transaction()?;
         self.setting.set_thermocouples(&tx, Some(thermocouples))?;
         self.daq_data
@@ -390,22 +435,17 @@ impl GlobalState {
         Ok(())
     }
 
+    #[instrument(level = "trace", skip(self, responder))]
     pub fn on_get_interp_method(&self, responder: Responder<InterpMethod>) {
         responder.respond(self.interp_method());
     }
 
+    #[instrument(level = "trace", skip(self, responder))]
     pub fn on_set_interp_method(&mut self, interp_method: InterpMethod, responder: Responder<()>) {
         responder.respond(self.set_interp_method(interp_method));
     }
 
     fn set_interp_method(&mut self, interp_method: InterpMethod) -> Result<()> {
-        let mut interp_meta = self.interp_id()?;
-        if interp_meta.interp_method == interp_method {
-            warn!("interp method unchanged, compute again anyway");
-        } else {
-            interp_meta.interp_method = interp_method;
-        }
-
         let tx = self.db.transaction()?;
         self.setting.set_interp_method(&tx, interp_method)?;
         self.daq_data
@@ -420,6 +460,7 @@ impl GlobalState {
         Ok(())
     }
 
+    #[instrument(level = "trace", skip(self, responder))]
     pub fn on_interp_frame(&self, frame_index: usize, responder: Responder<Array2<f64>>) {
         match self.interpolator() {
             Ok(interpolator) => {
@@ -429,10 +470,12 @@ impl GlobalState {
         }
     }
 
+    #[instrument(level = "trace", skip(self, responder))]
     pub fn on_get_iteration_method(&self, responder: Responder<IterationMethod>) {
         responder.respond(self.setting.iteration_method(&self.db));
     }
 
+    #[instrument(level = "trace", skip(self, responder))]
     pub fn on_set_iteration_method(
         &mut self,
         iteration_method: IterationMethod,
@@ -451,10 +494,12 @@ impl GlobalState {
         Ok(())
     }
 
+    #[instrument(level = "trace", skip(self, responder))]
     pub fn on_get_physical_param(&self, responder: Responder<PhysicalParam>) {
         responder.respond(self.setting.physical_param(&self.db));
     }
 
+    #[instrument(level = "trace", skip(self, responder))]
     pub fn on_set_gmax_temperature(&mut self, gmax_temperature: f64, responder: Responder<()>) {
         responder.respond(self.set_gmax_temperature(gmax_temperature));
     }
@@ -469,6 +514,7 @@ impl GlobalState {
         Ok(())
     }
 
+    #[instrument(level = "trace", skip(self, responder))]
     pub fn on_set_solid_thermal_conductivity(
         &mut self,
         solid_thermal_conductivity: f64,
@@ -487,6 +533,7 @@ impl GlobalState {
         Ok(())
     }
 
+    #[instrument(level = "trace", skip(self, responder))]
     pub fn on_set_solid_thermal_diffusivity(
         &mut self,
         solid_thermal_diffusivity: f64,
@@ -505,6 +552,7 @@ impl GlobalState {
         Ok(())
     }
 
+    #[instrument(level = "trace", skip(self, responder))]
     pub fn on_set_characteristic_length(
         &mut self,
         characteristic_length: f64,
@@ -523,6 +571,7 @@ impl GlobalState {
         Ok(())
     }
 
+    #[instrument(level = "trace", skip(self, responder))]
     pub fn on_set_air_thermal_conductivity(
         &mut self,
         air_thermal_conductivity: f64,
@@ -541,6 +590,7 @@ impl GlobalState {
         Ok(())
     }
 
+    #[instrument(level = "trace", skip(self, responder))]
     pub fn on_get_nu(&self, edge_truncation: Option<(f64, f64)>, responder: Responder<NuView>) {
         let f = || {
             let nu_data = self
@@ -564,7 +614,7 @@ impl GlobalState {
             let NuData { nu2, nu_nan_mean } = nu_data;
             let edge_truncation = edge_truncation.unwrap_or((nu_nan_mean * 0.6, nu_nan_mean * 2.0));
             match draw_area(plot_path, nu2.view(), edge_truncation) {
-                Ok(nu_plot_base64) => responder.respond_ok(NuView {
+                Ok(nu_plot_base64) => responder.respond_ok_no_result_log(NuView {
                     nu2,
                     nu_nan_mean,
                     nu_plot_base64,

@@ -19,4 +19,3 @@ dwt = "0.5"
 serde = { version = "1.0", features = ["derive"] }
 rayon = "1.5"
 tlc-util = { path = "../tlc-util" }
-ahash = "0.8"

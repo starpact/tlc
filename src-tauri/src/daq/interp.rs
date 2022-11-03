@@ -1,5 +1,3 @@
-use std::hash::{Hash, Hasher};
-
 use anyhow::{anyhow, Result};
 use ndarray::{parallel::prelude::*, prelude::*, ArcArray2};
 use packed_simd::f64x4;
@@ -7,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::daq::Thermocouple;
 
-#[derive(Debug, Clone, PartialEq, Hash)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct InterpId {
     pub daq_id: DaqId,
     pub start_row: usize,
@@ -15,14 +13,6 @@ pub struct InterpId {
     pub area: (u32, u32, u32, u32),
     pub interp_method: InterpMethod,
     pub thermocouples: Vec<Thermocouple>,
-}
-
-impl InterpId {
-    pub fn eval_hash(&self) -> u64 {
-        let mut hasher = ahash::AHasher::default();
-        self.hash(&mut hasher);
-        hasher.finish()
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -571,5 +561,15 @@ mod test {
                 position,
             })
             .collect()
+    }
+
+    impl Default for Interpolator {
+        fn default() -> Self {
+            Self {
+                interp_method: InterpMethod::Horizontal,
+                shape: (100, 100),
+                data: ArcArray2::zeros((100, 2000)),
+            }
+        }
     }
 }

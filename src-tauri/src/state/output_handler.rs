@@ -3,7 +3,7 @@ use std::sync::Arc;
 use anyhow::{anyhow, bail, Result};
 use ndarray::Array2;
 use tlc_video::{GmaxId, Green2Id, Packet, Parameters, VideoData, VideoId, VideoMeta};
-use tracing::warn;
+use tracing::{instrument, warn};
 
 use super::GlobalState;
 use crate::{
@@ -12,41 +12,8 @@ use crate::{
     solve::{NuData, SolveId},
 };
 
-pub enum Outcome {
-    ReadVideoMeta {
-        video_id: VideoId,
-        video_meta: VideoMeta,
-        parameters: Parameters,
-    },
-    LoadVideoPacket {
-        video_id: Arc<VideoId>,
-        packet: Packet,
-    },
-    ReadDaq {
-        daq_id: DaqId,
-        daq_meta: DaqMeta,
-        daq_raw: Array2<f64>,
-    },
-    BuildGreen2 {
-        green2_id: Green2Id,
-        green2: Array2<u8>,
-    },
-    DetectPeak {
-        gmax_id: GmaxId,
-        gmax_frame_indexes: Vec<usize>,
-    },
-    Interp {
-        interp_id: InterpId,
-        interpolator: Interpolator,
-    },
-    Solve {
-        solve_id: SolveId,
-        nu2: Array2<f64>,
-        nu_nan_mean: f64,
-    },
-}
-
 impl GlobalState {
+    #[instrument(level = "debug", skip(self, video_meta, parameters), err)]
     pub fn on_complete_read_video_meta(
         &mut self,
         video_id: VideoId,
@@ -58,6 +25,7 @@ impl GlobalState {
         }
 
         self.video_data = Some(VideoData::new(video_meta, parameters));
+        self.reconcile();
 
         Ok(())
     }
@@ -77,6 +45,7 @@ impl GlobalState {
             .push_packet(Arc::new(packet))
     }
 
+    #[instrument(level = "debug", skip(self, daq_meta, daq_raw), err)]
     pub fn on_complete_read_daq(
         &mut self,
         daq_id: DaqId,
@@ -88,10 +57,12 @@ impl GlobalState {
         }
 
         self.daq_data = Some(DaqData::new(daq_meta, daq_raw.into_shared()));
+        self.reconcile();
 
         Ok(())
     }
 
+    #[instrument(level = "debug", skip(self, green2), err)]
     pub fn on_complete_build_green2(
         &mut self,
         green2_id: Green2Id,
@@ -104,10 +75,12 @@ impl GlobalState {
             .as_mut()
             .unwrap() // already checked above
             .set_green2(Some(green2.into_shared()));
+        self.reconcile();
 
         Ok(())
     }
 
+    #[instrument(level = "debug", skip(self, gmax_frame_indexes), err)]
     pub fn on_complete_detect_peak(
         &mut self,
         gmax_id: GmaxId,
@@ -121,10 +94,12 @@ impl GlobalState {
             .as_mut()
             .unwrap() // already checked above
             .set_gmax_frame_indexes(Some(Arc::new(gmax_frame_indexes)));
+        self.reconcile();
 
         Ok(())
     }
 
+    #[instrument(level = "debug", skip(self, interpolator), err)]
     pub fn on_complete_interp(
         &mut self,
         interp_id: InterpId,
@@ -138,10 +113,12 @@ impl GlobalState {
             .as_mut()
             .ok_or_else(|| anyhow!("daq not loaded yet"))?
             .set_interpolator(Some(interpolator));
+        self.reconcile();
 
         Ok(())
     }
 
+    #[instrument(level = "debug", skip(self, nu2), err)]
     pub fn on_solve(
         &mut self,
         solve_id: SolveId,

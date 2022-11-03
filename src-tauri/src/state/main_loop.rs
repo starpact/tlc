@@ -1,32 +1,37 @@
 use anyhow::Result;
-use crossbeam::{channel::Receiver, select};
-use tracing::error;
+use crossbeam::{
+    channel::{Receiver, RecvError},
+    select,
+};
+use rusqlite::Connection;
+use tracing::{error, info};
 
 use super::GlobalState;
-use crate::{request::Request, setting::new_db, state::outcome_handler::Outcome};
+use crate::{request::Request, state::output::Output};
 
-const SQLITE_FILEPATH: &str = "./var/db.sqlite3";
-
-pub fn main_loop(request_receiver: Receiver<Request>) {
-    let db = new_db(SQLITE_FILEPATH);
+pub fn main_loop(db: Connection, request_receiver: Receiver<Request>) {
     let mut global_state = GlobalState::new(db);
-    loop {
-        if let Err(e) = global_state.handle(&request_receiver) {
-            error!("{e}");
-        }
-    }
+    while global_state.handle(&request_receiver).is_ok() {}
+    info!("exit main loop");
 }
 
 impl GlobalState {
-    /// `handle` keeps receiving `Request`(frontend message) and `Outcome`(computation
+    /// `handle` keeps receiving `Request`(frontend message) and `Output`(computation
     /// result), then make decision what to do next based on the current global state.
     /// It should NEVER block or do any heavy computations, all blocking/time-consuming
     /// tasks should be executed in other threads and send back results asynchronously
-    /// through `outcome_sender`.
-    fn handle(&mut self, request_receiver: &Receiver<Request>) -> Result<()> {
+    /// through `output_sender`.
+    fn handle(
+        &mut self,
+        request_receiver: &Receiver<Request>,
+    ) -> core::result::Result<(), RecvError> {
         select! {
             recv(request_receiver)  -> request => self.handle_request(request?),
-            recv(self.outcome_receiver) -> outcome => self.handle_outcome(outcome?)?,
+            recv(self.output_receiver) -> output => {
+                if let Err(e) = self.handle_output(output?) {
+                    error!(%e);
+                }
+            }
         }
         Ok(())
     }
@@ -53,21 +58,23 @@ impl GlobalState {
                 save_root_dir,
                 responder,
             } => self.on_set_save_root_dir(save_root_dir, responder),
-            GetVideoMeta { responder } => self.on_get_video_meta(responder),
+            GetVideoPath { responder } => self.on_get_video_path(responder),
             SetVideoPath {
                 video_path,
                 responder,
             } => self.on_set_video_path(video_path, responder),
+            GetVideoMeta { responder } => self.on_get_video_meta(responder),
             GetReadVideoProgress { responder } => self.on_get_read_video_progress(responder),
             DecodeFrameBase64 {
                 frame_index,
                 responder,
             } => self.on_decode_frame_base64(frame_index, responder),
-            GetDaqMeta { responder } => self.on_get_daq_meta(responder),
+            GetDaqPath { responder } => self.on_get_daq_path(responder),
             SetDaqPath {
                 daq_path,
                 responder,
             } => self.on_set_daq_path(daq_path, responder),
+            GetDaqMeta { responder } => self.on_get_daq_meta(responder),
             GetDaqRaw { responder } => self.on_get_daq_raw(responder),
             GetStartIndex { responder } => self.on_get_start_index(responder),
             SynchronizeVideoAndDaq {
@@ -143,9 +150,9 @@ impl GlobalState {
         }
     }
 
-    fn handle_outcome(&mut self, outcome: Outcome) -> Result<()> {
-        use Outcome::*;
-        match outcome {
+    fn handle_output(&mut self, output: Output) -> Result<()> {
+        use Output::*;
+        match output {
             ReadVideoMeta {
                 video_id,
                 video_meta,
@@ -154,9 +161,7 @@ impl GlobalState {
             LoadVideoPacket {
                 video_id: video_meta,
                 packet,
-            } => {
-                self.on_complete_load_video_packet(video_meta, packet)?;
-            }
+            } => self.on_complete_load_video_packet(video_meta, packet)?,
             ReadDaq {
                 daq_id,
                 daq_meta,
@@ -182,76 +187,5 @@ impl GlobalState {
         }
 
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::path::PathBuf;
-
-    use crossbeam::channel::{bounded, Sender};
-    use tokio::sync::oneshot;
-    use tracing::error;
-
-    use super::*;
-    use crate::{
-        request::{Request, Responder, SettingData},
-        setting::new_db_in_memory,
-        solve::PhysicalParam,
-    };
-
-    #[test]
-    fn test_main_loop_send_recv() {
-        let sender = spawn_main_loop();
-
-        let (tx, rx) = oneshot::channel();
-        sender
-            .send(Request::GetFilterMethod {
-                responder: Responder::simple(tx),
-            })
-            .unwrap();
-        let ret = rx.blocking_recv().unwrap().unwrap();
-        println!("{ret:?}")
-    }
-
-    fn spawn_main_loop() -> Sender<Request> {
-        let (request_sender, request_receiver) = bounded(3);
-        let db = new_db_in_memory();
-        let mut global_state = GlobalState::new(db);
-        std::thread::spawn(move || loop {
-            if let Err(e) = global_state.handle(&request_receiver) {
-                error!("{e}");
-            }
-        });
-
-        let (tx, rx) = oneshot::channel();
-        request_sender
-            .send(Request::CreateSetting {
-                create_setting: Box::new(SettingData {
-                    name: "test_case".to_owned(),
-                    save_root_dir: PathBuf::from("fake_save_root_dir"),
-                    video_path: None,
-                    daq_path: None,
-                    start_frame: None,
-                    start_row: None,
-                    area: None,
-                    thermocouples: None,
-                    interp_method: None,
-                    filter_method: None,
-                    iteration_method: None,
-                    physical_param: PhysicalParam {
-                        gmax_temperature: 35.48,
-                        solid_thermal_conductivity: 0.19,
-                        solid_thermal_diffusivity: 1.091e-7,
-                        characteristic_length: 0.015,
-                        air_thermal_conductivity: 0.0276,
-                    },
-                }),
-                responder: Responder::simple(tx),
-            })
-            .unwrap();
-        rx.blocking_recv().unwrap().unwrap();
-
-        request_sender
     }
 }

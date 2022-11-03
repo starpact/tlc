@@ -1,14 +1,6 @@
-#![allow(dead_code)]
+use std::{sync::Arc, time::Duration};
 
-use std::{
-    sync::{
-        atomic::{AtomicI64, Ordering},
-        Arc,
-    },
-    time::Duration,
-};
-
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, Result};
 use crossbeam::channel::{RecvTimeoutError, Sender};
 use ndarray::ArcArray2;
 use tlc_video::{
@@ -16,7 +8,7 @@ use tlc_video::{
 };
 use tracing::{debug, error, info_span, instrument};
 
-use super::{outcome_handler::Outcome, GlobalState};
+use super::{output::Output, GlobalState};
 use crate::{
     daq::{interp, read_daq, DaqId, InterpId, Interpolator},
     request::Responder,
@@ -25,22 +17,20 @@ use crate::{
 
 const NUM_TASK_TYPES: usize = 6;
 
-const TASK_TYPE_ID_READ_VIDEO: usize = 0;
-const TASK_TYPE_ID_READ_DAQ: usize = 1;
-const TASK_TYPE_ID_BUILD_GREEN2: usize = 2;
-const TASK_TYPE_ID_DETECT_PEAK: usize = 3;
-const TASK_TYPE_ID_INTERP: usize = 4;
-const TASK_TYPE_ID_SOLVE: usize = 5;
-
-const NO_BUSY_TASK: i64 = -1;
+const TYPE_ID_READ_VIDEO: usize = 0;
+const TYPE_ID_READ_DAQ: usize = 1;
+const TYPE_ID_BUILD_GREEN2: usize = 2;
+const TYPE_ID_DETECT_PEAK: usize = 3;
+const TYPE_ID_INTERP: usize = 4;
+const TYPE_ID_SOLVE: usize = 5;
 
 static DEPENDENCY_GRAPH: [&[usize]; NUM_TASK_TYPES] = [
-    &[],                                               // read_video
-    &[],                                               // read_daq
-    &[TASK_TYPE_ID_READ_VIDEO, TASK_TYPE_ID_READ_DAQ], // build_green2
-    &[TASK_TYPE_ID_BUILD_GREEN2],                      // detect_peak
-    &[TASK_TYPE_ID_READ_VIDEO, TASK_TYPE_ID_READ_DAQ], // interp
-    &[TASK_TYPE_ID_DETECT_PEAK, TASK_TYPE_ID_INTERP],  // solve
+    &[],                                     // read_video
+    &[],                                     // read_daq
+    &[TYPE_ID_READ_VIDEO, TYPE_ID_READ_DAQ], // build_green2
+    &[TYPE_ID_BUILD_GREEN2],                 // detect_peak
+    &[TYPE_ID_READ_VIDEO, TYPE_ID_READ_DAQ], // interp
+    &[TYPE_ID_DETECT_PEAK, TYPE_ID_INTERP],  // solve
 ];
 
 #[derive(Clone)]
@@ -74,15 +64,13 @@ enum Task {
 impl std::fmt::Debug for Task {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Task::ReadVideo {
-                video_id: video_path,
-            } => f
+            Task::ReadVideo { video_id } => f
                 .debug_struct("Task::ReadVideo")
-                .field("video_path", video_path)
+                .field("video_id", video_id)
                 .finish(),
-            Task::ReadDaq { daq_id: daq_path } => f
+            Task::ReadDaq { daq_id } => f
                 .debug_struct("Task::ReadDaq")
-                .field("daq_path", daq_path)
+                .field("daq_id", daq_id)
                 .finish(),
             Task::BuildGreen2 { green2_id, .. } => f
                 .debug_struct("Task::BuildGreen2")
@@ -104,12 +92,38 @@ impl std::fmt::Debug for Task {
     }
 }
 
+#[derive(Debug, PartialEq)]
+enum TaskId {
+    ReadVideo(VideoId),
+    ReadDaq(DaqId),
+    BuildGreen2(Green2Id),
+    DetectPeak(GmaxId),
+    Interp(InterpId),
+    Solve(SolveId),
+}
+
+impl TaskId {
+    fn type_id(&self) -> usize {
+        match self {
+            TaskId::ReadVideo(_) => TYPE_ID_READ_VIDEO,
+            TaskId::ReadDaq(_) => TYPE_ID_READ_DAQ,
+            TaskId::BuildGreen2(_) => TYPE_ID_BUILD_GREEN2,
+            TaskId::DetectPeak(_) => TYPE_ID_DETECT_PEAK,
+            TaskId::Interp(_) => TYPE_ID_INTERP,
+            TaskId::Solve(_) => TYPE_ID_SOLVE,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 enum TaskState {
     AlreadyCompleted,
     ReadyToGo(Task),
     DispatchedToOthers,
-    CannotStart { reason: String },
+    CannotStart {
+        #[allow(dead_code)] // used in log
+        reason: String,
+    },
 }
 
 impl From<Result<Option<Task>>> for TaskState {
@@ -136,39 +150,26 @@ impl From<Result<Task>> for TaskState {
 }
 
 #[derive(Default)]
-pub struct TaskController {
-    task_states: [Arc<AtomicI64>; NUM_TASK_TYPES],
+pub struct TaskRegistry {
+    last_task_ids: [Option<Arc<TaskId>>; NUM_TASK_TYPES],
 }
 
-#[derive(Debug)]
-struct TaskGuard {
-    state: Arc<AtomicI64>,
-}
-
-impl Drop for TaskGuard {
-    fn drop(&mut self) {
-        self.state.store(NO_BUSY_TASK, Ordering::Relaxed);
-    }
-}
-
-impl TaskController {
-    fn register(&self, task_type_id: usize, task_hash: u64) -> Result<TaskGuard> {
-        let state = &self.task_states[task_type_id];
-        let update_ret = state.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |old| {
-            let new = task_hash as i64;
-            if old != new {
-                Some(new)
+impl TaskRegistry {
+    fn register(&mut self, task_id: TaskId) -> Result<Arc<TaskId>> {
+        let last_task_id = &mut self.last_task_ids[task_id.type_id()];
+        if let Some(last_task_id) = last_task_id {
+            if Arc::strong_count(last_task_id) == 1 {
+                debug!("last task has already finished");
+            } else if **last_task_id != task_id {
+                debug!("last task has not finished but parameters are different");
             } else {
-                None
+                let e = anyhow!("last task with same parameters is still executing ");
+                error!(%e);
+                return Err(e);
             }
-        });
-        if update_ret.is_err() {
-            bail!("already executing with same parameters");
         }
 
-        Ok(TaskGuard {
-            state: state.clone(),
-        })
+        Ok(last_task_id.insert(Arc::new(task_id)).clone())
     }
 }
 
@@ -204,21 +205,21 @@ impl GlobalState {
         }
     }
 
-    #[instrument(skip(self), ret)]
+    #[instrument(level = "debug", skip(self), ret)]
     fn eval_tasks(&self) -> Vec<Task> {
-        let should_read_video = || self.should_read_video();
-        let should_read_daq = || self.should_read_daq();
-        let should_build_green2 = || self.should_build_green2();
-        let should_detect_peak = || self.should_detect_peak();
-        let should_interp = || self.should_interp();
-        let should_solve = || self.should_solve();
+        let eval_read_video = || self.eval_read_video();
+        let eval_read_daq = || self.eval_read_daq();
+        let eval_build_green2 = || self.eval_build_green2();
+        let eval_detect_peak = || self.eval_detect_peak();
+        let eval_interp = || self.eval_interp();
+        let eval_solve = || self.eval_solve();
         let mut evaluators = [
-            LazyEvaluator::new(&should_read_video),
-            LazyEvaluator::new(&should_read_daq),
-            LazyEvaluator::new(&should_build_green2),
-            LazyEvaluator::new(&should_detect_peak),
-            LazyEvaluator::new(&should_interp),
-            LazyEvaluator::new(&should_solve),
+            LazyEvaluator::new(&eval_read_video),
+            LazyEvaluator::new(&eval_read_daq),
+            LazyEvaluator::new(&eval_build_green2),
+            LazyEvaluator::new(&eval_detect_peak),
+            LazyEvaluator::new(&eval_interp),
+            LazyEvaluator::new(&eval_solve),
         ];
 
         let mut tasks = Vec::new();
@@ -227,8 +228,8 @@ impl GlobalState {
         tasks
     }
 
-    #[instrument(skip(self), ret)]
-    fn should_read_video(&self) -> TaskState {
+    #[instrument(level = "debug", parent = None, skip(self), ret)]
+    fn eval_read_video(&self) -> TaskState {
         match self.video_id() {
             Ok(video_id) => match self.video_data {
                 Some(_) => TaskState::AlreadyCompleted,
@@ -240,10 +241,10 @@ impl GlobalState {
         }
     }
 
-    #[instrument(skip(self), ret)]
-    fn should_read_daq(&self) -> TaskState {
+    #[instrument(level = "debug", parent = None, skip(self), ret)]
+    fn eval_read_daq(&self) -> TaskState {
         match self.daq_id() {
-            Ok(daq_id) => match self.video_data {
+            Ok(daq_id) => match self.daq_data {
                 Some(_) => TaskState::AlreadyCompleted,
                 None => TaskState::ReadyToGo(Task::ReadDaq { daq_id }),
             },
@@ -253,8 +254,8 @@ impl GlobalState {
         }
     }
 
-    #[instrument(skip(self), ret)]
-    fn should_build_green2(&self) -> TaskState {
+    #[instrument(level = "debug", parent = None, skip(self), ret)]
+    fn eval_build_green2(&self) -> TaskState {
         let f = || -> Result<Option<Task>> {
             let video_data = self.video_data()?;
             if video_data.green2().is_some() {
@@ -273,8 +274,8 @@ impl GlobalState {
         f().into()
     }
 
-    #[instrument(skip(self), ret)]
-    fn should_detect_peak(&self) -> TaskState {
+    #[instrument(level = "debug", parent = None, skip(self), ret)]
+    fn eval_detect_peak(&self) -> TaskState {
         let f = || -> Result<Option<Task>> {
             let video_data = self.video_data()?;
             if video_data.gmax_frame_indexes().is_some() {
@@ -295,8 +296,8 @@ impl GlobalState {
         f().into()
     }
 
-    #[instrument(skip(self), ret)]
-    fn should_interp(&self) -> TaskState {
+    #[instrument(level = "debug", parent = None, skip(self), ret)]
+    fn eval_interp(&self) -> TaskState {
         let f = || -> Result<Option<Task>> {
             let daq_data = self.daq_data()?;
             if daq_data.interpolator().is_some() {
@@ -310,8 +311,8 @@ impl GlobalState {
         f().into()
     }
 
-    #[instrument(skip(self), ret)]
-    fn should_solve(&self) -> TaskState {
+    #[instrument(level = "debug", parent = None, skip(self), ret)]
+    fn eval_solve(&self) -> TaskState {
         if self.nu_data.is_some() {
             return TaskState::AlreadyCompleted;
         }
@@ -356,98 +357,111 @@ impl GlobalState {
         }
     }
 
-    fn spawn<F>(&self, task_id: usize, task_hash: u64, f: F)
+    fn spawn<F>(&self, task_id: Arc<TaskId>, f: F)
     where
-        F: FnOnce(Sender<Outcome>) + Send + 'static,
+        F: FnOnce(Sender<Output>) + Send + 'static,
     {
-        if let Ok(task_guard) = self.task_controller.register(task_id, task_hash) {
-            let outcome_sender = self.outcome_sender.clone();
-            std::thread::spawn(move || {
-                let _task_guard = task_guard;
-                f(outcome_sender);
-            });
-        }
+        let output_sender = self.output_sender.clone();
+        std::thread::spawn(move || {
+            let _task_id = task_id;
+            f(output_sender);
+        });
     }
 
     pub fn spawn_read_video(&mut self, video_id: VideoId, responder: Option<Responder<()>>) {
-        let progress_bar = self.video_controller.prepare_read_video();
-        self.spawn(
-            TASK_TYPE_ID_READ_VIDEO,
-            video_id.eval_hash(),
-            |outcome_sender| {
-                let (video_meta, parameters, packet_rx) =
-                    match read_video(&video_id.video_path, progress_bar) {
-                        Ok(ret) => ret,
-                        Err(e) => {
-                            match responder {
-                                Some(responder) => responder.respond_err(e),
-                                None => error!(%e),
-                            }
-                            return;
-                        }
-                    };
+        let task_id = match self
+            .task_registry
+            .register(TaskId::ReadVideo(video_id.clone()))
+        {
+            Ok(task_id) => task_id,
+            Err(e) => {
+                if let Some(responder) = responder {
+                    responder.respond_err(e);
+                }
+                return;
+            }
+        };
 
-                let nframes = video_meta.nframes;
-                outcome_sender
-                    .send(Outcome::ReadVideoMeta {
-                        video_id: video_id.clone(),
-                        video_meta,
-                        parameters,
+        let progress_bar = self.video_controller.prepare_read_video();
+        self.spawn(task_id, |output_sender| {
+            let (video_meta, parameters, packet_rx) =
+                match read_video(&video_id.video_path, progress_bar) {
+                    Ok(ret) => ret,
+                    Err(e) => {
+                        match responder {
+                            Some(responder) => responder.respond_err(e),
+                            None => error!(%e),
+                        }
+                        return;
+                    }
+                };
+
+            let nframes = video_meta.nframes;
+            output_sender
+                .send(Output::ReadVideoMeta {
+                    video_id: video_id.clone(),
+                    video_meta,
+                    parameters,
+                })
+                .unwrap();
+            if let Some(responder) = responder {
+                responder.respond_ok(());
+            }
+
+            let _span = info_span!("receive_loaded_packets", nframes).entered();
+            let video_id = Arc::new(video_id);
+            for cnt in 0.. {
+                match packet_rx.recv_timeout(Duration::from_secs(1)) {
+                    Ok(packet) => output_sender
+                        .send(Output::LoadVideoPacket {
+                            video_id: video_id.clone(),
+                            packet,
+                        })
+                        .unwrap(),
+                    Err(e) => {
+                        match e {
+                            RecvTimeoutError::Timeout => {
+                                error!("load packets got stuck for some reason");
+                            }
+                            RecvTimeoutError::Disconnected => debug_assert_eq!(cnt, nframes),
+                        }
+                        return;
+                    }
+                }
+                debug_assert!(cnt < nframes);
+            }
+        });
+    }
+
+    pub fn spawn_read_daq(&mut self, daq_id: DaqId, responder: Option<Responder<()>>) {
+        let task_id = match self.task_registry.register(TaskId::ReadDaq(daq_id.clone())) {
+            Ok(task_id) => task_id,
+            Err(e) => {
+                if let Some(responder) = responder {
+                    responder.respond_err(e);
+                }
+                return;
+            }
+        };
+
+        self.spawn(task_id, |output_sender| match read_daq(&daq_id.daq_path) {
+            Ok((daq_meta, daq_raw)) => {
+                output_sender
+                    .send(Output::ReadDaq {
+                        daq_id,
+                        daq_meta,
+                        daq_raw,
                     })
                     .unwrap();
                 if let Some(responder) = responder {
                     responder.respond_ok(());
                 }
-
-                let _span = info_span!("receive_loaded_packets", nframes).entered();
-                let video_id = Arc::new(video_id);
-                for cnt in 1.. {
-                    match packet_rx.recv_timeout(Duration::from_secs(1)) {
-                        Ok(packet) => outcome_sender
-                            .send(Outcome::LoadVideoPacket {
-                                video_id: video_id.clone(),
-                                packet,
-                            })
-                            .unwrap(),
-                        Err(e) => {
-                            match e {
-                                RecvTimeoutError::Timeout => {
-                                    error!("load packets got stuck for some reason");
-                                }
-                                RecvTimeoutError::Disconnected => debug_assert_eq!(cnt, nframes),
-                            }
-                            return;
-                        }
-                    }
-                    debug_assert!(cnt < nframes);
-                }
+            }
+            Err(e) => match responder {
+                Some(responder) => responder.respond_err(e),
+                None => error!(%e),
             },
-        );
-    }
-
-    pub fn spawn_read_daq(&mut self, daq_id: DaqId, responder: Option<Responder<()>>) {
-        self.spawn(
-            TASK_TYPE_ID_READ_DAQ,
-            daq_id.eval_hash(),
-            |outcome_sender| match read_daq(&daq_id.daq_path) {
-                Ok((daq_meta, daq_raw)) => {
-                    outcome_sender
-                        .send(Outcome::ReadDaq {
-                            daq_id,
-                            daq_meta,
-                            daq_raw,
-                        })
-                        .unwrap();
-                    if let Some(responder) = responder {
-                        responder.respond_ok(());
-                    }
-                }
-                Err(e) => match responder {
-                    Some(responder) => responder.respond_err(e),
-                    None => error!(%e),
-                },
-            },
-        );
+        });
     }
 
     fn spawn_build_green2(
@@ -463,60 +477,57 @@ impl GlobalState {
             ..
         } = green2_id;
 
+        let Ok(task_id) = self.task_registry.register(TaskId::BuildGreen2(green2_id.clone())) else {
+            return;
+        };
         let progress_bar = self.video_controller.prepare_build_green2();
-        self.spawn(
-            TASK_TYPE_ID_BUILD_GREEN2,
-            green2_id.eval_hash(),
-            move |outcome_sender| {
-                if let Ok(green2) =
-                    decoder_manager.decode_all(packets, start_frame, cal_num, area, progress_bar)
-                {
-                    outcome_sender
-                        .send(Outcome::BuildGreen2 { green2_id, green2 })
-                        .unwrap();
-                }
-            },
-        );
+        self.spawn(task_id, move |output_sender| {
+            if let Ok(green2) =
+                decoder_manager.decode_all(packets, start_frame, cal_num, area, progress_bar)
+            {
+                output_sender
+                    .send(Output::BuildGreen2 { green2_id, green2 })
+                    .unwrap();
+            }
+        });
     }
 
-    pub fn spawn_detect_peak(&mut self, gmax_id: GmaxId, green2: ArcArray2<u8>) {
+    fn spawn_detect_peak(&mut self, gmax_id: GmaxId, green2: ArcArray2<u8>) {
+        let Ok(task_id) = self.task_registry.register(TaskId::DetectPeak(gmax_id.clone())) else {
+            return;
+        };
         let progress_bar = self.video_controller.prepare_detect_peak();
-        self.spawn(
-            TASK_TYPE_ID_DETECT_PEAK,
-            gmax_id.eval_hash(),
-            move |outcome_sender| {
-                if let Ok(gmax_frame_indexes) =
-                    filter_detect_peak(green2, gmax_id.filter_method, progress_bar)
-                {
-                    outcome_sender
-                        .send(Outcome::DetectPeak {
-                            gmax_id,
-                            gmax_frame_indexes,
-                        })
-                        .unwrap();
-                }
-            },
-        );
+        self.spawn(task_id, move |output_sender| {
+            if let Ok(gmax_frame_indexes) =
+                filter_detect_peak(green2, gmax_id.filter_method, progress_bar)
+            {
+                output_sender
+                    .send(Output::DetectPeak {
+                        gmax_id,
+                        gmax_frame_indexes,
+                    })
+                    .unwrap();
+            }
+        });
     }
 
-    pub fn spawn_interp(&mut self, interp_id: InterpId, daq_raw: ArcArray2<f64>) {
-        self.spawn(
-            TASK_TYPE_ID_INTERP,
-            interp_id.eval_hash(),
-            |outcome_sender| {
-                if let Ok(interpolator) = interp(&interp_id, daq_raw) {
-                    outcome_sender
-                        .send(Outcome::Interp {
-                            interp_id,
-                            interpolator,
-                        })
-                        .unwrap();
-                }
-            },
-        );
+    fn spawn_interp(&mut self, interp_id: InterpId, daq_raw: ArcArray2<f64>) {
+        let Ok(task_id) = self.task_registry.register(TaskId::Interp(interp_id.clone())) else {
+            return;
+        };
+        self.spawn(task_id, |output_sender| {
+            if let Ok(interpolator) = interp(&interp_id, daq_raw) {
+                output_sender
+                    .send(Output::Interp {
+                        interp_id,
+                        interpolator,
+                    })
+                    .unwrap();
+            }
+        });
     }
 
-    pub fn spawn_solve(
+    fn spawn_solve(
         &mut self,
         solve_id: SolveId,
         gmax_frame_indexes: Arc<Vec<usize>>,
@@ -528,30 +539,29 @@ impl GlobalState {
             physical_param,
             ..
         } = solve_id;
-        self.spawn(
-            TASK_TYPE_ID_SOLVE,
-            solve_id.eval_hash(),
-            move |outcome_sender| {
-                let nu2 = solve::solve(
-                    gmax_frame_indexes,
-                    &interpolator,
-                    physical_param,
-                    iteration_method,
-                    frame_rate,
-                );
+        let Ok(task_id) = self.task_registry.register(TaskId::Solve(solve_id.clone())) else {
+            return;
+        };
+        self.spawn(task_id, move |output_sender| {
+            let nu2 = solve::solve(
+                gmax_frame_indexes,
+                &interpolator,
+                physical_param,
+                iteration_method,
+                frame_rate,
+            );
 
-                let nu_nan_mean = nan_mean(nu2.view());
-                debug!(nu_nan_mean);
+            let nu_nan_mean = nan_mean(nu2.view());
+            debug!(nu_nan_mean);
 
-                outcome_sender
-                    .send(Outcome::Solve {
-                        solve_id,
-                        nu2,
-                        nu_nan_mean,
-                    })
-                    .unwrap();
-            },
-        );
+            output_sender
+                .send(Output::Solve {
+                    solve_id,
+                    nu2,
+                    nu_nan_mean,
+                })
+                .unwrap();
+        });
     }
 }
 
@@ -584,7 +594,14 @@ fn traverse_dependency_graph(
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
+    use std::{assert_matches::assert_matches, path::PathBuf};
+
+    use tlc_video::{Parameters, VideoData, VideoMeta};
+
+    use crate::{
+        daq::{DaqData, DaqMeta, InterpMethod, Thermocouple},
+        setting::{new_db_in_memory, CreateRequest, StartIndex},
+    };
 
     use super::*;
 
@@ -618,7 +635,7 @@ mod tests {
     }
 
     #[test]
-    fn test_eval_tasks() {
+    fn test_traverse_dependency_graph_all() {
         // Use `ReadVideo` to represent all tasks because it's easy to construct.
         fn fake_task(id: &str) -> Task {
             Task::ReadVideo {
@@ -749,29 +766,486 @@ mod tests {
     }
 
     #[test]
-    fn test_task_controller() {
-        let task_controller = TaskController::default();
-        let task_guard = task_controller
-            .register(TASK_TYPE_ID_BUILD_GREEN2, 666)
+    fn test_eval_tasks_empty_state() {
+        tlc_util::log::init();
+        let global_state = GlobalState::new(new_db_in_memory());
+        assert!(global_state.eval_tasks().is_empty());
+    }
+
+    #[test]
+    fn test_eval_read_video() {
+        tlc_util::log::init();
+        let mut global_state = empty_global_state();
+
+        assert_matches!(
+            global_state.eval_read_video(),
+            TaskState::CannotStart { reason } if reason == "video path unset",
+        );
+
+        global_state
+            .setting
+            .set_video_path(&global_state.db, &PathBuf::from("aaa"))
             .unwrap();
-        task_controller
-            .register(TASK_TYPE_ID_READ_DAQ, 666)
+        assert_matches!(global_state.eval_read_video(), TaskState::ReadyToGo(..));
+
+        global_state.video_data = Some(fake_video_data());
+        assert_matches!(global_state.eval_read_video(), TaskState::AlreadyCompleted);
+    }
+
+    #[test]
+    fn test_eval_read_daq() {
+        tlc_util::log::init();
+        let mut global_state = empty_global_state();
+
+        assert_matches!(
+            global_state.eval_read_daq(),
+            TaskState::CannotStart { reason } if reason == "daq path unset",
+        );
+
+        global_state
+            .setting
+            .set_daq_path(&global_state.db, &PathBuf::from("aaa"))
             .unwrap();
-        task_controller
-            .register(TASK_TYPE_ID_BUILD_GREEN2, 666)
+        assert_matches!(global_state.eval_read_daq(), TaskState::ReadyToGo(..));
+
+        global_state.daq_data = Some(fake_daq_data());
+        assert_matches!(global_state.eval_read_daq(), TaskState::AlreadyCompleted);
+    }
+
+    #[test]
+    fn test_eval_build_green2() {
+        tlc_util::log::init();
+        let mut global_state = empty_global_state();
+
+        assert_matches!(
+            global_state.eval_build_green2(),
+            TaskState::CannotStart { reason } if reason == "video not loaded yet",
+        );
+
+        global_state.video_data = Some(fake_video_data());
+        assert_matches!(
+            global_state.eval_build_green2(),
+            TaskState::CannotStart { reason } if reason == "loading packets not finished yet",
+        );
+
+        for i in 0..fake_video_data().video_meta().nframes {
+            let mut packet = Packet::empty();
+            packet.set_dts(Some(i as i64));
+            global_state
+                .video_data
+                .as_mut()
+                .unwrap()
+                .push_packet(Arc::new(packet))
+                .unwrap();
+        }
+        assert_matches!(
+            global_state.eval_build_green2(),
+            TaskState::CannotStart { reason } if reason == "video path unset",
+        );
+
+        global_state
+            .setting
+            .set_video_path(&global_state.db, &PathBuf::from("aaa"))
+            .unwrap();
+        assert_matches!(
+            global_state.eval_build_green2(),
+            TaskState::CannotStart { reason } if reason == "daq not loaded yet",
+        );
+
+        global_state.daq_data = Some(fake_daq_data());
+        assert_matches!(
+            global_state.eval_build_green2(),
+            TaskState::CannotStart { reason } if reason == "video and daq not synchronized yet",
+        );
+
+        global_state
+            .setting
+            .set_start_index(
+                &global_state.db,
+                Some(StartIndex {
+                    start_frame: 10,
+                    start_row: 2,
+                }),
+            )
+            .unwrap();
+        assert_matches!(
+            global_state.eval_build_green2(),
+            TaskState::CannotStart { reason } if reason == "area not selected yet",
+        );
+
+        global_state
+            .setting
+            .set_area(&global_state.db, Some((10, 10, 200, 200)))
+            .unwrap();
+        assert_matches!(global_state.eval_build_green2(), TaskState::ReadyToGo(..));
+    }
+
+    #[test]
+    fn test_eval_detect_peak() {
+        tlc_util::log::init();
+        let mut global_state = empty_global_state();
+
+        assert_matches!(
+            global_state.eval_detect_peak(),
+            TaskState::CannotStart { reason } if reason == "video not loaded yet",
+        );
+
+        global_state.video_data = Some(fake_video_data());
+        assert_matches!(
+            global_state.eval_detect_peak(),
+            TaskState::CannotStart { reason } if reason == "video path unset",
+        );
+
+        global_state
+            .setting
+            .set_video_path(&global_state.db, &PathBuf::from("aaa"))
+            .unwrap();
+        assert_matches!(
+            global_state.eval_detect_peak(),
+            TaskState::CannotStart { reason } if reason == "daq not loaded yet",
+        );
+
+        global_state.daq_data = Some(fake_daq_data());
+        assert_matches!(
+            global_state.eval_detect_peak(),
+            TaskState::CannotStart { reason } if reason == "video and daq not synchronized yet",
+        );
+
+        global_state
+            .setting
+            .set_start_index(
+                &global_state.db,
+                Some(StartIndex {
+                    start_frame: 10,
+                    start_row: 2,
+                }),
+            )
+            .unwrap();
+        assert_matches!(
+            global_state.eval_detect_peak(),
+            TaskState::CannotStart { reason } if reason == "area not selected yet",
+        );
+
+        global_state
+            .setting
+            .set_area(&global_state.db, Some((10, 10, 200, 200)))
+            .unwrap();
+        assert_matches!(
+            global_state.eval_detect_peak(),
+            TaskState::CannotStart { reason } if reason == "green2 not built yet",
+        );
+
+        global_state
+            .video_data
+            .as_mut()
+            .unwrap()
+            .set_green2(Some(ArcArray2::zeros((1, 1))));
+        assert_matches!(global_state.eval_detect_peak(), TaskState::ReadyToGo(..));
+    }
+
+    #[test]
+    fn test_eval_interp() {
+        tlc_util::log::init();
+        let mut global_state = empty_global_state();
+
+        assert_matches!(
+            global_state.eval_interp(),
+            TaskState::CannotStart { reason } if reason == "daq not loaded yet",
+        );
+
+        global_state.daq_data = Some(fake_daq_data());
+        assert_matches!(
+            global_state.eval_interp(),
+            TaskState::CannotStart { reason } if reason == "daq path unset",
+        );
+
+        global_state
+            .setting
+            .set_daq_path(&global_state.db, &PathBuf::from("aaa"))
+            .unwrap();
+        assert_matches!(
+            global_state.eval_interp(),
+            TaskState::CannotStart { reason } if reason == "video and daq not synchronized yet",
+        );
+
+        global_state
+            .setting
+            .set_start_index(
+                &global_state.db,
+                Some(StartIndex {
+                    start_frame: 10,
+                    start_row: 2,
+                }),
+            )
+            .unwrap();
+        assert_matches!(
+            global_state.eval_interp(),
+            TaskState::CannotStart { reason } if reason == "video path unset",
+        );
+
+        global_state
+            .setting
+            .set_video_path(&global_state.db, &PathBuf::from("aaa"))
+            .unwrap();
+        assert_matches!(
+            global_state.eval_interp(),
+            TaskState::CannotStart { reason } if reason == "video not loaded yet",
+        );
+
+        global_state.video_data = Some(fake_video_data());
+        assert_matches!(
+            global_state.eval_interp(),
+            TaskState::CannotStart { reason } if reason == "area not selected yet",
+        );
+
+        global_state
+            .setting
+            .set_area(&global_state.db, Some((10, 10, 200, 200)))
+            .unwrap();
+        assert_matches!(
+            global_state.eval_interp(),
+            TaskState::CannotStart { reason } if reason == "thermocouples unset",
+        );
+
+        global_state
+            .setting
+            .set_thermocouples(
+                &global_state.db,
+                Some(&[
+                    Thermocouple {
+                        column_index: 1,
+                        position: (10, 20),
+                    },
+                    Thermocouple {
+                        column_index: 2,
+                        position: (100, 200),
+                    },
+                ]),
+            )
+            .unwrap();
+        assert_matches!(
+            global_state.eval_interp(),
+            TaskState::CannotStart { reason } if reason == "interp method unset",
+        );
+
+        global_state
+            .setting
+            .set_interp_method(&global_state.db, InterpMethod::Horizontal)
+            .unwrap();
+        assert_matches!(global_state.eval_interp(), TaskState::ReadyToGo(..));
+    }
+
+    #[test]
+    fn test_eval_solve() {
+        tlc_util::log::init();
+        let mut global_state = empty_global_state();
+
+        assert_matches!(
+            global_state.eval_solve(),
+            TaskState::CannotStart { reason } if reason == "video path unset",
+        );
+
+        global_state
+            .setting
+            .set_video_path(&global_state.db, &PathBuf::from("aaa"))
+            .unwrap();
+        assert_matches!(
+            global_state.eval_solve(),
+            TaskState::CannotStart { reason } if reason == "video not loaded yet",
+        );
+
+        global_state.video_data = Some(fake_video_data());
+        assert_matches!(
+            global_state.eval_solve(),
+            TaskState::CannotStart { reason } if reason == "daq not loaded yet",
+        );
+
+        global_state.daq_data = Some(fake_daq_data());
+        assert_matches!(
+            global_state.eval_solve(),
+            TaskState::CannotStart { reason } if reason == "video and daq not synchronized yet",
+        );
+
+        global_state
+            .setting
+            .set_start_index(
+                &global_state.db,
+                Some(StartIndex {
+                    start_frame: 10,
+                    start_row: 2,
+                }),
+            )
+            .unwrap();
+        assert_matches!(
+            global_state.eval_solve(),
+            TaskState::CannotStart { reason } if reason == "area not selected yet",
+        );
+
+        global_state
+            .setting
+            .set_area(&global_state.db, Some((10, 10, 200, 200)))
+            .unwrap();
+        assert_matches!(
+            global_state.eval_solve(),
+            TaskState::CannotStart { reason } if reason == "daq path unset",
+        );
+
+        global_state
+            .setting
+            .set_daq_path(&global_state.db, &PathBuf::from("aaa"))
+            .unwrap();
+        assert_matches!(
+            global_state.eval_solve(),
+            TaskState::CannotStart { reason } if reason == "thermocouples unset",
+        );
+
+        global_state
+            .setting
+            .set_thermocouples(
+                &global_state.db,
+                Some(&[
+                    Thermocouple {
+                        column_index: 1,
+                        position: (10, 20),
+                    },
+                    Thermocouple {
+                        column_index: 2,
+                        position: (100, 200),
+                    },
+                ]),
+            )
+            .unwrap();
+        assert_matches!(
+            global_state.eval_solve(),
+            TaskState::CannotStart { reason } if reason == "interp method unset",
+        );
+
+        global_state
+            .setting
+            .set_interp_method(&global_state.db, InterpMethod::Horizontal)
+            .unwrap();
+        assert_matches!(
+            global_state.eval_solve(),
+            TaskState::CannotStart { reason } if reason == "not detect peak yet",
+        );
+
+        global_state
+            .video_data
+            .as_mut()
+            .unwrap()
+            .set_gmax_frame_indexes(Some(Arc::new(Vec::new())));
+        assert_matches!(
+            global_state.eval_solve(),
+            TaskState::CannotStart { reason } if reason == "not interp yet",
+        );
+
+        global_state
+            .daq_data
+            .as_mut()
+            .unwrap()
+            .set_interpolator(Some(Interpolator::default()));
+        assert_matches!(global_state.eval_solve(), TaskState::ReadyToGo(..));
+
+        println!("{}", std::mem::size_of::<ArcArray2<f64>>());
+    }
+
+    #[test]
+    fn test_task_controller_accept_same_type_different_param() {
+        tlc_util::log::init();
+
+        let mut task_controller = TaskRegistry::default();
+        let _task_id = task_controller
+            .register(TaskId::ReadVideo(VideoId {
+                video_path: PathBuf::from("aaa"),
+            }))
+            .unwrap();
+        let _task_id = task_controller
+            .register(TaskId::ReadVideo(VideoId {
+                video_path: PathBuf::from("bbb"),
+            }))
+            .unwrap();
+    }
+
+    #[test]
+    fn test_task_controller_reject_same_type_same_param() {
+        tlc_util::log::init();
+
+        let mut task_controller = TaskRegistry::default();
+        let _task_id = task_controller
+            .register(TaskId::ReadVideo(VideoId {
+                video_path: PathBuf::from("aaa"),
+            }))
+            .unwrap();
+        let _task_id = task_controller
+            .register(TaskId::ReadVideo(VideoId {
+                video_path: PathBuf::from("aaa"),
+            }))
             .unwrap_err();
-        task_controller
-            .register(TASK_TYPE_ID_BUILD_GREEN2, 777)
-            .unwrap();
+    }
 
-        std::thread::spawn(move || {
-            let _task_guard = task_guard;
-        })
-        .join()
-        .unwrap();
+    #[test]
+    fn test_task_controller_accept_different_type() {
+        tlc_util::log::init();
 
-        task_controller
-            .register(TASK_TYPE_ID_BUILD_GREEN2, 777)
+        let mut task_controller = TaskRegistry::default();
+        let _task_id = task_controller
+            .register(TaskId::ReadVideo(VideoId {
+                video_path: PathBuf::from("aaa"),
+            }))
             .unwrap();
+        let _task_id = task_controller
+            .register(TaskId::ReadDaq(DaqId {
+                daq_path: PathBuf::from("aaa"),
+            }))
+            .unwrap();
+    }
+
+    #[test]
+    fn test_task_controller_accept_same_type_same_param_after_finished() {
+        tlc_util::log::init();
+
+        let mut task_registry = TaskRegistry::default();
+        let _task_id = task_registry
+            .register(TaskId::ReadVideo(VideoId {
+                video_path: PathBuf::from("aaa"),
+            }))
+            .unwrap();
+        drop(_task_id);
+
+        let _task_id = task_registry
+            .register(TaskId::ReadVideo(VideoId {
+                video_path: PathBuf::from("aaa"),
+            }))
+            .unwrap();
+    }
+
+    fn empty_global_state() -> GlobalState {
+        let mut global_state = GlobalState::new(new_db_in_memory());
+        global_state
+            .setting
+            .create_setting(&global_state.db, CreateRequest::default())
+            .unwrap();
+        global_state
+    }
+
+    fn fake_video_data() -> VideoData {
+        VideoData::new(
+            VideoMeta {
+                frame_rate: 25,
+                nframes: 100,
+                shape: (1024, 1280),
+            },
+            Parameters::default(),
+        )
+    }
+
+    fn fake_daq_data() -> DaqData {
+        DaqData::new(
+            DaqMeta {
+                nrows: 120,
+                ncols: 10,
+            },
+            ArcArray2::zeros((120, 10)),
+        )
     }
 }

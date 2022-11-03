@@ -1,6 +1,5 @@
 use std::{
     f64::{consts::PI, NAN},
-    hash::{Hash, Hasher},
     sync::Arc,
 };
 
@@ -10,7 +9,7 @@ use packed_simd::{f64x4, Simd};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use tlc_video::GmaxId;
-use tracing::{debug, instrument};
+use tracing::{info, instrument};
 
 use crate::daq::{InterpId, Interpolator};
 
@@ -20,7 +19,8 @@ pub struct NuData {
     pub nu_nan_mean: f64,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, Copy)]
+#[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq)]
+// #[cfg_attr(test, derive(Default))]
 pub struct PhysicalParam {
     pub gmax_temperature: f64,
     pub solid_thermal_conductivity: f64,
@@ -29,92 +29,19 @@ pub struct PhysicalParam {
     pub air_thermal_conductivity: f64,
 }
 
-impl PartialEq for PhysicalParam {
-    fn eq(&self, other: &Self) -> bool {
-        self.gmax_temperature == other.gmax_temperature
-            && self.solid_thermal_conductivity == other.solid_thermal_conductivity
-            && self.solid_thermal_diffusivity == other.solid_thermal_diffusivity
-            && self.characteristic_length == other.characteristic_length
-            && self.air_thermal_conductivity == other.air_thermal_conductivity
-    }
-}
-
-impl Hash for PhysicalParam {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        state.write_u64(self.gmax_temperature.to_bits());
-        state.write_u64(self.solid_thermal_conductivity.to_bits());
-        state.write_u64(self.solid_thermal_diffusivity.to_bits());
-        state.write_u64(self.characteristic_length.to_bits());
-        state.write_u64(self.air_thermal_conductivity.to_bits());
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq)]
 pub enum IterationMethod {
     NewtonTangent { h0: f64, max_iter_num: usize },
     NewtonDown { h0: f64, max_iter_num: usize },
 }
 
-impl PartialEq for IterationMethod {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (
-                IterationMethod::NewtonTangent {
-                    h0: h01,
-                    max_iter_num: max_iter_num1,
-                },
-                IterationMethod::NewtonTangent {
-                    h0: h02,
-                    max_iter_num: max_iter_num2,
-                },
-            ) => h01 == h02 && max_iter_num1 == max_iter_num2,
-            (
-                IterationMethod::NewtonDown {
-                    h0: h01,
-                    max_iter_num: max_iter_num1,
-                },
-                IterationMethod::NewtonDown {
-                    h0: h02,
-                    max_iter_num: max_iter_num2,
-                },
-            ) => h01 == h02 && max_iter_num1 == max_iter_num2,
-            _ => false,
-        }
-    }
-}
-
-impl Hash for IterationMethod {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        match self {
-            IterationMethod::NewtonTangent { h0, max_iter_num } => {
-                state.write_u8(0);
-                state.write_u64(h0.to_bits());
-                state.write_u64(*max_iter_num as u64)
-            }
-            IterationMethod::NewtonDown { h0, max_iter_num } => {
-                state.write_u8(1);
-                state.write_u64(h0.to_bits());
-                state.write_u64(*max_iter_num as u64)
-            }
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Hash)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct SolveId {
     pub gmax_id: GmaxId,
     pub interp_id: InterpId,
     pub frame_rate: usize,
     pub iteration_method: IterationMethod,
     pub physical_param: PhysicalParam,
-}
-
-impl SolveId {
-    pub fn eval_hash(&self) -> u64 {
-        let mut hasher = ahash::AHasher::default();
-        self.hash(&mut hasher);
-        hasher.finish()
-    }
 }
 
 struct PointData<'a> {
@@ -312,7 +239,7 @@ pub fn nan_mean<D: Dimension>(data: ArrayView<f64, D>) -> f64 {
     });
 
     let nan_ratio = (cnt - non_nan_cnt) as f64 / cnt as f64;
-    debug!(non_nan_cnt, cnt, nan_ratio);
+    info!(non_nan_cnt, cnt, nan_ratio);
 
     sum / non_nan_cnt as f64
 }
@@ -483,5 +410,17 @@ mod tests {
 
         // 13,198 ns/iter (+/- 175)
         b.iter(|| point_data.no_iter_no_simd(I.0, I.1, I.2, I.3, I.4));
+    }
+
+    impl Default for PhysicalParam {
+        fn default() -> Self {
+            PhysicalParam {
+                gmax_temperature: 35.48,
+                solid_thermal_conductivity: 0.19,
+                solid_thermal_diffusivity: 1.091e-7,
+                characteristic_length: 0.015,
+                air_thermal_conductivity: 0.0276,
+            }
+        }
     }
 }

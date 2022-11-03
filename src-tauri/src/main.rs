@@ -6,7 +6,7 @@
 #![feature(array_windows)]
 #![feature(assert_matches)]
 
-mod commands;
+mod command;
 mod daq;
 mod post_processing;
 mod request;
@@ -14,17 +14,22 @@ mod setting;
 mod solve;
 mod state;
 
+use std::thread::spawn;
+
 use crossbeam::channel::bounded;
+use setting::new_db;
 use tracing::error;
 
-use commands::*;
+use command::*;
+
+const SQLITE_FILEPATH: &str = "./var/db.sqlite3";
 
 fn main() {
     tlc_util::log::init();
     tlc_video::init();
 
     let (request_sender, request_receiver) = bounded(3);
-    std::thread::spawn(move || state::main_loop(request_receiver));
+    spawn(move || state::main_loop(new_db(SQLITE_FILEPATH), request_receiver));
 
     tauri::Builder::default()
         .manage(request_sender)
@@ -36,11 +41,13 @@ fn main() {
             set_name,
             get_save_root_dir,
             set_save_root_dir,
+            get_video_path,
             get_video_meta,
             set_video_path,
             get_read_video_progress,
-            get_daq_meta,
+            get_daq_path,
             set_daq_path,
+            get_daq_meta,
             decode_frame_base64,
             get_daq_raw,
             synchronize_video_and_daq,

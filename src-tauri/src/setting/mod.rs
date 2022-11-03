@@ -110,3 +110,27 @@ pub struct StartIndex {
     /// Start row of DAQ data involved in the calculation.
     pub start_row: usize,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    impl Default for CreateRequest {
+        fn default() -> Self {
+            CreateRequest {
+                name: "test_case".to_owned(),
+                save_root_dir: PathBuf::from("fake_save_root_dir"),
+                video_path: None,
+                daq_path: None,
+                start_frame: None,
+                start_row: None,
+                area: None,
+                thermocouples: None,
+                interp_method: None,
+                filter_method: FilterMethod::default(),
+                iteration_method: IterationMethod::default(),
+                physical_param: PhysicalParam::default(),
+            }
+        }
+    }
+}

@@ -1,5 +1,6 @@
 mod main_loop;
-mod outcome_handler;
+mod output;
+mod output_handler;
 mod request_handler;
 mod task;
 
@@ -17,18 +18,17 @@ use crate::{
     setting::{Setting, SettingSnapshot, StartIndex},
     solve::{NuData, SolveId},
 };
-use outcome_handler::Outcome;
-
-use self::task::TaskController;
+use output::Output;
+use task::TaskRegistry;
 
 struct GlobalState {
     setting: Setting,
     db: Connection,
 
-    outcome_sender: Sender<Outcome>,
-    outcome_receiver: Receiver<Outcome>,
+    output_sender: Sender<Output>,
+    output_receiver: Receiver<Output>,
 
-    task_controller: TaskController,
+    task_registry: TaskRegistry,
 
     video_data: Option<VideoData>,
     video_controller: VideoController,
@@ -40,13 +40,13 @@ struct GlobalState {
 
 impl GlobalState {
     fn new(db: Connection) -> Self {
-        let (outcome_sender, outcome_receiver) = bounded(0);
+        let (output_sender, output_receiver) = bounded(0);
         Self {
             setting: Setting::default(),
             db,
-            outcome_sender,
-            outcome_receiver,
-            task_controller: TaskController::default(),
+            output_sender,
+            output_receiver,
+            task_registry: TaskRegistry::default(),
             video_data: None,
             daq_data: None,
             video_controller: VideoController::default(),
@@ -80,12 +80,12 @@ impl GlobalState {
 
     fn green2_id(&self) -> Result<Green2Id> {
         let video_id = self.video_id()?;
+        let nframes = self.video_data()?.video_meta().nframes;
+        let nrows = self.daq_data()?.daq_meta().nrows;
         let StartIndex {
             start_frame,
             start_row,
         } = self.start_index()?;
-        let nframes = self.video_data()?.video_meta().nframes;
-        let nrows = self.daq_data()?.daq_meta().nrows;
         let cal_num = (nframes - start_frame).min(nrows - start_row);
         let area = self.area()?;
 
@@ -208,5 +208,185 @@ impl GlobalState {
 
     fn setting_snapshot_path(&self) -> Result<PathBuf> {
         Ok(self.output_file_stem()?.with_extension("toml"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        thread::{sleep, spawn},
+        time::Duration,
+    };
+
+    use tlc_video::{Progress, VideoMeta};
+
+    use crate::{
+        daq::DaqMeta,
+        request::{self, NuView, SettingData},
+        setting::new_db_in_memory,
+    };
+
+    use super::*;
+
+    pub const VIDEO_PATH_REAL: &str = "/home/yhj/Downloads/EXP/imp/videos/imp_20000_1_up.avi";
+    pub const DAQ_PATH_REAL: &str = "/home/yhj/Downloads/EXP/imp/daq/imp_20000_1.lvm";
+
+    #[ignore]
+    #[tokio::test]
+    async fn test_real() {
+        tlc_util::log::init();
+        let (tx, rx) = bounded(3);
+        spawn(move || main_loop(new_db_in_memory(), rx));
+
+        request::create_setting(SettingData::default(), &tx)
+            .await
+            .unwrap();
+        assert_eq!(request::get_name(&tx).await.unwrap(), "test_case");
+        assert_eq!(
+            request::get_save_root_dir(&tx).await.unwrap(),
+            PathBuf::from("/tmp")
+        );
+
+        assert_eq!(
+            request::get_read_video_progress(&tx).await.unwrap(),
+            Progress::Uninitialized
+        );
+        request::set_video_path(PathBuf::from(VIDEO_PATH_REAL), &tx)
+            .await
+            .unwrap();
+        assert_eq!(
+            request::get_video_path(&tx).await.unwrap(),
+            PathBuf::from(VIDEO_PATH_REAL)
+        );
+        request::set_daq_path(PathBuf::from(DAQ_PATH_REAL), &tx)
+            .await
+            .unwrap();
+        assert_eq!(
+            request::get_daq_path(&tx).await.unwrap(),
+            PathBuf::from(DAQ_PATH_REAL)
+        );
+
+        loop {
+            let progress = request::get_read_video_progress(&tx).await.unwrap();
+            match progress {
+                Progress::Uninitialized | Progress::InProgress { .. } => {
+                    sleep(Duration::from_millis(200))
+                }
+                Progress::Finished { .. } => break,
+            }
+        }
+
+        let video_meta = request::get_video_meta(&tx).await.unwrap();
+        assert_eq!(
+            video_meta,
+            VideoMeta {
+                frame_rate: 25,
+                nframes: 2444,
+                shape: (1024, 1280),
+            }
+        );
+        assert_eq!(
+            request::get_daq_meta(&tx).await.unwrap(),
+            DaqMeta {
+                nrows: 2589,
+                ncols: 10,
+            }
+        );
+        request::decode_frame_base64(video_meta.nframes, &tx)
+            .await
+            .unwrap_err();
+        request::decode_frame_base64(video_meta.nframes - 1, &tx)
+            .await
+            .unwrap();
+        request::set_area((660, 20, 340, 1248), &tx).await.unwrap();
+        assert_eq!(
+            request::get_build_green2_progress(&tx).await.unwrap(),
+            Progress::Uninitialized
+        );
+        request::synchronize_video_and_daq(10, 20, &tx)
+            .await
+            .unwrap();
+        sleep(Duration::from_millis(200));
+        request::get_build_green2_progress(&tx).await.unwrap();
+
+        // Same parameters, evaluated task will be rejected by task registry.
+        request::set_start_frame(10, &tx).await.unwrap();
+        // Will cancel the current computation.
+        request::set_start_row(30, &tx).await.unwrap();
+
+        loop {
+            let progress = request::get_build_green2_progress(&tx).await.unwrap();
+            match progress {
+                Progress::Uninitialized | Progress::InProgress { .. } => {
+                    sleep(Duration::from_millis(500))
+                }
+                Progress::Finished { .. } => break,
+            }
+        }
+
+        loop {
+            let progress = request::get_detect_peak_progress(&tx).await.unwrap();
+            match progress {
+                Progress::Uninitialized | Progress::InProgress { .. } => {
+                    sleep(Duration::from_millis(500))
+                }
+                Progress::Finished { .. } => break,
+            }
+        }
+
+        let thermocouples = vec![
+            Thermocouple {
+                column_index: 1,
+                position: (0, 166),
+            },
+            Thermocouple {
+                column_index: 2,
+                position: (0, 355),
+            },
+            Thermocouple {
+                column_index: 3,
+                position: (0, 543),
+            },
+            Thermocouple {
+                column_index: 4,
+                position: (0, 731),
+            },
+            Thermocouple {
+                column_index: 5,
+                position: (0, 922),
+            },
+            Thermocouple {
+                column_index: 6,
+                position: (0, 1116),
+            },
+        ];
+
+        request::set_thermocouples(thermocouples.clone(), &tx)
+            .await
+            .unwrap();
+        assert_eq!(
+            request::get_thermocouples(&tx).await.unwrap(),
+            thermocouples
+        );
+        request::set_interp_method(InterpMethod::Horizontal, &tx)
+            .await
+            .unwrap();
+        assert_eq!(
+            request::get_interp_method(&tx).await.unwrap(),
+            InterpMethod::Horizontal
+        );
+        loop {
+            match request::get_nu(None, &tx).await {
+                Ok(NuView {
+                    nu_nan_mean,
+                    edge_truncation,
+                    ..
+                }) => {
+                    dbg!(nu_nan_mean, edge_truncation);
+                    break;
+                }
+                Err(_) => sleep(Duration::from_millis(500)),
+            }
+        }
     }
 }

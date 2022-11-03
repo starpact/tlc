@@ -1,7 +1,6 @@
 use std::{
     assert_matches::debug_assert_matches,
     cell::{RefCell, RefMut},
-    hash::{Hash, Hasher},
     ops::{Deref, DerefMut},
     sync::{Arc, Mutex},
 };
@@ -27,20 +26,12 @@ use tracing::instrument;
 
 use crate::{Progress, ProgressBar, VideoId};
 
-#[derive(Debug, Clone, PartialEq, Hash)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Green2Id {
     pub video_id: VideoId,
     pub start_frame: usize,
     pub cal_num: usize,
     pub area: (u32, u32, u32, u32),
-}
-
-impl Green2Id {
-    pub fn eval_hash(&self) -> u64 {
-        let mut hasher = ahash::AHasher::default();
-        self.hash(&mut hasher);
-        hasher.finish()
-    }
 }
 
 #[derive(Clone)]

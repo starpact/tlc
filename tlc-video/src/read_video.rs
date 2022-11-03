@@ -11,14 +11,13 @@ use crate::{ProgressBar, VideoMeta};
 /// `read_video` will return after finished reading video metadata, which just takes tens of
 /// milliseconds. Then packets can be received from the returned channel asynchronously.
 /// `progress_bar` can be used to observe the progress of `read_video` and cancel it.
-#[instrument(skip(progress_bar), fields(video_path = video_path.as_ref().to_str().unwrap()), err)]
+#[instrument(skip(progress_bar), fields(video_path), err)]
 pub fn read_video<P: AsRef<Path>>(
     video_path: P,
     progress_bar: ProgressBar,
 ) -> Result<(VideoMeta, Parameters, Receiver<Packet>)> {
     let video_path = video_path.as_ref().to_owned();
 
-    let _span1 = info_span!("read_video_meta").entered();
     let mut input = ffmpeg::format::input(&video_path)?;
     let video_stream = input
         .streams()
@@ -32,7 +31,6 @@ pub fn read_video<P: AsRef<Path>>(
     let nframes = video_stream.frames() as usize;
     let decoder = codec_ctx.decoder().video()?;
     let shape = (decoder.height(), decoder.width());
-    drop(_span1);
 
     progress_bar.start(nframes as u32)?;
     let (tx, rx) = bounded(3); // cap doesn't really matter
@@ -43,7 +41,7 @@ pub fn read_video<P: AsRef<Path>>(
     };
 
     std::thread::spawn(move || {
-        let _span2 = info_span!("load_packets", frame_rate, nframes).entered();
+        let _span = info_span!("load_packets", frame_rate, nframes).entered();
         if let Err(e) = input
             .packets()
             .filter_map(|(stream, packet)| (stream.index() == video_stream_index).then_some(packet))
