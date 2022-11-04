@@ -34,7 +34,7 @@ cargo install tauri-cli
 ```
 
 ## Architecture
-### `f(Setting) -> Data`
+### `Data = f(Setting)`
 `Setting`为由用户指定的设置，`Data`为计算结果。整体上是pure evaluation，即同样的`Setting`必然得到同样`Data`。具体实现上则会引入状态：
 - `Setting`有多项，`Data`有多个中间结果
 - `Data`的不同中间结果分别依赖`Setting`中的不同项
@@ -89,11 +89,13 @@ flowchart
 如果worker线程直接持有`GlobalState`的引用，则需要通过锁访问。
 1. 如果计算过程中持有锁，会影响主线程对于`GlobalState`的读写，不能接受
 2. 如果计算过程中不持有锁，则计算完成后根据结果修改`GlobalState`时，由于状态可能已经改变，计算结果已经不再有效，因此需要检验
-3. 由于`GlobalState`内不同模块的依赖关系较为复杂，拆分加锁难以保证状态的正确性（一把大锁）
+3. 由于`GlobalState`内不同模块的依赖关系较为复杂，拆分加锁难以保证状态的正确性（一把大锁难以避免）
+
 这里采用以`channel`为核心的架构：
+
 1. 主线程为单一事件循环，监听(通过`Request Channel`)来自用户的事件
-2. 主线程可读写`GlobalState`，并根据当前状态做出决策，具体的执行全部在另外的`worker`线程
-3. `worker`线程只会持有其任务所需的数据，size较小的数据copy，较大的数据通过线程安全的引用计数获得一个只读引用。计算完成后将结果以及该结果的依赖快照发送到`Output Channel`
+2. 主线程可读写`GlobalState`，并根据当前状态做出决策，不能长时间阻塞主循环，具体的执行全部在另外的`worker`线程
+3. `worker`线程只会持有其任务所需的数据（`GlobalState`的只读子集），size较小的数据copy，较大的数据通过线程安全的引用计数获得一个只读引用。计算完成后将结果以及该结果的依赖快照发送到`Output Channel`
 4. 主线程同时监听(`select`)`Output Channel`，收到`Output`后，根据结果的依赖快照与当前`GlobalState`检验，如果结果依然有效则修改状态，否则丢弃
 ![state management](.github/assets/state_management.png)
 
