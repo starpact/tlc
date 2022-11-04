@@ -10,13 +10,12 @@ use anyhow::{anyhow, Result};
 use crossbeam::channel::{bounded, Receiver, Sender};
 pub use main_loop::main_loop;
 use rusqlite::Connection;
-use tlc_util::time::now_as_millis;
 use tlc_video::{GmaxId, Green2Id, VideoController, VideoData, VideoId};
 
 use crate::{
     daq::{DaqData, DaqId, InterpId, InterpMethod, Interpolator, Thermocouple},
     setting::{Setting, SettingSnapshot, StartIndex},
-    solve::{NuData, SolveId},
+    solve::{NuData, SolveController, SolveId},
 };
 use output::Output;
 use task::TaskRegistry;
@@ -36,6 +35,7 @@ struct GlobalState {
     daq_data: Option<DaqData>,
 
     nu_data: Option<NuData>,
+    solve_controller: SolveController,
 }
 
 impl GlobalState {
@@ -51,6 +51,7 @@ impl GlobalState {
             daq_data: None,
             video_controller: VideoController::default(),
             nu_data: None,
+            solve_controller: SolveController::default(),
         }
     }
 
@@ -166,7 +167,7 @@ impl GlobalState {
             .clone())
     }
 
-    fn setting_snapshot(&self) -> Result<SettingSnapshot> {
+    fn setting_snapshot(&self, nu_nan_mean: f64) -> Result<SettingSnapshot> {
         let StartIndex {
             start_frame,
             start_row,
@@ -186,7 +187,8 @@ impl GlobalState {
             interp_method: self.interp_method()?,
             iteration_method: self.setting.iteration_method(&self.db)?,
             physical_param: self.setting.physical_param(&self.db)?,
-            completed_at: now_as_millis(),
+            nu_nan_mean,
+            completed_at: time::OffsetDateTime::now_local()?,
         };
 
         Ok(setting_snapshot)
@@ -207,7 +209,7 @@ impl GlobalState {
     }
 
     fn setting_snapshot_path(&self) -> Result<PathBuf> {
-        Ok(self.output_file_stem()?.with_extension("toml"))
+        Ok(self.output_file_stem()?.with_extension("json"))
     }
 }
 
@@ -218,12 +220,14 @@ mod tests {
         time::Duration,
     };
 
-    use tlc_video::{Progress, VideoMeta};
+    use tlc_util::progress_bar::Progress;
+    use tlc_video::{FilterMethod, VideoMeta};
 
     use crate::{
         daq::DaqMeta,
         request::{self, NuView, SettingData},
         setting::new_db_in_memory,
+        solve::{IterationMethod, PhysicalParam},
     };
 
     use super::*;
@@ -303,16 +307,16 @@ mod tests {
             request::get_build_green2_progress(&tx).await.unwrap(),
             Progress::Uninitialized
         );
-        request::synchronize_video_and_daq(10, 20, &tx)
+        request::synchronize_video_and_daq(71, 140, &tx)
             .await
             .unwrap();
         sleep(Duration::from_millis(200));
         request::get_build_green2_progress(&tx).await.unwrap();
 
-        // Same parameters, evaluated task will be rejected by task registry.
-        request::set_start_frame(10, &tx).await.unwrap();
         // Will cancel the current computation.
-        request::set_start_row(30, &tx).await.unwrap();
+        request::set_start_frame(81, &tx).await.unwrap();
+        // Same parameters, evaluated task will be rejected by task registry.
+        request::set_start_row(150, &tx).await.unwrap();
 
         loop {
             let progress = request::get_build_green2_progress(&tx).await.unwrap();
@@ -323,6 +327,10 @@ mod tests {
                 Progress::Finished { .. } => break,
             }
         }
+
+        request::set_filter_method(FilterMethod::Median { window_size: 10 }, &tx)
+            .await
+            .unwrap();
 
         loop {
             let progress = request::get_detect_peak_progress(&tx).await.unwrap();
@@ -352,7 +360,7 @@ mod tests {
                 position: (0, 731),
             },
             Thermocouple {
-                column_index: 5,
+                column_index: 1,
                 position: (0, 922),
             },
             Thermocouple {
@@ -368,6 +376,10 @@ mod tests {
             request::get_thermocouples(&tx).await.unwrap(),
             thermocouples
         );
+        assert_eq!(
+            request::get_solve_progress(&tx).await.unwrap(),
+            Progress::Uninitialized
+        );
         request::set_interp_method(InterpMethod::Horizontal, &tx)
             .await
             .unwrap();
@@ -375,18 +387,73 @@ mod tests {
             request::get_interp_method(&tx).await.unwrap(),
             InterpMethod::Horizontal
         );
+
         loop {
-            match request::get_nu(None, &tx).await {
-                Ok(NuView {
-                    nu_nan_mean,
-                    edge_truncation,
-                    ..
-                }) => {
-                    dbg!(nu_nan_mean, edge_truncation);
-                    break;
+            let progress = request::get_solve_progress(&tx).await.unwrap();
+            match progress {
+                Progress::Uninitialized | Progress::InProgress { .. } => {
+                    sleep(Duration::from_millis(200))
                 }
-                Err(_) => sleep(Duration::from_millis(500)),
+                Progress::Finished { .. } => break,
             }
         }
+
+        let NuView {
+            nu_nan_mean,
+            edge_truncation,
+            ..
+        } = request::get_nu(None, &tx).await.unwrap();
+        dbg!(nu_nan_mean, edge_truncation);
+    }
+
+    #[ignore]
+    #[tokio::test]
+    async fn test_complete_setting_auto_compute_all() {
+        tlc_util::log::init();
+        let (tx, rx) = bounded(3);
+        spawn(move || main_loop(new_db_in_memory(), rx));
+
+        let setting_data = SettingData {
+            name: "test_case".to_owned(),
+            save_root_dir: PathBuf::from("/tmp"),
+            video_path: Some(PathBuf::from(VIDEO_PATH_REAL)),
+            daq_path: Some(PathBuf::from(DAQ_PATH_REAL)),
+            start_frame: Some(81),
+            start_row: Some(150),
+            area: Some((660, 20, 340, 1248)),
+            thermocouples: Some(vec![
+                Thermocouple {
+                    column_index: 1,
+                    position: (0, 166),
+                },
+                Thermocouple {
+                    column_index: 2,
+                    position: (0, 355),
+                },
+                Thermocouple {
+                    column_index: 3,
+                    position: (0, 543),
+                },
+                Thermocouple {
+                    column_index: 4,
+                    position: (0, 731),
+                },
+                Thermocouple {
+                    column_index: 1,
+                    position: (0, 922),
+                },
+                Thermocouple {
+                    column_index: 6,
+                    position: (0, 1116),
+                },
+            ]),
+            interp_method: Some(InterpMethod::Horizontal),
+            filter_method: Some(FilterMethod::Median { window_size: 10 }),
+            iteration_method: Some(IterationMethod::default()),
+            physical_param: PhysicalParam::default(),
+        };
+        request::create_setting(setting_data, &tx).await.unwrap();
+
+        sleep(Duration::from_secs(10));
     }
 }

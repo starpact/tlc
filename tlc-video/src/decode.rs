@@ -21,10 +21,11 @@ use image::{codecs::jpeg::JpegEncoder, ColorType::Rgb8};
 use ndarray::prelude::*;
 use rayon::prelude::*;
 use thread_local::ThreadLocal;
+use tlc_util::progress_bar::{Progress, ProgressBar};
 use tokio::sync::oneshot;
 use tracing::instrument;
 
-use crate::{Progress, ProgressBar, VideoId};
+use crate::VideoId;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Green2Id {
@@ -168,6 +169,9 @@ impl DecoderManagerInner {
             .skip(start_frame)
             .zip(green2.axis_iter_mut(Axis(0)).into_iter())
             .try_for_each(|(packet, mut row)| -> Result<()> {
+                // Cancel point.
+                // This does not add noticeable overhead.
+                progress_bar.add(1)?;
                 let mut decoder = self.decoder()?;
                 let dst_frame = decoder.decode(packet)?;
 
@@ -186,10 +190,6 @@ impl DecoderManagerInner {
                         }
                     }
                 }
-
-                // Cancel point.
-                // This does not add noticeable overhead.
-                progress_bar.add(1)?;
 
                 Ok(())
             })?;
@@ -275,7 +275,6 @@ mod tests {
     use crate::{
         read_video,
         test_util::{video_meta_real, video_meta_sample, VIDEO_PATH_REAL, VIDEO_PATH_SAMPLE},
-        ProgressBar,
     };
 
     #[test]

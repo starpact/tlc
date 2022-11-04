@@ -7,7 +7,7 @@ use tracing::instrument;
 
 use crate::Green2Id;
 
-use super::controller::ProgressBar;
+use tlc_util::progress_bar::ProgressBar;
 
 #[derive(Debug, Default, Deserialize, Serialize, Clone, Copy, PartialEq)]
 pub enum FilterMethod {

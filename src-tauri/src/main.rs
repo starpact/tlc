@@ -75,6 +75,7 @@ fn main() {
             set_solid_thermal_diffusivity,
             set_characteristic_length,
             set_air_thermal_conductivity,
+            get_solve_progress,
             get_nu,
         ])
         .run(tauri::generate_context!())

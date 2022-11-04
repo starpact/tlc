@@ -1,2 +1,4 @@
+#![feature(assert_matches)]
+
 pub mod log;
-pub mod time;
+pub mod progress_bar;

@@ -1,13 +1,15 @@
 mod sqlite;
 
-use std::path::{Path, PathBuf};
+use std::{
+    io::Write,
+    path::{Path, PathBuf},
+};
 
 use anyhow::Result;
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 pub use sqlite::Setting;
 use tlc_video::{FilterMethod, VideoMeta};
-use tokio::io::AsyncWriteExt;
 use tracing::instrument;
 
 use crate::{
@@ -56,7 +58,7 @@ pub struct SettingSnapshot {
     /// User defined unique name of this experiment setting.
     pub name: String,
     /// Directory in which you save your data(parameters and results) of this experiment.
-    /// * setting_path: {root_dir}/{expertiment_name}/setting.toml
+    /// * setting_path: {root_dir}/{expertiment_name}/setting.json
     /// * nu_matrix_path: {root_dir}/{expertiment_name}/nu_matrix.csv
     /// * plot_matrix_path: {root_dir}/{expertiment_name}/nu_plot.png
     pub save_root_dir: PathBuf,
@@ -81,20 +83,23 @@ pub struct SettingSnapshot {
     pub iteration_method: IterationMethod,
     /// All physical parameters used when solving heat transfer equation.
     pub physical_param: PhysicalParam,
+    /// Final result.
+    pub nu_nan_mean: f64,
     /// Timestamp in milliseconds.
-    pub completed_at: u64,
+    #[serde(with = "time::serde::rfc3339")]
+    pub completed_at: time::OffsetDateTime,
 }
 
 impl SettingSnapshot {
-    #[instrument(fields(setting_path), err)]
-    pub async fn save<P: AsRef<Path>>(&self, setting_path: P) -> Result<()> {
-        let mut file = tokio::fs::OpenOptions::new()
+    #[instrument(skip(self), fields(setting_path = ?setting_path.as_ref()), err)]
+    pub fn save<P: AsRef<Path>>(&self, setting_path: P) -> Result<()> {
+        let mut file = std::fs::OpenOptions::new()
             .write(true)
             .create(true)
-            .open(setting_path)
-            .await?;
-        let buf = toml::to_string_pretty(&self)?;
-        file.write_all(buf.as_bytes()).await?;
+            .truncate(true)
+            .open(setting_path)?;
+        let buf = serde_json::to_string_pretty(&self)?;
+        file.write_all(buf.as_bytes())?;
 
         Ok(())
     }

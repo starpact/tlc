@@ -5,7 +5,8 @@ use crossbeam::channel::Sender;
 use function_name::named;
 use ndarray::{ArcArray2, Array2};
 use serde::{Deserialize, Serialize};
-use tlc_video::{FilterMethod, Progress, VideoMeta};
+use tlc_util::progress_bar::Progress;
+use tlc_video::{FilterMethod, VideoMeta};
 use tokio::sync::oneshot;
 use tracing::trace;
 
@@ -160,6 +161,9 @@ pub enum Request {
         air_thermal_conductivity: f64,
         responder: Responder<()>,
     },
+    GetSolveProgress {
+        responder: Responder<Progress>,
+    },
     GetNu {
         edge_truncation: Option<(f64, f64)>,
         responder: Responder<NuView>,
@@ -211,7 +215,7 @@ pub struct NuView {
     pub edge_truncation: (f64, f64),
 }
 
-pub struct Responder<T: Debug + Serialize> {
+pub struct Responder<T> {
     name: String,
     start_time: Instant,
     tx: oneshot::Sender<Result<T>>,
@@ -691,6 +695,15 @@ pub async fn set_air_thermal_conductivity(
     let (tx, rx) = oneshot::channel();
     let _ = request_sender.try_send(SetAirThermalConductivity {
         air_thermal_conductivity,
+        responder: Responder::new(function_name!(), tx),
+    });
+    rx.await?
+}
+
+#[named]
+pub async fn get_solve_progress(request_sender: &Sender<Request>) -> Result<Progress> {
+    let (tx, rx) = oneshot::channel();
+    let _ = request_sender.try_send(GetSolveProgress {
         responder: Responder::new(function_name!(), tx),
     });
     rx.await?

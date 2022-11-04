@@ -12,7 +12,7 @@ pub use ffmpeg::codec::{packet::Packet, Parameters};
 use ndarray::ArcArray2;
 use serde::{Deserialize, Serialize};
 
-pub use controller::{Progress, ProgressBar, VideoController};
+pub use controller::VideoController;
 pub use decode::{DecoderManager, Green2Id};
 pub use detect_peak::{filter_detect_peak, filter_point, FilterMethod, GmaxId};
 pub use read_video::read_video;

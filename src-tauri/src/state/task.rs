@@ -1,6 +1,6 @@
 use std::{sync::Arc, time::Duration};
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
 use crossbeam::channel::{RecvTimeoutError, Sender};
 use ndarray::ArcArray2;
 use tlc_video::{
@@ -65,29 +65,25 @@ impl std::fmt::Debug for Task {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Task::ReadVideo { video_id } => f
-                .debug_struct("Task::ReadVideo")
+                .debug_struct("ReadVideo")
                 .field("video_id", video_id)
                 .finish(),
-            Task::ReadDaq { daq_id } => f
-                .debug_struct("Task::ReadDaq")
-                .field("daq_id", daq_id)
-                .finish(),
+            Task::ReadDaq { daq_id } => f.debug_struct("ReadDaq").field("daq_id", daq_id).finish(),
             Task::BuildGreen2 { green2_id, .. } => f
-                .debug_struct("Task::BuildGreen2")
+                .debug_struct("BuildGreen2")
                 .field("green2_id", green2_id)
                 .finish(),
             Task::DetectPeak { gmax_id, .. } => f
-                .debug_struct("Task::DetectPeak")
+                .debug_struct("DetectPeak")
                 .field("gmax_id", gmax_id)
                 .finish(),
             Task::Interp { interp_id, .. } => f
-                .debug_struct("Task::Interp")
+                .debug_struct("Interp")
                 .field("interp_id", interp_id)
                 .finish(),
-            Task::Solve { solve_id, .. } => f
-                .debug_struct("Task::Solve")
-                .field("solve_id", solve_id)
-                .finish(),
+            Task::Solve { solve_id, .. } => {
+                f.debug_struct("Solve").field("solve_id", solve_id).finish()
+            }
         }
     }
 }
@@ -115,7 +111,7 @@ impl TaskId {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 enum TaskState {
     AlreadyCompleted,
     ReadyToGo(Task),
@@ -124,6 +120,20 @@ enum TaskState {
         #[allow(dead_code)] // used in log
         reason: String,
     },
+}
+
+impl std::fmt::Debug for TaskState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TaskState::AlreadyCompleted => f.debug_struct("AlreadyCompleted").finish(),
+            TaskState::ReadyToGo(_) => f.debug_struct("ReadyToGo").finish(),
+            TaskState::DispatchedToOthers => f.debug_struct("DispatchedToOthers").finish(),
+            TaskState::CannotStart { reason } => f
+                .debug_struct("CannotStart")
+                .field("reason", reason)
+                .finish(),
+        }
+    }
 }
 
 impl From<Result<Option<Task>>> for TaskState {
@@ -155,7 +165,9 @@ pub struct TaskRegistry {
 }
 
 impl TaskRegistry {
+    #[instrument(level = "debug", skip_all, err)]
     fn register(&mut self, task_id: TaskId) -> Result<Arc<TaskId>> {
+        debug!(?task_id);
         let last_task_id = &mut self.last_task_ids[task_id.type_id()];
         if let Some(last_task_id) = last_task_id {
             if Arc::strong_count(last_task_id) == 1 {
@@ -163,10 +175,10 @@ impl TaskRegistry {
             } else if **last_task_id != task_id {
                 debug!("last task has not finished but parameters are different");
             } else {
-                let e = anyhow!("last task with same parameters is still executing ");
-                error!(%e);
-                return Err(e);
+                bail!("last task with same parameters is still executing");
             }
+        } else {
+            debug!("no last task");
         }
 
         Ok(last_task_id.insert(Arc::new(task_id)).clone())
@@ -228,7 +240,7 @@ impl GlobalState {
         tasks
     }
 
-    #[instrument(level = "debug", parent = None, skip(self), ret)]
+    #[instrument(level = "debug", skip(self), ret)]
     fn eval_read_video(&self) -> TaskState {
         match self.video_id() {
             Ok(video_id) => match self.video_data {
@@ -241,7 +253,7 @@ impl GlobalState {
         }
     }
 
-    #[instrument(level = "debug", parent = None, skip(self), ret)]
+    #[instrument(level = "debug", skip(self), ret)]
     fn eval_read_daq(&self) -> TaskState {
         match self.daq_id() {
             Ok(daq_id) => match self.daq_data {
@@ -254,7 +266,7 @@ impl GlobalState {
         }
     }
 
-    #[instrument(level = "debug", parent = None, skip(self), ret)]
+    #[instrument(level = "debug", skip(self), ret)]
     fn eval_build_green2(&self) -> TaskState {
         let f = || -> Result<Option<Task>> {
             let video_data = self.video_data()?;
@@ -274,7 +286,7 @@ impl GlobalState {
         f().into()
     }
 
-    #[instrument(level = "debug", parent = None, skip(self), ret)]
+    #[instrument(level = "debug", skip(self), ret)]
     fn eval_detect_peak(&self) -> TaskState {
         let f = || -> Result<Option<Task>> {
             let video_data = self.video_data()?;
@@ -296,7 +308,7 @@ impl GlobalState {
         f().into()
     }
 
-    #[instrument(level = "debug", parent = None, skip(self), ret)]
+    #[instrument(level = "debug", skip(self), ret)]
     fn eval_interp(&self) -> TaskState {
         let f = || -> Result<Option<Task>> {
             let daq_data = self.daq_data()?;
@@ -311,7 +323,7 @@ impl GlobalState {
         f().into()
     }
 
-    #[instrument(level = "debug", parent = None, skip(self), ret)]
+    #[instrument(level = "debug", skip(self), ret)]
     fn eval_solve(&self) -> TaskState {
         if self.nu_data.is_some() {
             return TaskState::AlreadyCompleted;
@@ -542,25 +554,27 @@ impl GlobalState {
         let Ok(task_id) = self.task_registry.register(TaskId::Solve(solve_id.clone())) else {
             return;
         };
+        let progress_bar = self.solve_controller.prepare_solve();
         self.spawn(task_id, move |output_sender| {
-            let nu2 = solve::solve(
-                gmax_frame_indexes,
+            if let Ok(nu2) = solve::solve(
+                &gmax_frame_indexes,
                 &interpolator,
                 physical_param,
                 iteration_method,
                 frame_rate,
-            );
+                progress_bar,
+            ) {
+                let nu_nan_mean = nan_mean(nu2.view());
+                debug!(nu_nan_mean);
 
-            let nu_nan_mean = nan_mean(nu2.view());
-            debug!(nu_nan_mean);
-
-            output_sender
-                .send(Output::Solve {
-                    solve_id,
-                    nu2,
-                    nu_nan_mean,
-                })
-                .unwrap();
+                output_sender
+                    .send(Output::Solve {
+                        solve_id,
+                        nu2,
+                        nu_nan_mean,
+                    })
+                    .unwrap();
+            }
         });
     }
 }

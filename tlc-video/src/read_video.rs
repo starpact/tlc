@@ -4,13 +4,15 @@ use anyhow::{anyhow, Result};
 use crossbeam::channel::{bounded, Receiver};
 use ffmpeg::codec;
 pub use ffmpeg::codec::{packet::Packet, Parameters};
+use tlc_util::progress_bar::ProgressBar;
 use tracing::{error, info_span, instrument};
 
-use crate::{ProgressBar, VideoMeta};
+use crate::VideoMeta;
 
-/// `read_video` will return after finished reading video metadata, which just takes tens of
-/// milliseconds. Then packets can be received from the returned channel asynchronously.
-/// `progress_bar` can be used to observe the progress of `read_video` and cancel it.
+/// `read_video` will return after finished reading video metadata, which just takes
+/// several milliseconds. Then packets can be received from the returned channel
+/// asynchronously.
+/// `progress_bar` can be used to observe the progress and cancel it.
 #[instrument(skip(progress_bar), fields(video_path), err)]
 pub fn read_video<P: AsRef<Path>>(
     video_path: P,

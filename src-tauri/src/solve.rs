@@ -1,13 +1,12 @@
-use std::{
-    f64::{consts::PI, NAN},
-    sync::Arc,
-};
+use std::f64::{consts::PI, NAN};
 
+use anyhow::Result;
 use libm::erfc;
 use ndarray::{ArcArray2, Array2, ArrayView, Dimension};
 use packed_simd::{f64x4, Simd};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
+use tlc_util::progress_bar::{Progress, ProgressBar};
 use tlc_video::GmaxId;
 use tracing::{info, instrument};
 
@@ -20,7 +19,6 @@ pub struct NuData {
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq)]
-// #[cfg_attr(test, derive(Default))]
 pub struct PhysicalParam {
     pub gmax_temperature: f64,
     pub solid_thermal_conductivity: f64,
@@ -44,6 +42,23 @@ pub struct SolveId {
     pub physical_param: PhysicalParam,
 }
 
+#[derive(Default)]
+pub struct SolveController {
+    solve: ProgressBar,
+}
+
+impl SolveController {
+    pub fn solve_progress(&self) -> Progress {
+        self.solve.get()
+    }
+
+    pub fn prepare_solve(&mut self) -> ProgressBar {
+        std::mem::take(&mut self.solve).cancel();
+        self.solve.clone()
+    }
+}
+
+#[derive(Clone, Copy)]
 struct PointData<'a> {
     gmax_frame_index: usize,
     temperatures: &'a [f64],
@@ -116,24 +131,14 @@ fn erfc_simd(arr: Simd<[f64; 4]>) -> Simd<[f64; 4]> {
     }
 }
 
-fn newtow_tangent(
-    physical_param: PhysicalParam,
-    dt: f64,
-    h0: f64,
-    max_iter_num: usize,
-) -> impl Fn(PointData) -> f64 {
+fn newtow_tangent<EQ>(equation: EQ, h0: f64, max_iter_num: usize) -> impl Fn(PointData) -> f64
+where
+    EQ: Fn(PointData, f64) -> (f64, f64),
+{
     move |point_data| {
-        let PhysicalParam {
-            gmax_temperature: tw,
-            solid_thermal_conductivity: k,
-            solid_thermal_diffusivity: a,
-            characteristic_length,
-            air_thermal_conductivity,
-        } = physical_param;
-
         let mut h = h0;
         for _ in 0..max_iter_num {
-            let (f, df) = point_data.heat_transfer_equation(h, dt, k, a, tw);
+            let (f, df) = equation(point_data, h);
             let next_h = h - f / df;
             if next_h.abs() > 10000. {
                 return NAN;
@@ -144,27 +149,17 @@ fn newtow_tangent(
             h = next_h;
         }
 
-        h * characteristic_length / air_thermal_conductivity
+        h
     }
 }
 
-fn newtow_down(
-    physical_param: PhysicalParam,
-    dt: f64,
-    h0: f64,
-    max_iter_num: usize,
-) -> impl Fn(PointData) -> f64 {
+fn newtow_down<EQ>(equation: EQ, h0: f64, max_iter_num: usize) -> impl Fn(PointData) -> f64
+where
+    EQ: Fn(PointData, f64) -> (f64, f64),
+{
     move |point_data| {
-        let PhysicalParam {
-            gmax_temperature: tw,
-            solid_thermal_conductivity: k,
-            solid_thermal_diffusivity: a,
-            characteristic_length,
-            air_thermal_conductivity,
-        } = physical_param;
-
         let mut h = h0;
-        let (mut f, mut df) = point_data.heat_transfer_equation(h, dt, k, a, tw);
+        let (mut f, mut df) = equation(point_data, h);
         for _ in 0..max_iter_num {
             let mut lambda = 1.;
             loop {
@@ -172,7 +167,7 @@ fn newtow_down(
                 if (next_h - h).abs() < 1e-3 {
                     return next_h;
                 }
-                let (next_f, next_df) = point_data.heat_transfer_equation(next_h, dt, k, a, tw);
+                let (next_f, next_df) = equation(point_data, h);
                 if next_f.abs() < f.abs() {
                     h = next_h;
                     f = next_f;
@@ -189,7 +184,7 @@ fn newtow_down(
             }
         }
 
-        h * characteristic_length / air_thermal_conductivity
+        h
     }
 }
 
@@ -202,31 +197,50 @@ impl Default for IterationMethod {
     }
 }
 
-#[instrument(skip(gmax_frame_indexes, interpolator))]
+#[instrument(skip(gmax_frame_indexes, interpolator, progress_bar))]
 pub fn solve(
-    gmax_frame_indexes: Arc<Vec<usize>>,
+    gmax_frame_indexes: &[usize],
     interpolator: &Interpolator,
     physical_param: PhysicalParam,
     iteration_method: IterationMethod,
     frame_rate: usize,
-) -> Array2<f64> {
+    progress_bar: ProgressBar,
+) -> Result<Array2<f64>> {
     let dt = 1.0 / frame_rate as f64;
     let shape = interpolator.shape();
     let shape = (shape.0 as usize, shape.1 as usize);
+
+    let PhysicalParam {
+        gmax_temperature: tw,
+        solid_thermal_conductivity: k,
+        solid_thermal_diffusivity: a,
+        characteristic_length,
+        air_thermal_conductivity,
+    } = physical_param;
+
+    let equation =
+        move |point_data: PointData, h| point_data.heat_transfer_equation(h, dt, k, a, tw);
+
     let nu1 = match iteration_method {
         IterationMethod::NewtonTangent { h0, max_iter_num } => solve_inner(
             gmax_frame_indexes,
             interpolator,
-            newtow_tangent(physical_param, dt, h0, max_iter_num),
+            newtow_tangent(equation, h0, max_iter_num),
+            characteristic_length,
+            air_thermal_conductivity,
+            progress_bar,
         ),
         IterationMethod::NewtonDown { h0, max_iter_num } => solve_inner(
             gmax_frame_indexes,
             interpolator,
-            newtow_down(physical_param, dt, h0, max_iter_num),
+            newtow_down(equation, h0, max_iter_num),
+            characteristic_length,
+            air_thermal_conductivity,
+            progress_bar,
         ),
-    };
+    }?;
 
-    Array2::from_shape_vec(shape, nu1).unwrap()
+    Ok(Array2::from_shape_vec(shape, nu1)?)
 }
 
 pub fn nan_mean<D: Dimension>(data: ArrayView<f64, D>) -> f64 {
@@ -245,20 +259,26 @@ pub fn nan_mean<D: Dimension>(data: ArrayView<f64, D>) -> f64 {
 }
 
 fn solve_inner<F>(
-    gmax_frame_indexes: Arc<Vec<usize>>,
+    gmax_frame_indexes: &[usize],
     interpolator: &Interpolator,
     solve_single_point: F,
-) -> Vec<f64>
+    characteristic_length: f64,
+    air_thermal_conductivity: f64,
+    progress_bar: ProgressBar,
+) -> Result<Vec<f64>>
 where
     F: Fn(PointData) -> f64 + Send + Sync + 'static,
 {
     const FIRST_FEW_TO_CAL_T0: usize = 4;
-    gmax_frame_indexes
+    progress_bar.start(gmax_frame_indexes.len() as u32)?;
+    let nu1 = gmax_frame_indexes
         .par_iter()
         .enumerate()
         .map(|(point_index, &gmax_frame_index)| {
+            progress_bar.add(1)?;
+
             if gmax_frame_index <= FIRST_FEW_TO_CAL_T0 {
-                return NAN;
+                return Ok(NAN);
             }
             let temperatures = interpolator.interp_point(point_index);
             let temperatures = temperatures.as_slice().unwrap();
@@ -266,9 +286,13 @@ where
                 gmax_frame_index,
                 temperatures,
             };
-            solve_single_point(point_data)
+            let h = solve_single_point(point_data);
+
+            Ok(h * characteristic_length / air_thermal_conductivity)
         })
-        .collect()
+        .collect::<Result<_>>()?;
+
+    Ok(nu1)
 }
 
 #[cfg(test)]

@@ -143,6 +143,7 @@ impl GlobalState {
                 air_thermal_conductivity,
                 responder,
             } => self.on_set_air_thermal_conductivity(air_thermal_conductivity, responder),
+            GetSolveProgress { responder } => self.on_get_solve_progress(responder),
             GetNu {
                 edge_truncation,
                 responder,
@@ -183,7 +184,7 @@ impl GlobalState {
                 solve_id,
                 nu2,
                 nu_nan_mean,
-            } => self.on_solve(solve_id, nu2, nu_nan_mean)?,
+            } => self.on_complete_solve(solve_id, nu2, nu_nan_mean)?,
         }
 
         Ok(())

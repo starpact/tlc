@@ -4,7 +4,8 @@ use anyhow::Result;
 use crossbeam::channel::Sender;
 use ndarray::{ArcArray2, Array2};
 use serde::Serialize;
-use tlc_video::{FilterMethod, Progress, VideoMeta};
+use tlc_util::progress_bar::Progress;
+use tlc_video::{FilterMethod, VideoMeta};
 
 use crate::{
     daq::{DaqMeta, InterpMethod, Thermocouple},
@@ -312,6 +313,11 @@ pub async fn set_air_thermal_conductivity(
     request::set_air_thermal_conductivity(air_thermal_conductivity, &request_sender)
         .await
         .to()
+}
+
+#[tauri::command]
+pub async fn get_solve_progress(request_sender: RequestSender<'_>) -> TlcResult<Progress> {
+    request::get_solve_progress(&request_sender).await.to()
 }
 
 #[tauri::command]

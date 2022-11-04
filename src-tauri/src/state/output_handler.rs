@@ -3,7 +3,7 @@ use std::sync::Arc;
 use anyhow::{anyhow, bail, Result};
 use ndarray::Array2;
 use tlc_video::{GmaxId, Green2Id, Packet, Parameters, VideoData, VideoId, VideoMeta};
-use tracing::{instrument, warn};
+use tracing::{debug, instrument, warn};
 
 use super::GlobalState;
 use crate::{
@@ -13,13 +13,14 @@ use crate::{
 };
 
 impl GlobalState {
-    #[instrument(level = "debug", skip(self, video_meta, parameters), err)]
+    #[instrument(level = "debug", skip_all, err)]
     pub fn on_complete_read_video_meta(
         &mut self,
         video_id: VideoId,
         video_meta: VideoMeta,
         parameters: Parameters,
     ) -> Result<()> {
+        debug!(?video_id, ?video_meta);
         if self.video_id()? != video_id {
             bail!("video id changed");
         }
@@ -39,19 +40,30 @@ impl GlobalState {
             bail!("video path changed");
         }
 
-        self.video_data
+        let video_data = self
+            .video_data
             .as_mut()
-            .ok_or_else(|| anyhow!("video not loaded yet"))?
-            .push_packet(Arc::new(packet))
+            .ok_or_else(|| anyhow!("video not loaded yet"))?;
+        video_data.push_packet(Arc::new(packet))?;
+
+        if video_data
+            .packet(video_data.video_meta().nframes - 1)
+            .is_ok()
+        {
+            self.reconcile();
+        }
+
+        Ok(())
     }
 
-    #[instrument(level = "debug", skip(self, daq_meta, daq_raw), err)]
+    #[instrument(level = "debug", skip_all, err)]
     pub fn on_complete_read_daq(
         &mut self,
         daq_id: DaqId,
         daq_meta: DaqMeta,
         daq_raw: Array2<f64>,
     ) -> Result<()> {
+        debug!(?daq_id, ?daq_meta);
         if self.daq_id()? != daq_id {
             bail!("daq path changed");
         }
@@ -62,12 +74,13 @@ impl GlobalState {
         Ok(())
     }
 
-    #[instrument(level = "debug", skip(self, green2), err)]
+    #[instrument(level = "debug", skip_all, err)]
     pub fn on_complete_build_green2(
         &mut self,
         green2_id: Green2Id,
         green2: Array2<u8>,
     ) -> Result<()> {
+        debug!(?green2_id);
         if self.green2_id()? != green2_id {
             bail!("green2 meta changed");
         }
@@ -80,12 +93,13 @@ impl GlobalState {
         Ok(())
     }
 
-    #[instrument(level = "debug", skip(self, gmax_frame_indexes), err)]
+    #[instrument(level = "debug", skip_all, err)]
     pub fn on_complete_detect_peak(
         &mut self,
         gmax_id: GmaxId,
         gmax_frame_indexes: Vec<usize>,
     ) -> Result<()> {
+        debug!(?gmax_id);
         if self.gmax_id()? != gmax_id {
             bail!("gmax id changed");
         }
@@ -99,12 +113,13 @@ impl GlobalState {
         Ok(())
     }
 
-    #[instrument(level = "debug", skip(self, interpolator), err)]
+    #[instrument(level = "debug", skip_all, err)]
     pub fn on_complete_interp(
         &mut self,
         interp_id: InterpId,
         interpolator: Interpolator,
     ) -> Result<()> {
+        debug!(?interp_id);
         if self.interp_id()? != interp_id {
             bail!("interp id changed");
         }
@@ -118,13 +133,14 @@ impl GlobalState {
         Ok(())
     }
 
-    #[instrument(level = "debug", skip(self, nu2), err)]
-    pub fn on_solve(
+    #[instrument(level = "debug", skip_all, err)]
+    pub fn on_complete_solve(
         &mut self,
         solve_id: SolveId,
         nu2: Array2<f64>,
         nu_nan_mean: f64,
     ) -> Result<()> {
+        debug!(?solve_id, nu_nan_mean);
         if self.solve_id()? != solve_id {
             bail!("solve id changed");
         }
@@ -135,7 +151,7 @@ impl GlobalState {
             nu_nan_mean,
         });
 
-        let setting_snapshot = self.setting_snapshot()?;
+        let setting_snapshot = self.setting_snapshot(nu_nan_mean)?;
 
         let nu_path = self.nu_path()?;
         if nu_path.exists() {

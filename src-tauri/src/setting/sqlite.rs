@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, bail, Result};
 use rusqlite::{params, Connection, Error::QueryReturnedNoRows};
-use tlc_util::time::now_as_millis;
+use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 use tlc_video::FilterMethod;
 
 use super::{CreateRequest, StartIndex};
@@ -51,7 +51,7 @@ impl Setting {
         let interp_method = interp_method.and_then(|x| serde_json::to_string(&x).ok());
         let filter_method_str = serde_json::to_string(&filter_method)?;
         let iteration_method_str = serde_json::to_string(&iteration_method)?;
-        let created_at = now_as_millis();
+        let created_at = OffsetDateTime::now_local()?.format(&Rfc3339)?;
         let id = conn
             .prepare(
                 "
@@ -72,11 +72,10 @@ impl Setting {
                     solid_thermal_diffusivity,
                     characteristic_length,
                     air_thermal_conductivity,
-                    completed_at,
                     created_at,
                     updated_at
                 )
-                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)
                 ",
             )?
             .insert(params![
@@ -96,7 +95,6 @@ impl Setting {
                 solid_thermal_diffusivity,
                 characteristic_length,
                 air_thermal_conductivity,
-                0,
                 created_at,
                 created_at,
             ])?;
@@ -144,7 +142,7 @@ impl Setting {
 
     pub fn set_name(&self, conn: &Connection, name: &str) -> Result<()> {
         let id = self.id()?;
-        let updated_at = now_as_millis();
+        let updated_at = OffsetDateTime::now_local()?.format(&Rfc3339)?;
         conn.execute(
             "UPDATE settings SET name = ?1, updated_at = ?2 WHERE id = ?3",
             params![name, updated_at, id],
@@ -170,7 +168,7 @@ impl Setting {
         let save_root_dir = save_root_dir
             .to_str()
             .ok_or_else(|| anyhow!("invalid save_root_dir: {save_root_dir:?}"))?;
-        let updated_at = now_as_millis();
+        let updated_at = OffsetDateTime::now_local()?.format(&Rfc3339)?;
         conn.execute(
             "UPDATE settings SET save_root_dir = ?1, updated_at = ?2 WHERE id = ?3",
             params![save_root_dir, updated_at, id],
@@ -196,7 +194,7 @@ impl Setting {
     pub fn set_video_path(&self, conn: &Connection, video_path: &Path) -> Result<()> {
         let id = self.id()?;
         let video_path = video_path.to_str().ok_or_else(|| anyhow!("invliad path"))?;
-        let updated_at = now_as_millis();
+        let updated_at = OffsetDateTime::now_local()?.format(&Rfc3339)?;
         conn.execute(
             "UPDATE settings SET video_path = ?1, updated_at = ?2 WHERE id = ?3",
             params![video_path, updated_at, id],
@@ -221,7 +219,7 @@ impl Setting {
     pub fn set_daq_path(&self, conn: &Connection, daq_path: &Path) -> Result<()> {
         let id = self.id()?;
         let daq_path = daq_path.to_str().ok_or_else(|| anyhow!("invliad path"))?;
-        let updated_at = now_as_millis();
+        let updated_at = OffsetDateTime::now_local()?.format(&Rfc3339)?;
         conn.execute(
             "UPDATE settings SET daq_path = ?1, updated_at = ?2 WHERE id = ?3",
             params![daq_path, updated_at, id],
@@ -261,7 +259,7 @@ impl Setting {
             None => (None, None),
         };
 
-        let updated_at = now_as_millis();
+        let updated_at = OffsetDateTime::now_local()?.format(&Rfc3339)?;
         conn.execute(
             "UPDATE settings SET start_frame = ?1, start_row = ?2, updated_at = ?3 WHERE id = ?4",
             params![start_frame, start_row, updated_at, id],
@@ -287,7 +285,7 @@ impl Setting {
         let id = self.id()?;
         let area_str = serde_json::to_string(&area)?;
 
-        let updated_at = now_as_millis();
+        let updated_at = OffsetDateTime::now_local()?.format(&Rfc3339)?;
         conn.execute(
             "UPDATE settings SET area = ?1, updated_at = ?2 WHERE id = ?3",
             params![area_str, updated_at, id],
@@ -320,7 +318,7 @@ impl Setting {
             Some(thermocouples) => Some(serde_json::to_string(thermocouples)?),
             None => None,
         };
-        let updated_at = now_as_millis();
+        let updated_at = OffsetDateTime::now_local()?.format(&Rfc3339)?;
         conn.execute(
             "UPDATE settings SET thermocouples = ?1, updated_at = ?2 WHERE id = ?3",
             params![thermocouples_str, updated_at, id],
@@ -346,7 +344,7 @@ impl Setting {
     pub fn set_interp_method(&self, conn: &Connection, interp_method: InterpMethod) -> Result<()> {
         let id = self.id()?;
         let interp_method_str = serde_json::to_string(&interp_method)?;
-        let updated_at = now_as_millis();
+        let updated_at = OffsetDateTime::now_local()?.format(&Rfc3339)?;
         conn.execute(
             "UPDATE settings SET interp_method = ?1, updated_at = ?2 WHERE id = ?3",
             params![interp_method_str, updated_at, id],
@@ -369,7 +367,7 @@ impl Setting {
     pub fn set_filter_method(&self, conn: &Connection, filter_method: FilterMethod) -> Result<()> {
         let id = self.id()?;
         let filter_method_str = serde_json::to_string(&filter_method)?;
-        let updated_at = now_as_millis();
+        let updated_at = OffsetDateTime::now_local()?.format(&Rfc3339)?;
         conn.execute(
             "UPDATE settings SET filter_method = ?1, updated_at = ?2 WHERE id = ?3",
             params![filter_method_str, updated_at, id],
@@ -396,7 +394,7 @@ impl Setting {
     ) -> Result<()> {
         let id = self.id()?;
         let iteration_method_str = serde_json::to_string(&iteration_method)?;
-        let updated_at = now_as_millis();
+        let updated_at = OffsetDateTime::now_local()?.format(&Rfc3339)?;
         conn.execute(
             "UPDATE settings SET iteration_method = ?1, updated_at = ?2 WHERE id = ?3",
             params![iteration_method_str, updated_at, id],
@@ -435,7 +433,7 @@ impl Setting {
 
     pub fn set_gmax_temperature(&self, conn: &Connection, gmax_temperature: f64) -> Result<()> {
         let id = self.id()?;
-        let updated_at = now_as_millis();
+        let updated_at = OffsetDateTime::now_local()?.format(&Rfc3339)?;
         conn.execute(
             "UPDATE settings SET gmax_temperature = ?1, updated_at = ?2 WHERE id = ?3",
             params![gmax_temperature, updated_at, id],
@@ -450,7 +448,7 @@ impl Setting {
         solid_thermal_conductivity: f64,
     ) -> Result<()> {
         let id = self.id()?;
-        let updated_at = now_as_millis();
+        let updated_at = OffsetDateTime::now_local()?.format(&Rfc3339)?;
         conn.execute(
             "UPDATE settings SET solid_thermal_conductivity = ?1, updated_at = ?2 WHERE id = ?3",
             params![solid_thermal_conductivity, updated_at, id],
@@ -465,7 +463,7 @@ impl Setting {
         solid_thermal_diffusivity: f64,
     ) -> Result<()> {
         let id = self.id()?;
-        let updated_at = now_as_millis();
+        let updated_at = OffsetDateTime::now_local()?.format(&Rfc3339)?;
         conn.execute(
             "UPDATE settings SET solid_thermal_diffusivity = ?1, updated_at = ?2 WHERE id = ?3",
             params![solid_thermal_diffusivity, updated_at, id],
@@ -480,7 +478,7 @@ impl Setting {
         characteristic_length: f64,
     ) -> Result<()> {
         let id = self.id()?;
-        let updated_at = now_as_millis();
+        let updated_at = OffsetDateTime::now_local()?.format(&Rfc3339)?;
         conn.execute(
             "UPDATE settings SET characteristic_length = ?1, updated_at = ?2 WHERE id = ?3",
             params![characteristic_length, updated_at, id],
@@ -495,7 +493,7 @@ impl Setting {
         air_thermal_conductivity: f64,
     ) -> Result<()> {
         let id = self.id()?;
-        let updated_at = now_as_millis();
+        let updated_at = OffsetDateTime::now_local()?.format(&Rfc3339)?;
         conn.execute(
             "UPDATE settings SET air_thermal_conductivity = ?1, updated_at = ?2 WHERE id = ?3",
             params![air_thermal_conductivity, updated_at, id],
@@ -510,7 +508,7 @@ impl Setting {
     }
 
     #[cfg(test)]
-    fn updated_at(&self, conn: &Connection) -> Result<i64> {
+    fn updated_at(&self, conn: &Connection) -> Result<String> {
         let id = self.id()?;
         let updated_at = conn.query_row(
             "SELECT updated_at FROM settings WHERE id = ?1",
