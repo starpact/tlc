@@ -14,10 +14,8 @@ mod setting;
 mod solve;
 mod state;
 
-use std::thread::spawn;
-
-use crossbeam::channel::bounded;
 use setting::new_db;
+use state::GlobalState;
 use tracing::error;
 
 use command::*;
@@ -28,11 +26,10 @@ fn main() {
     tlc_util::log::init();
     tlc_video::init();
 
-    let (request_sender, request_receiver) = bounded(3);
-    spawn(move || state::main_loop(new_db(SQLITE_FILEPATH), request_receiver));
+    let global_state = GlobalState::new(new_db(SQLITE_FILEPATH));
 
     tauri::Builder::default()
-        .manage(request_sender)
+        .manage(global_state)
         .invoke_handler(tauri::generate_handler![
             create_setting,
             switch_setting,

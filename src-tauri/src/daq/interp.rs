@@ -2,6 +2,7 @@ use anyhow::{anyhow, Result};
 use ndarray::{parallel::prelude::*, prelude::*, ArcArray2};
 use packed_simd::f64x4;
 use serde::{Deserialize, Serialize};
+use tracing::instrument;
 
 use crate::daq::Thermocouple;
 
@@ -39,6 +40,7 @@ use InterpMethod::*;
 
 use super::DaqId;
 
+#[instrument(skip(daq_raw), err)]
 pub fn interp(interp_meta: &InterpId, daq_raw: ArcArray2<f64>) -> Result<Interpolator> {
     let InterpId {
         start_row,
