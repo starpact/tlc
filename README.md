@@ -1,14 +1,38 @@
 # Transient Liquid Crystal Experiment Data Processing
 
 Built with [Tauri](https://tauri.app).
+- [x] Backend, Rust, almost done
+- [ ] Frontend, TypeScript, will start soon 
+
+## User Manual
+todo
 
 ## Development
-### Linux
+### On Linux
 - install rust nightly-x86_64-unknown-linux-gnu toolchain
-- install [Nix](https://nixos.org/) and enable [Flake](https://nixos.wiki/wiki/Flakes), this will manage all other dependencies.
+- install [Nix](https://nixos.org/) and enable [Flake](https://nixos.wiki/wiki/Flakes), this will manage all other dependencies
 ```sh
 # enter the environment
 nix develop # or use direnv
+```
+- [ ] cross compile to Windows
+
+### On Windows
+- make sure your windows support [WebView2](https://developer.microsoft.com/en-us/microsoft-edge/webview2/)
+- install rust nightly-x86_64-pc-windows-msvc toolchain
+- install tauri-cli, cargo-nextest
+- install `ffmpeg` via `vcpkg`, need to compile for about 20 mins
+- let `vcpkg` expose `ffmpeg` headers and DLLs
+- install `cargo-vcpkg`
+- install `LLVM`
+
+---
+```sh
+# unit test
+cargo nextest run 
+
+# integration test(need real experiment data)
+cargo nextest run --run-ignored all
 
 # run
 cargo tauri dev
@@ -16,34 +40,26 @@ cargo tauri dev
 # build
 cargo tauri build
 ```
-Cross compile to Windows(TODO).
-
-### Windows(TODO)
-- install rust nightly-x86_64-pc-windows-msvc toolchain
-```sh
-# install tauri-cli
-cargo install tauri-cli
-
-# install `ffmpeg` via `vcpkg`, need to compile for about 20 mins
-
-# let vcpkg expose ffmpeg headers
-
-# install `llvm`
-
-# install `cargo-vcpkg`
-```
 
 ## Architecture
 ### `Data = f(Setting)`
-`Setting`为由用户指定的设置，`Data`为计算结果。整体上是pure evaluation，即同样的`Setting`必然得到同样`Data`。具体实现上则会引入状态：
+`Setting`为由用户指定的设置，`Data`为计算结果。
+
+整体上是pure evaluation，程序完成`Setting`到`Data`的映射，即同样的`Setting`得到同样的`Data`。
+
+具体实现上：
 - `Setting`有多项，`Data`有多个中间结果
 - `Data`的不同中间结果分别依赖`Setting`中的不同项
-- `Setting`中的不同项之间存在逻辑关联
-- `Setting`由用户逐步构建，需要尽可能的计算出所有已经可以计算的中间结果，以及当该结果所依赖的`Setting`项变化时重新计算
+- `Setting`中的不同项之间也存在依赖关系
 
-整个计算过程可以看作是实际`Data`逐步向当前`Setting`所映射的`Data`动态收敛的过程。
+整个计算过程可以看作是**实际**`Data`向**当前**`Setting`所**映射**的`Data`动态收敛的过程。
 
-`Data`对`Setting`的依赖关系如下图所示(方框：`Setting`，圆框：`Data`)：
+在用户逐步构建`Setting`的过程中，软件需要满足：
+- Best Efforts. 对于不完整`Setting`，需要尽可能的计算出所有已经**可以计算**的中间结果
+- Correctness. 当`Setting`项变化时，invalidate依赖该项的所有中间结果并重新计算
+- Eager & Declarative. 用户只负责修改设置，所有计算任务均自动触发。需要保证排除无效重复任务以及取消已经因为`Setting`变化而不需要继续的任务
+
+`Data`对`Setting`的依赖关系如下图（方框：`Setting`，圆框：`Data`）：
 ```mermaid
 flowchart
     video_path[Video Path] --> packets((Packets))
@@ -66,7 +82,7 @@ flowchart
     physical_param[Physical Parameters] --> nu2
 ```
 
-`Setting`内部各项之间的逻辑依赖如下图所示：
+`Setting`内部各项之间的依赖如下图：
 ```mermaid
 flowchart
     video_path[Video Path] --> area[Area]
@@ -85,11 +101,25 @@ flowchart
 
 ### 多线程下的状态管理
 全局状态`GlobalState`为`Setting`和`Data`的总和。
-首先主进程需要保持responsive，所有耗时任务(I/O & CPU intensive task)都要在其他线程执行，必然需要一定程度上让多线程共享`GlobalState`。
-如果worker线程直接持有`GlobalState`的引用，则需要通过锁访问。
-1. 如果计算过程中持有锁，会影响主线程对于`GlobalState`的读写，不能接受
-2. 如果计算过程中不持有锁，则计算完成后根据结果修改`GlobalState`时，由于状态可能已经改变，计算结果已经不再有效，因此需要检验
-3. 由于`GlobalState`内不同模块的依赖关系较为复杂，拆分加锁难以保证状态的正确性（一把大锁难以避免）
+
+主线程需要保持responsive，因此所有耗时任务(I/O & CPU intensive task)都要在其他线程执行，并且在任务执行过程中必须放弃对于`GlobalState`的独占。此外，由于`GlobalState`内不同模块的依赖关系较为复杂，拆分后分别加锁会破坏操作的原子性，难以保证整体状态的正确性，不考虑。
+
+因此耗时任务的生命周期可以描述为：
+```rust
+// lock
+let input = eval_task_input(&global_state);
+// unlock
+
+let output = execute(&input);
+
+// lock
+check(&global_state, &input); // 计算过程中`GlobalState`可能已经被修改
+update(&mut global_state, output);
+// unlock
+```
+- `execute`是pure function，且只需要domain knowledge，便于测试
+- `eval_task`, `check`和`update`也是pure function，由于不涉及实际计算，`GlobalState`的mock很容易（大部分只需要设置是否存在，而不需要mock一个真实的数据）
+- 临界区内只有简单数据读写，不会成为整个系统瓶颈，耗时任务的执行完全并行
 
 这里采用以`channel`为核心的架构：
 
@@ -106,7 +136,7 @@ flowchart
 flowchart
     build_green2[Build Green2] --> read_video[Read Video]
     build_green2 --> read_daq[Read DAQ]
-    interp[Interp] --> read_video
+    interp[Interpolate] --> read_video
     interp --> read_daq
     detect_peak[Detect Peak] --> build_green2
     solve[Solve] --> detect_peak
