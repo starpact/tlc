@@ -13,7 +13,7 @@ use crate::VideoMeta;
 /// several milliseconds. Then packets can be received from the returned channel
 /// asynchronously.
 /// `progress_bar` can be used to observe the progress and cancel it.
-#[instrument(skip(progress_bar), fields(video_path = ?video_path.as_ref()), err)]
+#[instrument(skip(progress_bar), fields(video_path), err)]
 pub fn read_video<P: AsRef<Path>>(
     video_path: P,
     progress_bar: ProgressBar,
