@@ -454,6 +454,14 @@ mod tests {
         };
         request::create_setting(setting_data, &tx).await.unwrap();
 
-        sleep(Duration::from_secs(10));
+        loop {
+            let progress = request::get_solve_progress(&tx).await.unwrap();
+            match progress {
+                Progress::Uninitialized | Progress::InProgress { .. } => {
+                    sleep(Duration::from_millis(200))
+                }
+                Progress::Finished { .. } => break,
+            }
+        }
     }
 }
