@@ -437,7 +437,7 @@ mod tests {
     }
 
     impl Default for PhysicalParam {
-        fn default() -> Self {
+        fn default() -> PhysicalParam {
             PhysicalParam {
                 gmax_temperature: 35.48,
                 solid_thermal_conductivity: 0.19,

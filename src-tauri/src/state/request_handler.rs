@@ -26,25 +26,24 @@ impl GlobalState {
         responder: Responder<()>,
     ) {
         trace!(?create_setting);
-        responder.respond(
-            self.setting
-                .create_setting(&self.db, (*create_setting).into()),
-        );
-        self.reconcile();
+        let ret = self
+            .setting
+            .create_setting(&self.db, (*create_setting).into());
+        self.respond_with_side_effects(ret, responder);
     }
 
     #[instrument(level = "trace", skip_all)]
     pub fn on_switch_setting(&mut self, setting_id: i64, responder: Responder<()>) {
         trace!(setting_id);
-        responder.respond(self.setting.switch_setting(&self.db, setting_id));
-        self.reconcile();
+        let ret = self.setting.switch_setting(&self.db, setting_id);
+        self.respond_with_side_effects(ret, responder);
     }
 
     #[instrument(level = "trace", skip_all)]
     pub fn on_delete_setting(&mut self, setting_id: i64, responder: Responder<()>) {
         trace!(setting_id);
-        responder.respond(self.setting.delete_setting(&self.db, setting_id));
-        self.reconcile();
+        let ret = self.setting.delete_setting(&self.db, setting_id);
+        self.respond_with_side_effects(ret, responder);
     }
 
     #[instrument(level = "trace", skip_all)]
@@ -192,7 +191,8 @@ impl GlobalState {
         responder: Responder<()>,
     ) {
         trace!(start_frame, start_row);
-        responder.respond(self.synchronize_video_and_daq(start_frame, start_row));
+        let ret = self.synchronize_video_and_daq(start_frame, start_row);
+        self.respond_with_side_effects(ret, responder);
     }
 
     fn synchronize_video_and_daq(&mut self, start_frame: usize, start_row: usize) -> Result<()> {
@@ -223,15 +223,14 @@ impl GlobalState {
             .set_interpolator(None);
         self.nu_data = None;
 
-        self.reconcile();
-
         Ok(())
     }
 
     #[instrument(level = "trace", skip_all)]
     pub fn on_set_start_frame(&mut self, start_frame: usize, responder: Responder<()>) {
         trace!(start_frame);
-        responder.respond(self.set_start_frame(start_frame));
+        let ret = self.set_start_frame(start_frame);
+        self.respond_with_side_effects(ret, responder);
     }
 
     fn set_start_frame(&mut self, start_frame: usize) -> Result<()> {
@@ -270,15 +269,14 @@ impl GlobalState {
             .set_interpolator(None);
         self.nu_data = None;
 
-        self.reconcile();
-
         Ok(())
     }
 
     #[instrument(level = "trace", skip_all)]
     pub fn on_set_start_row(&mut self, start_row: usize, responder: Responder<()>) {
         trace!(start_row);
-        responder.respond(self.set_start_row(start_row));
+        let ret = self.set_start_row(start_row);
+        self.respond_with_side_effects(ret, responder);
     }
 
     fn set_start_row(&mut self, start_row: usize) -> Result<()> {
@@ -317,8 +315,6 @@ impl GlobalState {
             .set_interpolator(None);
         self.nu_data = None;
 
-        self.reconcile();
-
         Ok(())
     }
 
@@ -330,7 +326,8 @@ impl GlobalState {
     #[instrument(level = "trace", skip_all)]
     pub fn on_set_area(&mut self, area: (u32, u32, u32, u32), responder: Responder<()>) {
         trace!(?area);
-        responder.respond(self.set_area(area));
+        let ret = self.set_area(area);
+        self.respond_with_side_effects(ret, responder);
     }
 
     fn set_area(&mut self, area: (u32, u32, u32, u32)) -> Result<()> {
@@ -354,8 +351,6 @@ impl GlobalState {
         }
         self.nu_data = None;
 
-        self.reconcile();
-
         Ok(())
     }
 
@@ -372,7 +367,8 @@ impl GlobalState {
     #[instrument(level = "trace", skip_all)]
     pub fn on_set_filter_method(&mut self, filter_method: FilterMethod, responder: Responder<()>) {
         trace!(?filter_method);
-        responder.respond(self.set_filter_method(filter_method));
+        let ret = self.set_filter_method(filter_method);
+        self.respond_with_side_effects(ret, responder);
     }
 
     fn set_filter_method(&mut self, filter_method: FilterMethod) -> Result<()> {
@@ -381,8 +377,6 @@ impl GlobalState {
             video_data.set_gmax_frame_indexes(None);
         }
         self.nu_data = None;
-
-        self.reconcile();
 
         Ok(())
     }
@@ -429,7 +423,8 @@ impl GlobalState {
         responder: Responder<()>,
     ) {
         trace!(?thermocouples);
-        responder.respond(self.set_thermocouples(&thermocouples));
+        let ret = self.set_thermocouples(&thermocouples);
+        self.respond_with_side_effects(ret, responder);
     }
 
     fn set_thermocouples(&mut self, thermocouples: &[Thermocouple]) -> Result<()> {
@@ -446,8 +441,6 @@ impl GlobalState {
         self.nu_data = None;
         tx.commit()?;
 
-        self.reconcile();
-
         Ok(())
     }
 
@@ -459,7 +452,8 @@ impl GlobalState {
     #[instrument(level = "trace", skip_all)]
     pub fn on_set_interp_method(&mut self, interp_method: InterpMethod, responder: Responder<()>) {
         trace!(?interp_method);
-        responder.respond(self.set_interp_method(interp_method));
+        let ret = self.set_interp_method(interp_method);
+        self.respond_with_side_effects(ret, responder);
     }
 
     fn set_interp_method(&mut self, interp_method: InterpMethod) -> Result<()> {
@@ -471,8 +465,6 @@ impl GlobalState {
             .set_interpolator(None);
         self.nu_data = None;
         tx.commit()?;
-
-        self.reconcile();
 
         Ok(())
     }
@@ -500,15 +492,14 @@ impl GlobalState {
         responder: Responder<()>,
     ) {
         trace!(?iteration_method);
-        responder.respond(self.set_iteration_method(iteration_method));
+        let ret = self.set_iteration_method(iteration_method);
+        self.respond_with_side_effects(ret, responder);
     }
 
     fn set_iteration_method(&mut self, iteration_method: IterationMethod) -> Result<()> {
         self.setting
             .set_iteration_method(&self.db, iteration_method)?;
         self.nu_data = None;
-
-        self.reconcile();
 
         Ok(())
     }
@@ -520,16 +511,15 @@ impl GlobalState {
 
     #[instrument(level = "trace", skip_all)]
     pub fn on_set_gmax_temperature(&mut self, gmax_temperature: f64, responder: Responder<()>) {
-        responder.respond(self.set_gmax_temperature(gmax_temperature));
+        trace!(gmax_temperature);
+        let ret = self.set_gmax_temperature(gmax_temperature);
+        self.respond_with_side_effects(ret, responder);
     }
 
     fn set_gmax_temperature(&mut self, gmax_temperature: f64) -> Result<()> {
-        trace!(gmax_temperature);
         self.setting
             .set_gmax_temperature(&self.db, gmax_temperature)?;
         self.nu_data = None;
-
-        self.reconcile();
 
         Ok(())
     }
@@ -541,15 +531,14 @@ impl GlobalState {
         responder: Responder<()>,
     ) {
         trace!(solid_thermal_conductivity);
-        responder.respond(self.set_solid_thermal_conductivity(solid_thermal_conductivity));
+        let ret = self.set_solid_thermal_conductivity(solid_thermal_conductivity);
+        self.respond_with_side_effects(ret, responder);
     }
 
     fn set_solid_thermal_conductivity(&mut self, solid_thermal_conductivity: f64) -> Result<()> {
         self.setting
             .set_solid_thermal_conductivity(&self.db, solid_thermal_conductivity)?;
         self.nu_data = None;
-
-        self.reconcile();
 
         Ok(())
     }
@@ -561,15 +550,14 @@ impl GlobalState {
         responder: Responder<()>,
     ) {
         trace!(solid_thermal_diffusivity);
-        responder.respond(self.set_solid_thermal_diffusivity(solid_thermal_diffusivity));
+        let ret = self.set_solid_thermal_diffusivity(solid_thermal_diffusivity);
+        self.respond_with_side_effects(ret, responder);
     }
 
     fn set_solid_thermal_diffusivity(&mut self, solid_thermal_diffusivity: f64) -> Result<()> {
         self.setting
             .set_solid_thermal_diffusivity(&self.db, solid_thermal_diffusivity)?;
         self.nu_data = None;
-
-        self.reconcile();
 
         Ok(())
     }
@@ -581,15 +569,14 @@ impl GlobalState {
         responder: Responder<()>,
     ) {
         trace!(characteristic_length);
-        responder.respond(self.set_characteristic_length(characteristic_length));
+        let ret = self.set_characteristic_length(characteristic_length);
+        self.respond_with_side_effects(ret, responder);
     }
 
     fn set_characteristic_length(&mut self, characteristic_length: f64) -> Result<()> {
         self.setting
             .set_characteristic_length(&self.db, characteristic_length)?;
         self.nu_data = None;
-
-        self.reconcile();
 
         Ok(())
     }
@@ -601,15 +588,14 @@ impl GlobalState {
         responder: Responder<()>,
     ) {
         trace!(air_thermal_conductivity);
-        responder.respond(self.set_air_thermal_conductivity(air_thermal_conductivity));
+        let ret = self.set_air_thermal_conductivity(air_thermal_conductivity);
+        self.respond_with_side_effects(ret, responder);
     }
 
     fn set_air_thermal_conductivity(&mut self, air_thermal_conductivity: f64) -> Result<()> {
         self.setting
             .set_air_thermal_conductivity(&self.db, air_thermal_conductivity)?;
         self.nu_data = None;
-
-        self.reconcile();
 
         Ok(())
     }
@@ -653,5 +639,13 @@ impl GlobalState {
                 Err(e) => responder.respond_err(e),
             }
         });
+    }
+
+    fn respond_with_side_effects(&mut self, ret: Result<()>, responder: Responder<()>) {
+        let ok = ret.is_ok();
+        responder.respond(ret);
+        if ok {
+            self.reconcile();
+        }
     }
 }

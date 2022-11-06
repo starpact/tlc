@@ -1,4 +1,3 @@
-use anyhow::Result;
 use crossbeam::{
     channel::{Receiver, RecvError},
     select,
@@ -6,8 +5,10 @@ use crossbeam::{
 use rusqlite::Connection;
 use tracing::{error, info};
 
-use super::GlobalState;
-use crate::{request::Request, state::output::Output};
+use crate::{
+    request::Request,
+    state::{GlobalState, Output},
+};
 
 pub fn main_loop(db: Connection, request_receiver: Receiver<Request>) {
     let mut global_state = GlobalState::new(db);
@@ -27,11 +28,7 @@ impl GlobalState {
     ) -> core::result::Result<(), RecvError> {
         select! {
             recv(request_receiver)  -> request => self.handle_request(request?),
-            recv(self.output_receiver) -> output => {
-                if let Err(e) = self.handle_output(output?) {
-                    error!(%e);
-                }
-            }
+            recv(self.output_receiver) -> output => self.handle_output(output?),
         }
         Ok(())
     }
@@ -151,42 +148,44 @@ impl GlobalState {
         }
     }
 
-    fn handle_output(&mut self, output: Output) -> Result<()> {
+    fn handle_output(&mut self, output: Output) {
         use Output::*;
-        match output {
+        let ret = match output {
             ReadVideoMeta {
                 video_id,
                 video_meta,
                 parameters,
-            } => self.on_complete_read_video_meta(video_id, video_meta, parameters)?,
+            } => self.on_complete_read_video_meta(video_id, video_meta, parameters),
             LoadVideoPacket {
                 video_id: video_meta,
                 packet,
-            } => self.on_complete_load_video_packet(video_meta, packet)?,
+            } => self.on_complete_load_video_packet(video_meta, packet),
             ReadDaq {
                 daq_id,
                 daq_meta,
                 daq_raw,
-            } => self.on_complete_read_daq(daq_id, daq_meta, daq_raw)?,
+            } => self.on_complete_read_daq(daq_id, daq_meta, daq_raw),
             BuildGreen2 {
                 green2_id: green2_meta,
                 green2,
-            } => self.on_complete_build_green2(green2_meta, green2)?,
+            } => self.on_complete_build_green2(green2_meta, green2),
             Interp {
                 interp_id,
                 interpolator,
-            } => self.on_complete_interp(interp_id, interpolator)?,
+            } => self.on_complete_interp(interp_id, interpolator),
             DetectPeak {
                 gmax_id: gmax_meta,
                 gmax_frame_indexes,
-            } => self.on_complete_detect_peak(gmax_meta, gmax_frame_indexes)?,
+            } => self.on_complete_detect_peak(gmax_meta, gmax_frame_indexes),
             Solve {
                 solve_id,
                 nu2,
                 nu_nan_mean,
-            } => self.on_complete_solve(solve_id, nu2, nu_nan_mean)?,
-        }
+            } => self.on_complete_solve(solve_id, nu2, nu_nan_mean),
+        };
 
-        Ok(())
+        if let Err(e) = ret {
+            error!(%e);
+        }
     }
 }
