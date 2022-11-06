@@ -9,7 +9,6 @@
 mod command;
 mod daq;
 mod post_processing;
-mod request;
 mod setting;
 mod solve;
 mod state;
