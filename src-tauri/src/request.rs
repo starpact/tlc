@@ -736,7 +736,7 @@ mod tests {
     }
 
     impl Default for SettingData {
-        fn default() -> Self {
+        fn default() -> SettingData {
             SettingData {
                 name: "test_case".to_owned(),
                 save_root_dir: PathBuf::from("/tmp"),

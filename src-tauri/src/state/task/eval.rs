@@ -1,125 +1,15 @@
-use std::{sync::Arc, time::Duration};
+use anyhow::{anyhow, Result};
+use tlc_video::GmaxId;
+use tracing::instrument;
 
-use anyhow::{anyhow, bail, Result};
-use crossbeam::channel::{RecvTimeoutError, Sender};
-use ndarray::ArcArray2;
-use tlc_video::{
-    filter_detect_peak, read_video, DecoderManager, GmaxId, Green2Id, Packet, VideoId,
-};
-use tracing::{debug, error, info_span, instrument};
-
-use super::{output::Output, GlobalState};
-use crate::{
-    daq::{interp, read_daq, DaqId, InterpId, Interpolator},
-    request::Responder,
-    solve::{self, nan_mean, SolveId},
-};
-
-const NUM_TASK_TYPES: usize = 6;
-
-const TYPE_ID_READ_VIDEO: usize = 0;
-const TYPE_ID_READ_DAQ: usize = 1;
-const TYPE_ID_BUILD_GREEN2: usize = 2;
-const TYPE_ID_DETECT_PEAK: usize = 3;
-const TYPE_ID_INTERP: usize = 4;
-const TYPE_ID_SOLVE: usize = 5;
-
-static DEPENDENCY_GRAPH: [&[usize]; NUM_TASK_TYPES] = [
-    &[],                                     // read_video
-    &[],                                     // read_daq
-    &[TYPE_ID_READ_VIDEO, TYPE_ID_READ_DAQ], // build_green2
-    &[TYPE_ID_BUILD_GREEN2],                 // detect_peak
-    &[TYPE_ID_READ_VIDEO, TYPE_ID_READ_DAQ], // interp
-    &[TYPE_ID_DETECT_PEAK, TYPE_ID_INTERP],  // solve
-];
-
-#[derive(Clone)]
-enum Task {
-    ReadVideo {
-        video_id: VideoId,
-    },
-    ReadDaq {
-        daq_id: DaqId,
-    },
-    BuildGreen2 {
-        green2_id: Green2Id,
-        decoder_manager: DecoderManager,
-        packets: Vec<Arc<Packet>>,
-    },
-    DetectPeak {
-        gmax_id: GmaxId,
-        green2: ArcArray2<u8>,
-    },
-    Interp {
-        interp_id: InterpId,
-        daq_raw: ArcArray2<f64>,
-    },
-    Solve {
-        solve_id: SolveId,
-        gmax_frame_indexes: Arc<Vec<usize>>,
-        interpolator: Interpolator,
-    },
-}
-
-impl std::fmt::Debug for Task {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Task::ReadVideo { video_id } => f
-                .debug_struct("ReadVideo")
-                .field("video_id", video_id)
-                .finish(),
-            Task::ReadDaq { daq_id } => f.debug_struct("ReadDaq").field("daq_id", daq_id).finish(),
-            Task::BuildGreen2 { green2_id, .. } => f
-                .debug_struct("BuildGreen2")
-                .field("green2_id", green2_id)
-                .finish(),
-            Task::DetectPeak { gmax_id, .. } => f
-                .debug_struct("DetectPeak")
-                .field("gmax_id", gmax_id)
-                .finish(),
-            Task::Interp { interp_id, .. } => f
-                .debug_struct("Interp")
-                .field("interp_id", interp_id)
-                .finish(),
-            Task::Solve { solve_id, .. } => {
-                f.debug_struct("Solve").field("solve_id", solve_id).finish()
-            }
-        }
-    }
-}
-
-#[derive(Debug, PartialEq)]
-enum TaskId {
-    ReadVideo(VideoId),
-    ReadDaq(DaqId),
-    BuildGreen2(Green2Id),
-    DetectPeak(GmaxId),
-    Interp(InterpId),
-    Solve(SolveId),
-}
-
-impl TaskId {
-    fn type_id(&self) -> usize {
-        match self {
-            TaskId::ReadVideo(_) => TYPE_ID_READ_VIDEO,
-            TaskId::ReadDaq(_) => TYPE_ID_READ_DAQ,
-            TaskId::BuildGreen2(_) => TYPE_ID_BUILD_GREEN2,
-            TaskId::DetectPeak(_) => TYPE_ID_DETECT_PEAK,
-            TaskId::Interp(_) => TYPE_ID_INTERP,
-            TaskId::Solve(_) => TYPE_ID_SOLVE,
-        }
-    }
-}
+use super::{GlobalState, Task, DEPENDENCY_GRAPH};
 
 #[derive(Clone)]
 enum TaskState {
     AlreadyCompleted,
     ReadyToGo(Task),
     DispatchedToOthers,
-    CannotStart {
-        #[allow(dead_code)] // used in log
-        reason: String,
-    },
+    CannotStart { reason: String },
 }
 
 impl std::fmt::Debug for TaskState {
@@ -137,7 +27,7 @@ impl std::fmt::Debug for TaskState {
 }
 
 impl From<Result<Option<Task>>> for TaskState {
-    fn from(x: Result<Option<Task>>) -> Self {
+    fn from(x: Result<Option<Task>>) -> TaskState {
         match x {
             Ok(None) => TaskState::AlreadyCompleted,
             Ok(Some(task)) => TaskState::ReadyToGo(task),
@@ -149,7 +39,7 @@ impl From<Result<Option<Task>>> for TaskState {
 }
 
 impl From<Result<Task>> for TaskState {
-    fn from(x: Result<Task>) -> Self {
+    fn from(x: Result<Task>) -> TaskState {
         match x {
             Ok(task) => TaskState::ReadyToGo(task),
             Err(e) => TaskState::CannotStart {
@@ -159,46 +49,20 @@ impl From<Result<Task>> for TaskState {
     }
 }
 
-#[derive(Default)]
-pub struct TaskRegistry {
-    last_task_ids: [Option<Arc<TaskId>>; NUM_TASK_TYPES],
-}
-
-impl TaskRegistry {
-    #[instrument(level = "debug", skip_all, err)]
-    fn register(&mut self, task_id: TaskId) -> Result<Arc<TaskId>> {
-        debug!(?task_id);
-        let last_task_id = &mut self.last_task_ids[task_id.type_id()];
-        if let Some(last_task_id) = last_task_id {
-            if Arc::strong_count(last_task_id) == 1 {
-                debug!("last task has already finished");
-            } else if **last_task_id != task_id {
-                debug!("last task has not finished but parameters are different");
-            } else {
-                bail!("last task with same parameters is still executing");
-            }
-        } else {
-            debug!("no last task");
-        }
-
-        Ok(last_task_id.insert(Arc::new(task_id)).clone())
-    }
-}
-
 struct LazyEvaluator<'a> {
-    expr: &'a dyn Fn() -> TaskState,
+    eval: &'a dyn Fn() -> TaskState,
     value: Option<TaskState>,
 }
 
 impl<'a> LazyEvaluator<'a> {
-    fn new(expr: &dyn Fn() -> TaskState) -> LazyEvaluator {
-        LazyEvaluator { expr, value: None }
+    fn new(eval: &dyn Fn() -> TaskState) -> LazyEvaluator {
+        LazyEvaluator { eval, value: None }
     }
 
     fn eval(&mut self) -> TaskState {
         match &self.value {
             Some(value) => value.clone(),
-            None => match (self.expr)() {
+            None => match (self.eval)() {
                 task_state @ TaskState::ReadyToGo(_) => {
                     self.value = Some(TaskState::DispatchedToOthers);
                     task_state
@@ -211,14 +75,8 @@ impl<'a> LazyEvaluator<'a> {
 }
 
 impl GlobalState {
-    pub fn reconcile(&mut self) {
-        for task in self.eval_tasks() {
-            self.spawn_execute_task(task);
-        }
-    }
-
     #[instrument(level = "debug", skip(self), ret)]
-    fn eval_tasks(&self) -> Vec<Task> {
+    pub fn eval_tasks(&self) -> Vec<Task> {
         let eval_read_video = || self.eval_read_video();
         let eval_read_daq = || self.eval_read_daq();
         let eval_build_green2 = || self.eval_build_green2();
@@ -349,234 +207,6 @@ impl GlobalState {
 
         f().into()
     }
-
-    fn spawn_execute_task(&mut self, task: Task) {
-        match task {
-            Task::ReadVideo { video_id } => self.spawn_read_video(video_id, None),
-            Task::ReadDaq { daq_id } => self.spawn_read_daq(daq_id, None),
-            Task::BuildGreen2 {
-                green2_id,
-                decoder_manager,
-                packets,
-            } => self.spawn_build_green2(green2_id, decoder_manager, packets),
-            Task::DetectPeak { gmax_id, green2 } => self.spawn_detect_peak(gmax_id, green2),
-            Task::Interp { interp_id, daq_raw } => self.spawn_interp(interp_id, daq_raw),
-            Task::Solve {
-                solve_id,
-                gmax_frame_indexes,
-                interpolator,
-            } => self.spawn_solve(solve_id, gmax_frame_indexes, interpolator),
-        }
-    }
-
-    fn spawn<F>(&self, task_id: Arc<TaskId>, f: F)
-    where
-        F: FnOnce(Sender<Output>) + Send + 'static,
-    {
-        let output_sender = self.output_sender.clone();
-        std::thread::spawn(move || {
-            let _task_id = task_id;
-            f(output_sender);
-        });
-    }
-
-    pub fn spawn_read_video(&mut self, video_id: VideoId, responder: Option<Responder<()>>) {
-        let task_id = match self
-            .task_registry
-            .register(TaskId::ReadVideo(video_id.clone()))
-        {
-            Ok(task_id) => task_id,
-            Err(e) => {
-                if let Some(responder) = responder {
-                    responder.respond_err(e);
-                }
-                return;
-            }
-        };
-
-        let progress_bar = self.video_controller.prepare_read_video();
-        self.spawn(task_id, |output_sender| {
-            let (video_meta, parameters, packet_rx) =
-                match read_video(&video_id.video_path, progress_bar) {
-                    Ok(ret) => ret,
-                    Err(e) => {
-                        match responder {
-                            Some(responder) => responder.respond_err(e),
-                            None => error!(%e),
-                        }
-                        return;
-                    }
-                };
-
-            let nframes = video_meta.nframes;
-            output_sender
-                .send(Output::ReadVideoMeta {
-                    video_id: video_id.clone(),
-                    video_meta,
-                    parameters,
-                })
-                .unwrap();
-            if let Some(responder) = responder {
-                responder.respond_ok(());
-            }
-
-            let _span = info_span!("receive_loaded_packets", nframes).entered();
-            let video_id = Arc::new(video_id);
-            for cnt in 0.. {
-                match packet_rx.recv_timeout(Duration::from_secs(1)) {
-                    Ok(packet) => output_sender
-                        .send(Output::LoadVideoPacket {
-                            video_id: video_id.clone(),
-                            packet,
-                        })
-                        .unwrap(),
-                    Err(e) => {
-                        match e {
-                            RecvTimeoutError::Timeout => {
-                                error!("load packets got stuck for some reason");
-                            }
-                            RecvTimeoutError::Disconnected => debug_assert_eq!(cnt, nframes),
-                        }
-                        return;
-                    }
-                }
-                debug_assert!(cnt < nframes);
-            }
-        });
-    }
-
-    pub fn spawn_read_daq(&mut self, daq_id: DaqId, responder: Option<Responder<()>>) {
-        let task_id = match self.task_registry.register(TaskId::ReadDaq(daq_id.clone())) {
-            Ok(task_id) => task_id,
-            Err(e) => {
-                if let Some(responder) = responder {
-                    responder.respond_err(e);
-                }
-                return;
-            }
-        };
-
-        self.spawn(task_id, |output_sender| match read_daq(&daq_id.daq_path) {
-            Ok((daq_meta, daq_raw)) => {
-                output_sender
-                    .send(Output::ReadDaq {
-                        daq_id,
-                        daq_meta,
-                        daq_raw,
-                    })
-                    .unwrap();
-                if let Some(responder) = responder {
-                    responder.respond_ok(());
-                }
-            }
-            Err(e) => match responder {
-                Some(responder) => responder.respond_err(e),
-                None => error!(%e),
-            },
-        });
-    }
-
-    fn spawn_build_green2(
-        &mut self,
-        green2_id: Green2Id,
-        decoder_manager: DecoderManager,
-        packets: Vec<Arc<Packet>>,
-    ) {
-        let Green2Id {
-            start_frame,
-            cal_num,
-            area,
-            ..
-        } = green2_id;
-
-        let Ok(task_id) = self.task_registry.register(TaskId::BuildGreen2(green2_id.clone())) else {
-            return;
-        };
-        let progress_bar = self.video_controller.prepare_build_green2();
-        self.spawn(task_id, move |output_sender| {
-            if let Ok(green2) =
-                decoder_manager.decode_all(packets, start_frame, cal_num, area, progress_bar)
-            {
-                output_sender
-                    .send(Output::BuildGreen2 { green2_id, green2 })
-                    .unwrap();
-            }
-        });
-    }
-
-    fn spawn_detect_peak(&mut self, gmax_id: GmaxId, green2: ArcArray2<u8>) {
-        let Ok(task_id) = self.task_registry.register(TaskId::DetectPeak(gmax_id.clone())) else {
-            return;
-        };
-        let progress_bar = self.video_controller.prepare_detect_peak();
-        self.spawn(task_id, move |output_sender| {
-            if let Ok(gmax_frame_indexes) =
-                filter_detect_peak(green2, gmax_id.filter_method, progress_bar)
-            {
-                output_sender
-                    .send(Output::DetectPeak {
-                        gmax_id,
-                        gmax_frame_indexes,
-                    })
-                    .unwrap();
-            }
-        });
-    }
-
-    fn spawn_interp(&mut self, interp_id: InterpId, daq_raw: ArcArray2<f64>) {
-        let Ok(task_id) = self.task_registry.register(TaskId::Interp(interp_id.clone())) else {
-            return;
-        };
-        self.spawn(task_id, |output_sender| {
-            if let Ok(interpolator) = interp(&interp_id, daq_raw) {
-                output_sender
-                    .send(Output::Interp {
-                        interp_id,
-                        interpolator,
-                    })
-                    .unwrap();
-            }
-        });
-    }
-
-    fn spawn_solve(
-        &mut self,
-        solve_id: SolveId,
-        gmax_frame_indexes: Arc<Vec<usize>>,
-        interpolator: Interpolator,
-    ) {
-        let SolveId {
-            frame_rate,
-            iteration_method,
-            physical_param,
-            ..
-        } = solve_id;
-        let Ok(task_id) = self.task_registry.register(TaskId::Solve(solve_id.clone())) else {
-            return;
-        };
-        let progress_bar = self.solve_controller.prepare_solve();
-        self.spawn(task_id, move |output_sender| {
-            if let Ok(nu2) = solve::solve(
-                &gmax_frame_indexes,
-                &interpolator,
-                physical_param,
-                iteration_method,
-                frame_rate,
-                progress_bar,
-            ) {
-                let nu_nan_mean = nan_mean(nu2.view());
-                debug!(nu_nan_mean);
-
-                output_sender
-                    .send(Output::Solve {
-                        solve_id,
-                        nu2,
-                        nu_nan_mean,
-                    })
-                    .unwrap();
-            }
-        });
-    }
 }
 
 fn traverse_dependency_graph(
@@ -608,45 +238,18 @@ fn traverse_dependency_graph(
 
 #[cfg(test)]
 mod tests {
-    use std::{assert_matches::assert_matches, path::PathBuf};
+    use std::{assert_matches::assert_matches, path::PathBuf, sync::Arc};
 
-    use tlc_video::{Parameters, VideoData, VideoMeta};
+    use ndarray::ArcArray2;
+    use tlc_video::{Packet, Parameters, VideoData, VideoId, VideoMeta};
 
     use crate::{
-        daq::{DaqData, DaqMeta, InterpMethod, Thermocouple},
+        daq::{DaqData, DaqId, DaqMeta, InterpMethod, Interpolator, Thermocouple},
         setting::{new_db_in_memory, CreateRequest, StartIndex},
+        state::task::{TaskId, TaskRegistry},
     };
 
     use super::*;
-
-    impl PartialEq for Task {
-        fn eq(&self, other: &Self) -> bool {
-            match (self, other) {
-                (
-                    Task::ReadVideo {
-                        video_id: video_path1,
-                    },
-                    Task::ReadVideo {
-                        video_id: video_path2,
-                    },
-                ) => video_path1 == video_path2,
-                (Task::ReadDaq { daq_id: daq_path1 }, Task::ReadDaq { daq_id: daq_path2 }) => {
-                    daq_path1 == daq_path2
-                }
-                (
-                    Task::BuildGreen2 {
-                        green2_id: green2_id1,
-                        ..
-                    },
-                    Task::BuildGreen2 {
-                        green2_id: green2_id2,
-                        ..
-                    },
-                ) => green2_id1 == green2_id2,
-                _ => false,
-            }
-        }
-    }
 
     #[test]
     fn test_traverse_dependency_graph_all() {
@@ -1261,5 +864,34 @@ mod tests {
             },
             ArcArray2::zeros((120, 10)),
         )
+    }
+
+    impl PartialEq for Task {
+        fn eq(&self, other: &Self) -> bool {
+            match (self, other) {
+                (
+                    Task::ReadVideo {
+                        video_id: video_path1,
+                    },
+                    Task::ReadVideo {
+                        video_id: video_path2,
+                    },
+                ) => video_path1 == video_path2,
+                (Task::ReadDaq { daq_id: daq_path1 }, Task::ReadDaq { daq_id: daq_path2 }) => {
+                    daq_path1 == daq_path2
+                }
+                (
+                    Task::BuildGreen2 {
+                        green2_id: green2_id1,
+                        ..
+                    },
+                    Task::BuildGreen2 {
+                        green2_id: green2_id2,
+                        ..
+                    },
+                ) => green2_id1 == green2_id2,
+                _ => false,
+            }
+        }
     }
 }

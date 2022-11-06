@@ -1,5 +1,4 @@
 mod main_loop;
-mod output;
 mod output_handler;
 mod request_handler;
 mod task;
@@ -8,7 +7,6 @@ use std::path::PathBuf;
 
 use anyhow::{anyhow, Result};
 use crossbeam::channel::{bounded, Receiver, Sender};
-pub use main_loop::main_loop;
 use rusqlite::Connection;
 use tlc_video::{GmaxId, Green2Id, VideoController, VideoData, VideoId};
 
@@ -17,10 +15,12 @@ use crate::{
     setting::{Setting, SettingSnapshot, StartIndex},
     solve::{NuData, SolveController, SolveId},
 };
-use output::Output;
-use task::TaskRegistry;
+pub use main_loop::main_loop;
+pub use task::Output;
 
-struct GlobalState {
+use self::task::TaskRegistry;
+
+pub struct GlobalState {
     setting: Setting,
     db: Connection,
 
@@ -39,9 +39,9 @@ struct GlobalState {
 }
 
 impl GlobalState {
-    fn new(db: Connection) -> Self {
+    pub fn new(db: Connection) -> GlobalState {
         let (output_sender, output_receiver) = bounded(0);
-        Self {
+        GlobalState {
             setting: Setting::default(),
             db,
             output_sender,
@@ -225,6 +225,7 @@ mod tests {
 
     use crate::{
         daq::DaqMeta,
+        main_loop,
         request::{self, NuView, SettingData},
         setting::new_db_in_memory,
         solve::{IterationMethod, PhysicalParam},

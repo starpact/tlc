@@ -564,8 +564,8 @@ mod test {
     }
 
     impl Default for Interpolator {
-        fn default() -> Self {
-            Self {
+        fn default() -> Interpolator {
+            Interpolator {
                 interp_method: InterpMethod::Horizontal,
                 shape: (100, 100),
                 data: ArcArray2::zeros((100, 2000)),

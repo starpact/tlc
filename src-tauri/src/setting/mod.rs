@@ -121,7 +121,7 @@ mod tests {
     use super::*;
 
     impl Default for CreateRequest {
-        fn default() -> Self {
+        fn default() -> CreateRequest {
             CreateRequest {
                 name: "test_case".to_owned(),
                 save_root_dir: PathBuf::from("fake_save_root_dir"),

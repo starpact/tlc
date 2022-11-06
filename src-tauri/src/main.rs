@@ -8,6 +8,7 @@
 
 mod command;
 mod daq;
+mod main_loop;
 mod post_processing;
 mod request;
 mod setting;
@@ -21,6 +22,7 @@ use setting::new_db;
 use tracing::error;
 
 use command::*;
+use state::main_loop;
 
 const SQLITE_FILEPATH: &str = "./var/db.sqlite3";
 
@@ -29,7 +31,7 @@ fn main() {
     tlc_video::init();
 
     let (request_sender, request_receiver) = bounded(3);
-    spawn(move || state::main_loop(new_db(SQLITE_FILEPATH), request_receiver));
+    spawn(move || main_loop(new_db(SQLITE_FILEPATH), request_receiver));
 
     tauri::Builder::default()
         .manage(request_sender)
