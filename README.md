@@ -122,7 +122,7 @@ let output = execute(input);
 3. 根据任务执行的结果修改`GlobalState`，但由于计算过程中放弃了独占，`GlobalState`可能已经被修改，需要检查任务条件是否变化
 ```rust
 // lock
-check(&global_state, input);
+check(&global_state, input)?;
 update(&mut global_state, output);
 // unlock
 ```
@@ -206,7 +206,7 @@ When user drags the progress bar quickly, the decoding can not keep up and there
     ring_buffer: ArrayQueue<(Packet, oneshot::Sender<T>)>,
     task_dispatcher: Sender<()>,
     ```
-    `task_dispatcher`是有界`spmc`用于把任务分发多个worker，利用`try_send`满了立即失败来abort多余的任    务。但消息不能放在队列里，因为FIFO不满足需求，需要一个`ring_buffer`存放实际的消息，淘汰掉的消息就是 最旧的。
+    `task_dispatcher`是有界`spmc`用于把任务分发多个worker，利用`try_send`满了立即失败来abort多余的任务。但消息不能放在队列里，因为FIFO不满足需求，需要一个`ring_buffer`存放实际的消息，淘汰掉的消息就是最旧的。
 
 - 不要试图实现同步取消，会变得不幸
 - 充分利用RAII，优先采用状态的销毁和重建，而非维护和复用

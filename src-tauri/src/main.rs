@@ -8,7 +8,6 @@
 
 mod command;
 mod daq;
-mod main_loop;
 mod post_processing;
 mod request;
 mod setting;
