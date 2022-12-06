@@ -36,7 +36,6 @@ crossbeam = "0.8.2"
 function_name = "0.3.0"
 tlc-video = { path = "../tlc-video" }
 tlc-util = { path = "../tlc-util" }
-serde_yaml = "0.9.14"
 time = { version = "0.3", features = ["serde", "local-offset", "formatting"] }
 
 [dev-dependencies]
