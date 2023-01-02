@@ -167,7 +167,7 @@ impl DecoderManagerInner {
         packets
             .par_iter()
             .skip(start_frame)
-            .zip(green2.axis_iter_mut(Axis(0)).into_iter())
+            .zip(green2.axis_iter_mut(Axis(0)))
             .try_for_each(|(packet, mut row)| -> Result<()> {
                 // Cancel point.
                 // This does not add noticeable overhead.

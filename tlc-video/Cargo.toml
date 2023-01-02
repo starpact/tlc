@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-tokio = "1.23"
+tokio = { version = "1.23", features = ["sync"] }
 base64 = "0.20"
 image = "0.24"
 ndarray = { version = "0.15", features = ["rayon", "serde", "approx-0_5"] }

@@ -34,7 +34,7 @@ impl GlobalState {
         }
     }
 
-    /// This could be triggered both by `request` or `reconcile`, so `responder` is optional.
+    /// This could be triggered by `request` or `reconcile`, so `responder` is optional.
     pub fn spawn_read_video(&mut self, video_id: VideoId, responder: Option<Responder<()>>) {
         let task_id = match self
             .task_registry

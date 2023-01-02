@@ -2,7 +2,28 @@ use anyhow::{anyhow, Result};
 use tlc_video::GmaxId;
 use tracing::instrument;
 
-use super::{GlobalState, Task, DEPENDENCY_GRAPH};
+use super::{
+    GlobalState, Task, NUM_TASK_TYPES, TYPE_ID_BUILD_GREEN2, TYPE_ID_DETECT_PEAK, TYPE_ID_INTERP,
+    TYPE_ID_READ_DAQ, TYPE_ID_READ_VIDEO,
+};
+
+static DEPENDENCY_GRAPH: [&[usize]; NUM_TASK_TYPES] = [
+    &[],                                     // read_video
+    &[],                                     // read_daq
+    &[TYPE_ID_READ_VIDEO, TYPE_ID_READ_DAQ], // build_green2
+    &[TYPE_ID_BUILD_GREEN2],                 // detect_peak
+    &[TYPE_ID_READ_VIDEO, TYPE_ID_READ_DAQ], // interp
+    &[TYPE_ID_DETECT_PEAK, TYPE_ID_INTERP],  // solve
+];
+
+static EVALUATORS: [Eval; NUM_TASK_TYPES] = [
+    GlobalState::eval_read_video,
+    GlobalState::eval_read_daq,
+    GlobalState::eval_build_green2,
+    GlobalState::eval_detect_peak,
+    GlobalState::eval_interp,
+    GlobalState::eval_solve,
+];
 
 #[derive(Clone)]
 enum TaskState {
@@ -49,20 +70,22 @@ impl From<Result<Task>> for TaskState {
     }
 }
 
-struct LazyEvaluator<'a> {
-    eval: &'a dyn Fn() -> TaskState,
+type Eval = fn(&GlobalState) -> TaskState;
+
+struct LazyEvaluator {
+    eval: Eval,
     value: Option<TaskState>,
 }
 
-impl<'a> LazyEvaluator<'a> {
-    fn new(eval: &dyn Fn() -> TaskState) -> LazyEvaluator {
+impl LazyEvaluator {
+    fn new(eval: fn(&GlobalState) -> TaskState) -> LazyEvaluator {
         LazyEvaluator { eval, value: None }
     }
 
-    fn eval(&mut self) -> TaskState {
+    fn eval(&mut self, global_state: &GlobalState) -> TaskState {
         match &self.value {
             Some(value) => value.clone(),
-            None => match (self.eval)() {
+            None => match (self.eval)(global_state) {
                 task_state @ TaskState::ReadyToGo(_) => {
                     self.value = Some(TaskState::DispatchedToOthers);
                     task_state
@@ -77,23 +100,13 @@ impl<'a> LazyEvaluator<'a> {
 impl GlobalState {
     #[instrument(level = "debug", skip(self), ret)]
     pub fn eval_tasks(&self) -> Vec<Task> {
-        let eval_read_video = || self.eval_read_video();
-        let eval_read_daq = || self.eval_read_daq();
-        let eval_build_green2 = || self.eval_build_green2();
-        let eval_detect_peak = || self.eval_detect_peak();
-        let eval_interp = || self.eval_interp();
-        let eval_solve = || self.eval_solve();
-        let mut evaluators = [
-            LazyEvaluator::new(&eval_read_video),
-            LazyEvaluator::new(&eval_read_daq),
-            LazyEvaluator::new(&eval_build_green2),
-            LazyEvaluator::new(&eval_detect_peak),
-            LazyEvaluator::new(&eval_interp),
-            LazyEvaluator::new(&eval_solve),
-        ];
-
         let mut tasks = Vec::new();
-        traverse_dependency_graph(&mut evaluators, &mut tasks, DEPENDENCY_GRAPH.len() - 1);
+        self.traverse_dependency_graph(
+            &mut EVALUATORS.map(LazyEvaluator::new),
+            DEPENDENCY_GRAPH,
+            &mut tasks,
+            DEPENDENCY_GRAPH.len() - 1,
+        );
 
         tasks
     }
@@ -207,32 +220,32 @@ impl GlobalState {
 
         f().into()
     }
-}
 
-fn traverse_dependency_graph(
-    evaluators: &mut [LazyEvaluator],
-    tasks: &mut Vec<Task>,
-    task_id: usize,
-) -> bool {
-    assert_eq!(evaluators.len(), DEPENDENCY_GRAPH.len());
-
-    let mut all_dependencies_ready = true;
-    for &task_id in DEPENDENCY_GRAPH[task_id] {
-        if !traverse_dependency_graph(evaluators, tasks, task_id) {
-            all_dependencies_ready = false;
+    fn traverse_dependency_graph<const N: usize>(
+        &self,
+        evaluators: &mut [LazyEvaluator; N],
+        dependency_graph: [&[usize]; N],
+        tasks: &mut Vec<Task>,
+        task_id: usize,
+    ) -> bool {
+        let mut all_dependencies_ready = true;
+        for &task_id in dependency_graph[task_id] {
+            if !self.traverse_dependency_graph(evaluators, dependency_graph, tasks, task_id) {
+                all_dependencies_ready = false;
+            }
         }
-    }
-    if !all_dependencies_ready {
-        return false;
-    }
-
-    match evaluators[task_id].eval() {
-        TaskState::AlreadyCompleted => true,
-        TaskState::ReadyToGo(task) => {
-            tasks.push(task);
-            false
+        if !all_dependencies_ready {
+            return false;
         }
-        TaskState::DispatchedToOthers | TaskState::CannotStart { .. } => false,
+
+        match evaluators[task_id].eval(self) {
+            TaskState::AlreadyCompleted => true,
+            TaskState::ReadyToGo(task) => {
+                tasks.push(task);
+                false
+            }
+            TaskState::DispatchedToOthers | TaskState::CannotStart { .. } => false,
+        }
     }
 }
 
@@ -262,16 +275,50 @@ mod tests {
             }
         }
 
-        for (case_name, exprs, ready_, tasks_) in [
+        fn eval_already_completed(_: &GlobalState) -> TaskState {
+            TaskState::AlreadyCompleted
+        }
+
+        fn eval_unreachable(_: &GlobalState) -> TaskState {
+            unreachable!()
+        }
+
+        fn eval_go_1(_: &GlobalState) -> TaskState {
+            TaskState::ReadyToGo(fake_task("1"))
+        }
+
+        fn eval_go_2(_: &GlobalState) -> TaskState {
+            TaskState::ReadyToGo(fake_task("2"))
+        }
+
+        fn eval_go_3(_: &GlobalState) -> TaskState {
+            TaskState::ReadyToGo(fake_task("3"))
+        }
+
+        fn eval_go_4(_: &GlobalState) -> TaskState {
+            TaskState::ReadyToGo(fake_task("4"))
+        }
+
+        fn eval_go_5(_: &GlobalState) -> TaskState {
+            TaskState::ReadyToGo(fake_task("5"))
+        }
+
+        fn eval_cannot_start(_: &GlobalState) -> TaskState {
+            TaskState::CannotStart {
+                reason: "".to_owned(),
+            }
+        }
+
+        let cases: [(_, [Eval; 6], _, _); 8] = [
             (
                 "all_ready",
                 [
-                    || TaskState::AlreadyCompleted,
-                    || TaskState::AlreadyCompleted,
-                    || TaskState::AlreadyCompleted,
-                    || TaskState::AlreadyCompleted,
-                    || TaskState::AlreadyCompleted,
-                    || TaskState::AlreadyCompleted,
+                    eval_already_completed,
+                    eval_already_completed,
+                    eval_already_completed,
+                    eval_already_completed,
+                    eval_already_completed,
+                    eval_already_completed,
                 ],
                 true,
                 vec![],
@@ -279,12 +326,12 @@ mod tests {
             (
                 "read_video_and_daq",
                 [
-                    || TaskState::ReadyToGo(fake_task("1")),
-                    || TaskState::ReadyToGo(fake_task("2")),
-                    || unreachable!(),
-                    || unreachable!(),
-                    || unreachable!(),
-                    || unreachable!(),
+                    eval_go_1,
+                    eval_go_2,
+                    eval_unreachable,
+                    eval_unreachable,
+                    eval_unreachable,
+                    eval_unreachable,
                 ],
                 false,
                 vec![fake_task("1"), fake_task("2")],
@@ -292,14 +339,12 @@ mod tests {
             (
                 "read_video_cannot_read_daq",
                 [
-                    || TaskState::ReadyToGo(fake_task("1")),
-                    || TaskState::CannotStart {
-                        reason: "xxx".to_owned(),
-                    },
-                    || unreachable!(),
-                    || unreachable!(),
-                    || unreachable!(),
-                    || unreachable!(),
+                    eval_go_1,
+                    eval_cannot_start,
+                    eval_unreachable,
+                    eval_unreachable,
+                    eval_unreachable,
+                    eval_unreachable,
                 ],
                 false,
                 vec![fake_task("1")],
@@ -307,12 +352,12 @@ mod tests {
             (
                 "build_green2_and_interp",
                 [
-                    || TaskState::AlreadyCompleted,
-                    || TaskState::AlreadyCompleted,
-                    || TaskState::ReadyToGo(fake_task("2")),
-                    || unreachable!(),
-                    || TaskState::ReadyToGo(fake_task("4")),
-                    || unreachable!(),
+                    eval_already_completed,
+                    eval_already_completed,
+                    eval_go_2,
+                    eval_unreachable,
+                    eval_go_4,
+                    eval_unreachable,
                 ],
                 false,
                 vec![fake_task("2"), fake_task("4")],
@@ -320,12 +365,12 @@ mod tests {
             (
                 "build_green2_no_need_interp",
                 [
-                    || TaskState::AlreadyCompleted,
-                    || TaskState::AlreadyCompleted,
-                    || TaskState::ReadyToGo(fake_task("3")),
-                    || unreachable!(),
-                    || TaskState::AlreadyCompleted,
-                    || unreachable!(),
+                    eval_already_completed,
+                    eval_already_completed,
+                    eval_go_3,
+                    eval_unreachable,
+                    eval_already_completed,
+                    eval_unreachable,
                 ],
                 false,
                 vec![fake_task("3")],
@@ -333,14 +378,12 @@ mod tests {
             (
                 "cannot_build_green2_because_prerequisites_not_met",
                 [
-                    || TaskState::AlreadyCompleted,
-                    || TaskState::CannotStart {
-                        reason: "xxx".to_owned(),
-                    },
-                    || TaskState::ReadyToGo(fake_task("3")),
-                    || unreachable!(),
-                    || unreachable!(),
-                    || unreachable!(),
+                    eval_already_completed,
+                    eval_cannot_start,
+                    eval_go_3,
+                    eval_unreachable,
+                    eval_unreachable,
+                    eval_unreachable,
                 ],
                 false,
                 vec![],
@@ -348,12 +391,12 @@ mod tests {
             (
                 "detect_peak_and_interp",
                 [
-                    || TaskState::AlreadyCompleted,
-                    || TaskState::AlreadyCompleted,
-                    || TaskState::AlreadyCompleted,
-                    || TaskState::ReadyToGo(fake_task("3")),
-                    || TaskState::ReadyToGo(fake_task("4")),
-                    || unreachable!(),
+                    eval_already_completed,
+                    eval_already_completed,
+                    eval_already_completed,
+                    eval_go_3,
+                    eval_go_4,
+                    eval_unreachable,
                 ],
                 false,
                 vec![fake_task("3"), fake_task("4")],
@@ -361,24 +404,30 @@ mod tests {
             (
                 "solve",
                 [
-                    || TaskState::AlreadyCompleted,
-                    || TaskState::AlreadyCompleted,
-                    || TaskState::AlreadyCompleted,
-                    || TaskState::AlreadyCompleted,
-                    || TaskState::AlreadyCompleted,
-                    || TaskState::ReadyToGo(fake_task("5")),
+                    eval_already_completed,
+                    eval_already_completed,
+                    eval_already_completed,
+                    eval_already_completed,
+                    eval_go_5,
+                    eval_unreachable,
                 ],
                 false,
                 vec![fake_task("5")],
             ),
-        ] {
+        ];
+
+        for (case_name, evals, ready_expected, tasks_expected) in cases {
             println!("case_name: {case_name}");
-            let mut evaluators: Vec<_> = exprs.iter().map(|x| LazyEvaluator::new(x)).collect();
+            let mut evaluators = evals.map(LazyEvaluator::new);
             let mut tasks = Vec::new();
-            let ready =
-                traverse_dependency_graph(&mut evaluators, &mut tasks, DEPENDENCY_GRAPH.len() - 1);
-            assert_eq!(ready, ready_,);
-            assert_eq!(tasks, tasks_);
+            let ready = GlobalState::new(new_db_in_memory()).traverse_dependency_graph(
+                &mut evaluators,
+                DEPENDENCY_GRAPH,
+                &mut tasks,
+                DEPENDENCY_GRAPH.len() - 1,
+            );
+            assert_eq!(ready_expected, ready);
+            assert_eq!(tasks_expected, tasks);
         }
     }
 

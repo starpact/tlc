@@ -3288,6 +3288,38 @@ dependencies = [
 ]
 
 [[package]]
+name = "src-tauri"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "approx",
+ "base64 0.13.1",
+ "calamine",
+ "crossbeam",
+ "csv",
+ "function_name",
+ "image",
+ "libm 0.2.6",
+ "ndarray",
+ "once_cell",
+ "packed_simd_2",
+ "plotters",
+ "rayon",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "thread_local",
+ "time 0.3.17",
+ "tlc-util",
+ "tlc-video",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "stable_deref_trait"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3780,38 +3812,6 @@ name = "tinyvec_macros"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cda74da7e1a664f795bb1f8a87ec406fb89a02522cf6e50620d016add6dbbf5c"
-
-[[package]]
-name = "tlc"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "approx",
- "base64 0.13.1",
- "calamine",
- "crossbeam",
- "csv",
- "function_name",
- "image",
- "libm 0.2.6",
- "ndarray",
- "once_cell",
- "packed_simd_2",
- "plotters",
- "rayon",
- "rusqlite",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "thread_local",
- "time 0.3.17",
- "tlc-util",
- "tlc-video",
- "tokio",
- "tracing",
- "tracing-subscriber",
-]
 
 [[package]]
 name = "tlc-util"

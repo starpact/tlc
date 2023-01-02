@@ -1,11 +1,11 @@
 [package]
-name = "tlc"
+name = "src-tauri"
 version = "0.1.0"
 description = "Transient Liquid Crystal Experiment Data Processing"
 authors = ["yhj.await@gmail.com"]
 license = "MIT"
 repository = "https://github/starpact/tlc"
-default-run = "tlc"
+default-run = "src-tauri"
 edition = "2021"
 
 [build-dependencies]

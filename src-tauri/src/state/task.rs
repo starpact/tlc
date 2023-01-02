@@ -25,15 +25,6 @@ const TYPE_ID_DETECT_PEAK: usize = 3;
 const TYPE_ID_INTERP: usize = 4;
 const TYPE_ID_SOLVE: usize = 5;
 
-static DEPENDENCY_GRAPH: [&[usize]; NUM_TASK_TYPES] = [
-    &[],                                     // read_video
-    &[],                                     // read_daq
-    &[TYPE_ID_READ_VIDEO, TYPE_ID_READ_DAQ], // build_green2
-    &[TYPE_ID_BUILD_GREEN2],                 // detect_peak
-    &[TYPE_ID_READ_VIDEO, TYPE_ID_READ_DAQ], // interp
-    &[TYPE_ID_DETECT_PEAK, TYPE_ID_INTERP],  // solve
-];
-
 #[derive(Clone)]
 pub enum Task {
     ReadVideo {

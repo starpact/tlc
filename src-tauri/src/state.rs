@@ -15,7 +15,6 @@ use crate::{
     setting::{Setting, SettingSnapshot, StartIndex},
     solve::{NuData, SolveController, SolveId},
 };
-pub use main_loop::main_loop;
 pub use task::Output;
 
 use self::task::TaskRegistry;

@@ -8,6 +8,7 @@
 
 mod command;
 mod daq;
+mod main_loop;
 mod post_processing;
 mod request;
 mod setting;
@@ -21,7 +22,7 @@ use setting::new_db;
 use tracing::error;
 
 use command::*;
-use state::main_loop;
+use main_loop::main_loop;
 
 const SQLITE_FILEPATH: &str = "./var/db.sqlite3";
 

@@ -32,7 +32,7 @@ pub fn new_db_in_memory() -> Connection {
 }
 
 fn init_db(db: &Connection) {
-    db.execute(include_str!("../../db/schema.sql"), ())
+    db.execute(include_str!("../db/schema.sql"), ())
         .expect("Failed to create db");
 }
 

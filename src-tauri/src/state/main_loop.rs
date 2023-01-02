@@ -2,19 +2,11 @@ use crossbeam::{
     channel::{Receiver, RecvError},
     select,
 };
-use rusqlite::Connection;
-use tracing::{error, info};
 
 use crate::{
     request::Request,
     state::{GlobalState, Output},
 };
-
-pub fn main_loop(db: Connection, request_receiver: Receiver<Request>) {
-    let mut global_state = GlobalState::new(db);
-    while global_state.handle(&request_receiver).is_ok() {}
-    info!("exit main loop");
-}
 
 impl GlobalState {
     /// `handle` keeps receiving `Request`(frontend message) and `Output`(computation
@@ -22,12 +14,12 @@ impl GlobalState {
     /// It should NEVER block or do any heavy computations, all blocking/time-consuming
     /// tasks should be executed in other threads and send back results asynchronously
     /// through `output_sender`.
-    fn handle(
+    pub fn handle(
         &mut self,
         request_receiver: &Receiver<Request>,
     ) -> core::result::Result<(), RecvError> {
         select! {
-            recv(request_receiver)  -> request => self.handle_request(request?),
+            recv(request_receiver) -> request => self.handle_request(request?),
             recv(self.output_receiver) -> output => self.handle_output(output?),
         }
         Ok(())
@@ -150,7 +142,7 @@ impl GlobalState {
 
     fn handle_output(&mut self, output: Output) {
         use Output::*;
-        let ret = match output {
+        let _ = match output {
             ReadVideoMeta {
                 video_id,
                 video_meta,
@@ -183,9 +175,5 @@ impl GlobalState {
                 nu_nan_mean,
             } => self.on_complete_solve(solve_id, nu2, nu_nan_mean),
         };
-
-        if let Err(e) = ret {
-            error!(%e);
-        }
     }
 }

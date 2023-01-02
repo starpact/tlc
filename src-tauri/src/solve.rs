@@ -382,10 +382,7 @@ mod tests {
         let r1 = point_data.heat_transfer_equation(I.0, I.1, I.2, I.3, I.4);
         let r2 = point_data.iter_no_simd(I.0, I.1, I.2, I.3, I.4);
         let r3 = point_data.no_iter_no_simd(I.0, I.1, I.2, I.3, I.4);
-        println!(
-            "simd:\t\t\t{:?}\niter_no_simd:\t\t{:?}\nno_iter_no_simd:\t{:?}",
-            r1, r2, r3
-        );
+        println!("simd:\t\t\t{r1:?}\niter_no_simd:\t\t{r2:?}\nno_iter_no_simd:\t{r3:?}");
 
         assert_relative_eq!(r1.0, r2.0, max_relative = 1e-6);
         assert_relative_eq!(r1.1, r2.1, max_relative = 1e-6);
