@@ -4,14 +4,11 @@ use anyhow::Result;
 use crossbeam::channel::Sender;
 use ndarray::{ArcArray2, Array2};
 use serde::Serialize;
-use tlc_util::progress_bar::Progress;
-use tlc_video::{FilterMethod, VideoMeta};
 
-use crate::{
-    daq::{DaqMeta, InterpMethod, Thermocouple},
+use tlc_core::{
     request::{self, NuView, Request, SettingData},
-    setting::StartIndex,
-    solve::{IterationMethod, PhysicalParam},
+    DaqMeta, FilterMethod, InterpMethod, IterationMethod, PhysicalParam, Progress, StartIndex,
+    Thermocouple, VideoMeta,
 };
 
 type RequestSender<'a> = tauri::State<'a, Sender<Request>>;

@@ -1,5 +1,10 @@
 use std::{fmt::Debug, path::PathBuf, time::Instant};
 
+use crate::{
+    daq::{DaqMeta, InterpMethod, Thermocouple},
+    setting::{self, StartIndex},
+    solve::{IterationMethod, PhysicalParam},
+};
 use anyhow::Result;
 use crossbeam::channel::Sender;
 use function_name::named;
@@ -9,12 +14,6 @@ use tlc_util::progress_bar::Progress;
 use tlc_video::{FilterMethod, VideoMeta};
 use tokio::sync::oneshot;
 use tracing::trace;
-
-use crate::{
-    daq::{DaqMeta, InterpMethod, Thermocouple},
-    setting::{self, StartIndex},
-    solve::{IterationMethod, PhysicalParam},
-};
 
 pub enum Request {
     CreateSetting {
@@ -222,7 +221,7 @@ pub struct Responder<T> {
 }
 
 impl<T: Debug + Serialize> Responder<T> {
-    pub fn new(name: &str, tx: oneshot::Sender<Result<T>>) -> Responder<T> {
+    fn new(name: &str, tx: oneshot::Sender<Result<T>>) -> Responder<T> {
         Responder {
             name: name.to_owned(),
             tx,
@@ -230,23 +229,23 @@ impl<T: Debug + Serialize> Responder<T> {
         }
     }
 
-    pub fn respond(self, result: Result<T>) {
+    pub(crate) fn respond(self, result: Result<T>) {
         self.respond_inner(result, true);
     }
 
-    pub fn respond_no_result_log(self, result: Result<T>) {
+    pub(crate) fn respond_no_result_log(self, result: Result<T>) {
         self.respond_inner(result, false);
     }
 
-    pub fn respond_ok(self, v: T) {
+    pub(crate) fn respond_ok(self, v: T) {
         self.respond(Ok(v))
     }
 
-    pub fn respond_ok_no_result_log(self, v: T) {
+    pub(crate) fn respond_ok_no_result_log(self, v: T) {
         self.respond_no_result_log(Ok(v))
     }
 
-    pub fn respond_err(self, e: anyhow::Error) {
+    pub(crate) fn respond_err(self, e: anyhow::Error) {
         self.respond(Err(e))
     }
 

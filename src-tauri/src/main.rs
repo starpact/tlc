@@ -2,36 +2,21 @@
     all(not(debug_assertions), target_os = "windows"),
     windows_subsystem = "windows"
 )]
-#![feature(test)]
-#![feature(array_windows)]
-#![feature(assert_matches)]
 
 mod command;
-mod daq;
-mod main_loop;
-mod post_processing;
-mod request;
-mod setting;
-mod solve;
-mod state;
 
 use std::thread::spawn;
 
 use crossbeam::channel::bounded;
-use setting::new_db;
 use tracing::error;
 
 use command::*;
-use main_loop::main_loop;
 
 const SQLITE_FILEPATH: &str = "./var/db.sqlite3";
 
 fn main() {
-    tlc_util::log::init();
-    tlc_video::init();
-
     let (request_sender, request_receiver) = bounded(3);
-    spawn(move || main_loop(new_db(SQLITE_FILEPATH), request_receiver));
+    spawn(|| tlc_core::run(SQLITE_FILEPATH, request_receiver));
 
     tauri::Builder::default()
         .manage(request_sender)

@@ -1,4 +1,4 @@
-mod main_loop;
+mod handle;
 mod output_handler;
 mod request_handler;
 mod task;
@@ -224,7 +224,7 @@ mod tests {
 
     use crate::{
         daq::DaqMeta,
-        main_loop,
+        main_loop::main_loop,
         request::{self, NuView, SettingData},
         setting::new_db_in_memory,
         solve::{IterationMethod, PhysicalParam},
