@@ -5,9 +5,8 @@ use ndarray::{parallel::prelude::*, prelude::*, ArcArray2};
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
 
-use crate::Green2Id;
-
-use tlc_util::progress_bar::ProgressBar;
+use super::Green2Id;
+use crate::util::progress_bar::ProgressBar;
 
 #[derive(Debug, Default, Deserialize, Serialize, Clone, Copy, PartialEq)]
 pub enum FilterMethod {

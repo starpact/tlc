@@ -6,11 +6,13 @@ use ndarray::{ArcArray2, Array2, ArrayView, Dimension};
 use packed_simd::{f64x4, Simd};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
-use tlc_util::progress_bar::{Progress, ProgressBar};
-use tlc_video::GmaxId;
 use tracing::{info, instrument};
 
-use crate::daq::{InterpId, Interpolator};
+use crate::{
+    daq::{InterpId, Interpolator},
+    util::progress_bar::{Progress, ProgressBar},
+    video::GmaxId,
+};
 
 #[derive(Clone)]
 pub struct NuData {
@@ -366,7 +368,7 @@ mod tests {
     }
 
     fn new_temps() -> Array1<f64> {
-        let daq_raw = daq::read_daq("../tests/imp_20000_1.lvm").unwrap().1;
+        let daq_raw = daq::read_daq("./testdata/imp_20000_1.lvm").unwrap().1;
         daq_raw.column(3).to_owned()
     }
 

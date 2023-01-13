@@ -6,11 +6,11 @@ edition = "2021"
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-tokio = { version = "1.23", features = ["macros"] }
+tokio = { version = "1.24", features = ["sync", "rt", "macros"] }
 rayon = "1.6"
 anyhow = "1.0"
 tracing = "0.1"
-tracing-subscriber = "0.3"
+tracing-subscriber = { version = "0.3", features = ["local-time"] }
 thread_local = "1.1"
 image = "0.24"
 ndarray = { version = "0.15", features = ["rayon", "serde", "approx-0_5"] }
@@ -24,10 +24,11 @@ once_cell = "1.16"
 rusqlite = { version = "0.28.0", features = ["bundled"] }
 crossbeam = "0.8"
 function_name = "0.3"
+ffmpeg = { version = "5.1", package = "ffmpeg-next" }
+median = "0.3"
+dwt = "0.5"
 time = { version = "0.3", features = ["serde", "local-offset", "formatting"] }
 salsa = { git = "https://github.com/salsa-rs/salsa", package = "salsa-2022" }
-tlc-video = { path = "../tlc-video" }
-tlc-util = { path = "../tlc-util" }
 
 [dev-dependencies]
 approx = "0.5"

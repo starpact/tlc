@@ -1,4 +1,4 @@
-use tlc_util::progress_bar::{Progress, ProgressBar};
+use crate::util::progress_bar::{Progress, ProgressBar};
 
 #[derive(Default)]
 pub struct VideoController {

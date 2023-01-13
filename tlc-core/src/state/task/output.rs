@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
 use ndarray::Array2;
-use tlc_video::{GmaxId, Green2Id, Packet, Parameters, VideoId, VideoMeta};
 
 use crate::{
     daq::{DaqId, DaqMeta, InterpId, Interpolator},
     solve::SolveId,
+    video::{GmaxId, Green2Id, Packet, Parameters, VideoId, VideoMeta},
 };
 
 pub enum Output {

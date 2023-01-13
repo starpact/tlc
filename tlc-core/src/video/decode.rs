@@ -21,11 +21,13 @@ use image::{codecs::jpeg::JpegEncoder, ColorType::Rgb8};
 use ndarray::prelude::*;
 use rayon::prelude::*;
 use thread_local::ThreadLocal;
-use tlc_util::progress_bar::{Progress, ProgressBar};
 use tokio::sync::oneshot;
 use tracing::instrument;
 
-use crate::VideoId;
+use crate::{
+    util::progress_bar::{Progress, ProgressBar},
+    video::VideoId,
+};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Green2Id {
@@ -266,39 +268,45 @@ impl DerefMut for SendableSwsCtx {
 #[cfg(test)]
 mod tests {
     use std::{
-        sync::atomic::{AtomicU32, Ordering::Relaxed},
+        sync::{
+            atomic::{AtomicU32, Ordering::Relaxed},
+            Arc,
+        },
         thread::{sleep, spawn},
         time::Duration,
     };
 
-    use super::*;
     use crate::{
-        read_video,
-        test_util::{video_meta_real, video_meta_sample, VIDEO_PATH_REAL, VIDEO_PATH_SAMPLE},
+        util::{self, progress_bar::ProgressBar},
+        video::{
+            read_video,
+            test_util::{video_meta_real, video_meta_sample, VIDEO_PATH_REAL, VIDEO_PATH_SAMPLE},
+            DecoderManager,
+        },
     };
 
     #[test]
     fn test_decode_frame_sample() {
-        tlc_util::log::init();
+        util::log::init();
         _decode_frame(VIDEO_PATH_SAMPLE);
     }
 
     #[ignore]
     #[test]
     fn test_decode_frame_read() {
-        tlc_util::log::init();
+        util::log::init();
         _decode_frame(VIDEO_PATH_REAL);
     }
 
     #[test]
     fn test_decode_all_sample() {
-        tlc_util::log::init();
+        util::log::init();
         _decode_all(VIDEO_PATH_SAMPLE, 0, video_meta_sample().nframes);
     }
 
     #[test]
     fn test_decode_all_real() {
-        tlc_util::log::init();
+        util::log::init();
         _decode_all(VIDEO_PATH_REAL, 10, video_meta_real().nframes - 10);
     }
 

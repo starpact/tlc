@@ -6,13 +6,13 @@ use std::sync::Arc;
 
 use anyhow::{bail, Result};
 use ndarray::ArcArray2;
-use tlc_video::{DecoderManager, GmaxId, Green2Id, Packet, VideoId};
 use tracing::{debug, instrument};
 
 use super::GlobalState;
 use crate::{
     daq::{DaqId, InterpId, Interpolator},
     solve::SolveId,
+    video::{DecoderManager, GmaxId, Green2Id, Packet, VideoId},
 };
 pub use output::Output;
 

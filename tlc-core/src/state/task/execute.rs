@@ -2,9 +2,6 @@ use std::{sync::Arc, time::Duration};
 
 use crossbeam::channel::{RecvTimeoutError, Sender};
 use ndarray::ArcArray2;
-use tlc_video::{
-    filter_detect_peak, read_video, DecoderManager, GmaxId, Green2Id, Packet, VideoId,
-};
 use tracing::{debug, debug_span, error};
 
 use super::{GlobalState, Output, Task, TaskId};
@@ -12,6 +9,7 @@ use crate::{
     daq::{interp, read_daq, DaqId, InterpId, Interpolator},
     request::Responder,
     solve::{self, nan_mean, SolveId},
+    video::{filter_detect_peak, read_video, DecoderManager, GmaxId, Green2Id, Packet, VideoId},
 };
 
 impl GlobalState {

@@ -8,16 +8,15 @@ use std::path::PathBuf;
 use anyhow::{anyhow, Result};
 use crossbeam::channel::{bounded, Receiver, Sender};
 use rusqlite::Connection;
-use tlc_video::{GmaxId, Green2Id, VideoController, VideoData, VideoId};
 
+use self::task::TaskRegistry;
 use crate::{
     daq::{DaqData, DaqId, InterpId, InterpMethod, Interpolator, Thermocouple},
     setting::{Setting, SettingSnapshot, StartIndex},
     solve::{NuData, SolveController, SolveId},
+    video::{GmaxId, Green2Id, VideoController, VideoData, VideoId},
 };
 pub use task::Output;
-
-use self::task::TaskRegistry;
 
 pub struct GlobalState {
     setting: Setting,
@@ -219,8 +218,10 @@ mod tests {
         time::Duration,
     };
 
-    use tlc_util::progress_bar::Progress;
-    use tlc_video::{FilterMethod, VideoMeta};
+    use crate::{
+        util::{self, progress_bar::Progress},
+        video::{FilterMethod, VideoMeta},
+    };
 
     use crate::{
         daq::DaqMeta,
@@ -238,7 +239,7 @@ mod tests {
     #[ignore]
     #[tokio::test]
     async fn test_real() {
-        tlc_util::log::init();
+        util::log::init();
         let (tx, rx) = bounded(3);
         spawn(move || main_loop(new_db_in_memory(), rx));
 
@@ -409,7 +410,7 @@ mod tests {
     #[ignore]
     #[tokio::test]
     async fn test_complete_setting_auto_compute_all() {
-        tlc_util::log::init();
+        util::log::init();
         let (tx, rx) = bounded(3);
         spawn(move || main_loop(new_db_in_memory(), rx));
 

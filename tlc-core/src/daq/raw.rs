@@ -83,14 +83,15 @@ mod tests {
     use approx::assert_relative_eq;
 
     use super::*;
+    use crate::util;
 
-    const DAQ_PATH_LVM: &str = "../tests/imp_20000_1.lvm";
-    const DAQ_PATH_XLSX: &str = "../tests/imp_20000_1.xlsx";
-    const DAQ_PATH_UNSUPPORTED: &str = "../tests/imp_20000_1.csv";
+    const DAQ_PATH_LVM: &str = "./testdata/imp_20000_1.lvm";
+    const DAQ_PATH_XLSX: &str = "./testdata/imp_20000_1.xlsx";
+    const DAQ_PATH_UNSUPPORTED: &str = "./testdata/imp_20000_1.csv";
 
     #[test]
     fn test_read_daq_lvm_and_xlsx() {
-        tlc_util::log::init();
+        util::log::init();
 
         let (daq_meta, daq_raw_lvm) = read_daq(DAQ_PATH_LVM).unwrap();
         assert_eq!(

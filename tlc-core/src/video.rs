@@ -1,5 +1,3 @@
-#![feature(assert_matches)]
-
 mod controller;
 mod decode;
 mod detect_peak;
@@ -136,7 +134,7 @@ impl VideoData {
 mod test_util {
     use crate::VideoMeta;
 
-    pub const VIDEO_PATH_SAMPLE: &str = "../tests/almost_empty.avi";
+    pub const VIDEO_PATH_SAMPLE: &str = "./testdata/almost_empty.avi";
     pub const VIDEO_PATH_REAL: &str = "/home/yhj/Downloads/EXP/imp/videos/imp_20000_1_up.avi";
 
     pub fn video_meta_sample() -> VideoMeta {

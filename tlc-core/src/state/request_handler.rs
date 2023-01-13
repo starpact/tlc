@@ -5,8 +5,6 @@ use std::{
 
 use anyhow::{anyhow, bail, Result};
 use ndarray::{ArcArray2, Array2};
-use tlc_util::progress_bar::Progress;
-use tlc_video::{filter_point, FilterMethod, VideoId, VideoMeta};
 use tracing::{instrument, trace, warn};
 
 use super::GlobalState;
@@ -16,6 +14,8 @@ use crate::{
     request::{NuView, Responder, SettingData},
     setting::StartIndex,
     solve::{IterationMethod, NuData, PhysicalParam},
+    util::progress_bar::Progress,
+    video::{filter_point, FilterMethod, VideoId, VideoMeta},
 };
 
 impl GlobalState {

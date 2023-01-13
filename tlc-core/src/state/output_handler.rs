@@ -2,7 +2,6 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, bail, Result};
 use ndarray::Array2;
-use tlc_video::{GmaxId, Green2Id, Packet, Parameters, VideoData, VideoId, VideoMeta};
 use tracing::{debug, instrument, warn};
 
 use super::GlobalState;
@@ -10,6 +9,7 @@ use crate::{
     daq::{DaqData, DaqId, DaqMeta, InterpId, Interpolator},
     post_processing::save_matrix,
     solve::{NuData, SolveId},
+    video::{GmaxId, Green2Id, Packet, Parameters, VideoData, VideoId, VideoMeta},
 };
 
 impl GlobalState {

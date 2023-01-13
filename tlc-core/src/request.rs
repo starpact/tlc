@@ -10,10 +10,13 @@ use crossbeam::channel::Sender;
 use function_name::named;
 use ndarray::{ArcArray2, Array2};
 use serde::{Deserialize, Serialize};
-use tlc_util::progress_bar::Progress;
-use tlc_video::{FilterMethod, VideoMeta};
 use tokio::sync::oneshot;
 use tracing::trace;
+
+use crate::{
+    util::progress_bar::Progress,
+    video::{FilterMethod, VideoMeta},
+};
 
 pub enum Request {
     CreateSetting {
@@ -723,11 +726,13 @@ pub async fn get_nu(
 
 #[cfg(test)]
 mod tests {
+    use crate::util;
+
     use super::*;
 
     #[test]
     fn test_respond_log_output() {
-        tlc_util::log::init();
+        util::log::init();
 
         let (tx, _rx) = oneshot::channel::<Result<()>>();
         let responder = Responder::new("some_event", tx);

@@ -1,11 +1,11 @@
 use anyhow::{anyhow, Result};
-use tlc_video::GmaxId;
 use tracing::instrument;
 
 use super::{
     GlobalState, Task, NUM_TASK_TYPES, TYPE_ID_BUILD_GREEN2, TYPE_ID_DETECT_PEAK, TYPE_ID_INTERP,
     TYPE_ID_READ_DAQ, TYPE_ID_READ_VIDEO,
 };
+use crate::video::GmaxId;
 
 static DEPENDENCY_GRAPH: [&[usize]; NUM_TASK_TYPES] = [
     &[],                                     // read_video
@@ -254,12 +254,13 @@ mod tests {
     use std::{assert_matches::assert_matches, path::PathBuf, sync::Arc};
 
     use ndarray::ArcArray2;
-    use tlc_video::{Packet, Parameters, VideoData, VideoId, VideoMeta};
 
     use crate::{
         daq::{DaqData, DaqId, DaqMeta, InterpMethod, Interpolator, Thermocouple},
         setting::{new_db_in_memory, CreateRequest, StartIndex},
         state::task::{TaskId, TaskRegistry},
+        util,
+        video::{Packet, Parameters, VideoData, VideoId, VideoMeta},
     };
 
     use super::*;
@@ -433,14 +434,14 @@ mod tests {
 
     #[test]
     fn test_eval_tasks_empty_state() {
-        tlc_util::log::init();
+        util::log::init();
         let global_state = GlobalState::new(new_db_in_memory());
         assert!(global_state.eval_tasks().is_empty());
     }
 
     #[test]
     fn test_eval_read_video() {
-        tlc_util::log::init();
+        util::log::init();
         let mut global_state = empty_global_state();
 
         assert_matches!(
@@ -460,7 +461,7 @@ mod tests {
 
     #[test]
     fn test_eval_read_daq() {
-        tlc_util::log::init();
+        util::log::init();
         let mut global_state = empty_global_state();
 
         assert_matches!(
@@ -480,7 +481,7 @@ mod tests {
 
     #[test]
     fn test_eval_build_green2() {
-        tlc_util::log::init();
+        util::log::init();
         let mut global_state = empty_global_state();
 
         assert_matches!(
@@ -548,7 +549,7 @@ mod tests {
 
     #[test]
     fn test_eval_detect_peak() {
-        tlc_util::log::init();
+        util::log::init();
         let mut global_state = empty_global_state();
 
         assert_matches!(
@@ -611,7 +612,7 @@ mod tests {
 
     #[test]
     fn test_eval_interp() {
-        tlc_util::log::init();
+        util::log::init();
         let mut global_state = empty_global_state();
 
         assert_matches!(
@@ -703,7 +704,7 @@ mod tests {
 
     #[test]
     fn test_eval_solve() {
-        tlc_util::log::init();
+        util::log::init();
         let mut global_state = empty_global_state();
 
         assert_matches!(
@@ -817,7 +818,7 @@ mod tests {
 
     #[test]
     fn test_task_controller_accept_same_type_different_param() {
-        tlc_util::log::init();
+        util::log::init();
 
         let mut task_controller = TaskRegistry::default();
         let _task_id = task_controller
@@ -834,7 +835,7 @@ mod tests {
 
     #[test]
     fn test_task_controller_reject_same_type_same_param() {
-        tlc_util::log::init();
+        util::log::init();
 
         let mut task_controller = TaskRegistry::default();
         let _task_id = task_controller
@@ -851,7 +852,7 @@ mod tests {
 
     #[test]
     fn test_task_controller_accept_different_type() {
-        tlc_util::log::init();
+        util::log::init();
 
         let mut task_controller = TaskRegistry::default();
         let _task_id = task_controller
@@ -868,7 +869,7 @@ mod tests {
 
     #[test]
     fn test_task_controller_accept_same_type_same_param_after_finished() {
-        tlc_util::log::init();
+        util::log::init();
 
         let mut task_registry = TaskRegistry::default();
         let _task_id = task_registry

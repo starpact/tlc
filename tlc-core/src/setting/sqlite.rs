@@ -3,12 +3,12 @@ use std::path::{Path, PathBuf};
 use anyhow::{anyhow, bail, Result};
 use rusqlite::{params, Connection, Error::QueryReturnedNoRows};
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
-use tlc_video::FilterMethod;
 
 use super::{CreateRequest, StartIndex};
 use crate::{
     daq::{InterpMethod, Thermocouple},
     solve::{IterationMethod, PhysicalParam},
+    video::FilterMethod,
 };
 
 #[derive(Debug, Default)]
@@ -407,13 +407,13 @@ impl Setting {
         let id = self.id()?;
         let physical_param = conn.query_row(
             "
-            SELECT 
+            SELECT
                 gmax_temperature,
                 solid_thermal_conductivity,
                 solid_thermal_diffusivity,
                 characteristic_length,
                 air_thermal_conductivity
-            FROM settings 
+            FROM settings
             WHERE id = ?1
             ",
             [id],

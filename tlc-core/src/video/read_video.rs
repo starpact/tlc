@@ -4,10 +4,9 @@ use anyhow::{anyhow, Result};
 use crossbeam::channel::{bounded, Receiver};
 use ffmpeg::codec;
 pub use ffmpeg::codec::{packet::Packet, Parameters};
-use tlc_util::progress_bar::ProgressBar;
 use tracing::{error, info_span, instrument};
 
-use crate::VideoMeta;
+use crate::{util::progress_bar::ProgressBar, VideoMeta};
 
 /// `read_video` will return after finished reading video metadata, which just takes
 /// several milliseconds. Then packets can be received from the returned channel
@@ -65,28 +64,31 @@ mod tests {
     use std::{thread::sleep, time::Duration};
 
     use crate::{
-        test_util::{video_meta_real, video_meta_sample, VIDEO_PATH_REAL, VIDEO_PATH_SAMPLE},
-        VideoController,
+        util,
+        video::{
+            test_util::{video_meta_real, video_meta_sample, VIDEO_PATH_REAL, VIDEO_PATH_SAMPLE},
+            VideoController,
+        },
     };
 
     use super::*;
 
     #[test]
     fn test_read_video_sample() {
-        tlc_util::log::init();
+        util::log::init();
         _read_video(VIDEO_PATH_SAMPLE, video_meta_sample());
     }
 
     #[ignore]
     #[test]
     fn test_read_video_real() {
-        tlc_util::log::init();
+        util::log::init();
         _read_video(VIDEO_PATH_REAL, video_meta_real());
     }
 
     #[test]
     fn test_cancel_before_start_sample() {
-        tlc_util::log::init();
+        util::log::init();
         let mut video_controller = VideoController::default();
         let progress_bar = video_controller.prepare_read_video();
         // Cancel the previous one.
@@ -97,7 +99,7 @@ mod tests {
     #[ignore]
     #[test]
     fn test_cancel_while_reading_real() {
-        tlc_util::log::init();
+        util::log::init();
         let mut video_controller = VideoController::default();
         let progress_bar = video_controller.prepare_read_video();
         let (_, _, packet_rx) = read_video(VIDEO_PATH_REAL, progress_bar).unwrap();

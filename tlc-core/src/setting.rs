@@ -9,12 +9,12 @@ use anyhow::Result;
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 pub use sqlite::Setting;
-use tlc_video::{FilterMethod, VideoMeta};
 use tracing::instrument;
 
 use crate::{
     daq::{DaqMeta, InterpMethod, Thermocouple},
     solve::{IterationMethod, PhysicalParam},
+    video::{FilterMethod, VideoMeta},
 };
 
 pub fn new_db<P: AsRef<Path>>(path: P) -> Connection {
