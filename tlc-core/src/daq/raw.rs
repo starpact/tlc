@@ -3,12 +3,68 @@ use std::path::Path;
 use anyhow::{anyhow, bail, Result};
 use calamine::{open_workbook, Reader, Xlsx};
 use ndarray::Array2;
+use std::path::PathBuf;
 use tracing::instrument;
 
-use super::DaqMeta;
+use ndarray::ArcArray2;
+use serde::{Deserialize, Serialize};
+
+use super::Interpolator;
+
+pub struct DaqData {
+    daq_raw: ArcArray2<f64>,
+    interpolator: Option<Interpolator>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct DaqId {
+    pub daq_path: PathBuf,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq)]
+pub struct DaqMeta {
+    pub nrows: usize,
+    pub ncols: usize,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq)]
+pub struct Thermocouple {
+    /// Column index of this thermocouple in the DAQ file.
+    pub column_index: usize,
+    /// Position of this thermocouple(y, x). Thermocouples
+    /// may not be in the video area, so coordinate can be negative.
+    pub position: (i32, i32),
+}
+
+impl DaqData {
+    pub fn new(daq_raw: ArcArray2<f64>) -> DaqData {
+        DaqData {
+            daq_raw,
+            interpolator: None,
+        }
+    }
+
+    pub fn daq_meta(&self) -> DaqMeta {
+        let nrows = self.daq_raw.nrows();
+        let ncols = self.daq_raw.ncols();
+        DaqMeta { nrows, ncols }
+    }
+
+    pub fn daq_raw(&self) -> ArcArray2<f64> {
+        self.daq_raw.clone()
+    }
+
+    pub fn interpolator(&self) -> Option<&Interpolator> {
+        self.interpolator.as_ref()
+    }
+
+    pub fn set_interpolator(&mut self, interpolator: Option<Interpolator>) {
+        self.interpolator = interpolator;
+    }
+}
 
 #[instrument(fields(daq_path = ?daq_path.as_ref()), err)]
-pub fn read_daq<P: AsRef<Path>>(daq_path: P) -> Result<(DaqMeta, Array2<f64>)> {
+pub fn read_daq<P: AsRef<Path>>(daq_path: P) -> Result<Array2<f64>> {
     let daq_path = daq_path.as_ref();
     let daq_raw = match daq_path
         .extension()
@@ -20,11 +76,7 @@ pub fn read_daq<P: AsRef<Path>>(daq_path: P) -> Result<(DaqMeta, Array2<f64>)> {
         _ => bail!("only .lvm and .xlsx are supported"),
     }?;
 
-    let nrows = daq_raw.nrows();
-    let ncols = daq_raw.ncols();
-    let daq_meta = DaqMeta { nrows, ncols };
-
-    Ok((daq_meta, daq_raw))
+    Ok(daq_raw)
 }
 
 fn read_daq_lvm(daq_path: &Path) -> Result<Array2<f64>> {
@@ -83,39 +135,19 @@ mod tests {
     use approx::assert_relative_eq;
 
     use super::*;
-    use crate::util;
-
-    const DAQ_PATH_LVM: &str = "./testdata/imp_20000_1.lvm";
-    const DAQ_PATH_XLSX: &str = "./testdata/imp_20000_1.xlsx";
-    const DAQ_PATH_UNSUPPORTED: &str = "./testdata/imp_20000_1.csv";
+    use crate::util::log;
 
     #[test]
     fn test_read_daq_lvm_and_xlsx() {
-        util::log::init();
-
-        let (daq_meta, daq_raw_lvm) = read_daq(DAQ_PATH_LVM).unwrap();
-        assert_eq!(
-            daq_meta,
-            DaqMeta {
-                nrows: 2589,
-                ncols: 10,
-            }
+        log::init();
+        assert_relative_eq!(
+            read_daq("./testdata/imp_20000_1.lvm").unwrap(),
+            read_daq("./testdata/imp_20000_1.xlsx").unwrap()
         );
-
-        let (daq_meta, daq_raw_xlsx) = read_daq(DAQ_PATH_XLSX).unwrap();
-        assert_eq!(
-            daq_meta,
-            DaqMeta {
-                nrows: 2589,
-                ncols: 10,
-            }
-        );
-
-        assert_relative_eq!(daq_raw_lvm, daq_raw_xlsx);
     }
 
     #[test]
     fn test_read_daq_unsupported_extension() {
-        assert!(read_daq(DAQ_PATH_UNSUPPORTED).is_err());
+        assert!(read_daq("./testdata/imp_20000_1.csv").is_err());
     }
 }

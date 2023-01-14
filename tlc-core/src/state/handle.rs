@@ -152,11 +152,7 @@ impl GlobalState {
                 video_id: video_meta,
                 packet,
             } => self.on_complete_load_video_packet(video_meta, packet),
-            ReadDaq {
-                daq_id,
-                daq_meta,
-                daq_raw,
-            } => self.on_complete_read_daq(daq_id, daq_meta, daq_raw),
+            ReadDaq { daq_id, daq_raw } => self.on_complete_read_daq(daq_id, daq_raw),
             BuildGreen2 {
                 green2_id: green2_meta,
                 green2,

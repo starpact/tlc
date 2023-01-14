@@ -20,6 +20,24 @@ pub enum FilterMethod {
     },
 }
 
+impl Eq for FilterMethod {}
+
+impl std::hash::Hash for FilterMethod {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        match self {
+            FilterMethod::No => state.write_u8(0),
+            FilterMethod::Median { window_size } => {
+                state.write_u8(1);
+                window_size.hash(state)
+            }
+            FilterMethod::Wavelet { threshold_ratio } => {
+                state.write_u8(2);
+                threshold_ratio.to_bits().hash(state);
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct GmaxId {
     pub green2_id: Green2Id,

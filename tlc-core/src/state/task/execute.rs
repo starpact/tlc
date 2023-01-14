@@ -111,13 +111,9 @@ impl GlobalState {
         };
 
         self.spawn(task_id, |output_sender| match read_daq(&daq_id.daq_path) {
-            Ok((daq_meta, daq_raw)) => {
+            Ok(daq_raw) => {
                 output_sender
-                    .send(Output::ReadDaq {
-                        daq_id,
-                        daq_meta,
-                        daq_raw,
-                    })
+                    .send(Output::ReadDaq { daq_id, daq_raw })
                     .unwrap();
                 if let Some(responder) = responder {
                     responder.respond_ok(());

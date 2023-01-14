@@ -726,14 +726,10 @@ pub async fn get_nu(
 
 #[cfg(test)]
 mod tests {
-    use crate::util;
-
     use super::*;
 
     #[test]
     fn test_respond_log_output() {
-        util::log::init();
-
         let (tx, _rx) = oneshot::channel::<Result<()>>();
         let responder = Responder::new("some_event", tx);
         responder.respond_ok(());

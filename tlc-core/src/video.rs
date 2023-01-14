@@ -2,6 +2,8 @@ mod controller;
 mod decode;
 mod detect_peak;
 mod read_video;
+#[cfg(test)]
+mod test;
 
 use std::{path::PathBuf, sync::Arc};
 
@@ -10,6 +12,10 @@ pub use ffmpeg::codec::{packet::Packet, Parameters};
 use ndarray::ArcArray2;
 use serde::{Deserialize, Serialize};
 
+use crate::{
+    util::{impl_eq_always_false, progress_bar::ProgressBar},
+    CalNumId,
+};
 pub use controller::VideoController;
 pub use decode::{DecoderManager, Green2Id};
 pub use detect_peak::{filter_detect_peak, filter_point, FilterMethod, GmaxId};
@@ -152,4 +158,124 @@ mod test_util {
             shape: (1024, 1280),
         }
     }
+}
+
+#[salsa::input]
+pub(crate) struct VideoPathId {
+    pub path: PathBuf,
+}
+
+#[salsa::tracked]
+pub(crate) struct VideoDataId {
+    pub frame_rate: usize,
+    pub shape: (u32, u32),
+    pub packets: Packets,
+    pub decoder_manager: DecoderManager,
+}
+
+#[derive(Clone)]
+pub(crate) struct Packets(pub Arc<Vec<Packet>>);
+
+impl_eq_always_false!(Packets);
+
+impl std::fmt::Debug for Packets {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("Packets")
+            .field(&format!("[..] len = {}", self.0.len()))
+            .finish()
+    }
+}
+
+#[salsa::interned]
+pub(crate) struct StartFrameId {
+    pub start_frame: usize,
+}
+
+#[salsa::interned]
+pub(crate) struct Area {
+    pub area: (u32, u32, u32, u32),
+}
+
+#[salsa::tracked]
+pub(crate) struct Green2 {
+    pub green2: ArcArray2<u8>,
+}
+
+#[salsa::interned]
+pub(crate) struct FilterMethodId {
+    pub filter_method: FilterMethod,
+}
+
+#[salsa::tracked]
+pub(crate) struct FilteredGreen2 {
+    pub filtered_green2: ArcArray2<u8>,
+}
+
+/// Reading from a file path is not actually deterministic because existence and content of the file
+/// can change. We should track changes of the file outside of salsa system and set the input before
+/// `read_video` to force re-execution when needed.
+/// Same to `read_daq`.
+#[salsa::tracked]
+pub(crate) fn _read_video(
+    db: &dyn crate::Db,
+    video_path_id: VideoPathId,
+) -> Result<VideoDataId, String> {
+    let path = video_path_id.path(db);
+    let (video_meta, parameters, rx) =
+        read_video(path, ProgressBar::default()).map_err(|e| e.to_string())?;
+    let VideoMeta {
+        frame_rate, shape, ..
+    } = video_meta;
+    let packets = Packets(Arc::new(rx.into_iter().collect())); // TODO
+    let decoder_manager = DecoderManager::new(parameters, 2, 4);
+    let video_data_id = VideoDataId::new(db, frame_rate, shape, packets, decoder_manager);
+
+    Ok(video_data_id)
+}
+
+#[salsa::tracked]
+pub(crate) fn _decode_all(
+    db: &dyn crate::Db,
+    video_data_id: VideoDataId,
+    start_frame_id: StartFrameId,
+    cal_num_id: CalNumId,
+    area_id: Area,
+) -> Result<Green2, String> {
+    let decoder_manager = video_data_id.decoder_manager(db);
+    let packets = video_data_id.packets(db).0;
+    let packets = packets
+        .iter()
+        .map(|packet| Arc::new(packet.clone())) // TODO
+        .collect();
+    let start_frame = start_frame_id.start_frame(db);
+    let cal_num = cal_num_id.cal_num(db);
+    let area = area_id.area(db);
+    let green2 = decoder_manager
+        .decode_all(packets, start_frame, cal_num, area, ProgressBar::default())
+        .map_err(|e| e.to_string())?;
+
+    Ok(Green2::new(db, green2.into_shared()))
+}
+
+/// `decode_frame_base64` is nondeterministic as whether decoding can succeed depends
+/// whether there is enough idle worker as the moment.
+/// Meanwhile, `decode_frame_base64` can already yield the final output, there is no
+/// benefit to extract out the impure part and make it deterministic.
+/// So `decode_frame_base64` is excluded from salsa system.
+pub(crate) fn _decode_frame_base64(
+    db: &dyn crate::Db,
+    video_data_id: VideoDataId,
+    frame_index: usize,
+) -> anyhow::Result<String> {
+    let decoder_manager = video_data_id.decoder_manager(db);
+    let packets = video_data_id.packets(db).0;
+    if frame_index >= packets.len() {
+        bail!(
+            "frame index out of bounds: {} > {}",
+            frame_index,
+            packets.len()
+        );
+    }
+
+    decoder_manager.decode_frame_base64(Arc::new(packets[frame_index].clone())) // TODO
 }

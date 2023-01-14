@@ -25,7 +25,7 @@ pub struct Interpolator {
     data: ArcArray2<f64>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Hash)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum InterpMethod {
     Horizontal,
     HorizontalExtra,

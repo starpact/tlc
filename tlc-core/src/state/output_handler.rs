@@ -6,7 +6,7 @@ use tracing::{debug, instrument, warn};
 
 use super::GlobalState;
 use crate::{
-    daq::{DaqData, DaqId, DaqMeta, InterpId, Interpolator},
+    daq::{DaqData, DaqId, InterpId, Interpolator},
     post_processing::save_matrix,
     solve::{NuData, SolveId},
     video::{GmaxId, Green2Id, Packet, Parameters, VideoData, VideoId, VideoMeta},
@@ -57,18 +57,13 @@ impl GlobalState {
     }
 
     #[instrument(level = "debug", skip_all, err)]
-    pub fn on_complete_read_daq(
-        &mut self,
-        daq_id: DaqId,
-        daq_meta: DaqMeta,
-        daq_raw: Array2<f64>,
-    ) -> Result<()> {
-        debug!(?daq_id, ?daq_meta);
+    pub fn on_complete_read_daq(&mut self, daq_id: DaqId, daq_raw: Array2<f64>) -> Result<()> {
+        debug!(?daq_id,);
         if self.daq_id()? != daq_id {
             bail!("daq path changed");
         }
 
-        self.daq_data = Some(DaqData::new(daq_meta, daq_raw.into_shared()));
+        self.daq_data = Some(DaqData::new(daq_raw.into_shared()));
         self.reconcile();
 
         Ok(())

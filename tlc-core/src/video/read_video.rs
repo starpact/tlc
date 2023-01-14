@@ -63,32 +63,26 @@ pub fn read_video<P: AsRef<Path>>(
 mod tests {
     use std::{thread::sleep, time::Duration};
 
-    use crate::{
-        util,
-        video::{
-            test_util::{video_meta_real, video_meta_sample, VIDEO_PATH_REAL, VIDEO_PATH_SAMPLE},
-            VideoController,
-        },
+    use crate::video::{
+        test_util::{video_meta_real, video_meta_sample, VIDEO_PATH_REAL, VIDEO_PATH_SAMPLE},
+        VideoController,
     };
 
     use super::*;
 
     #[test]
     fn test_read_video_sample() {
-        util::log::init();
         _read_video(VIDEO_PATH_SAMPLE, video_meta_sample());
     }
 
     #[ignore]
     #[test]
     fn test_read_video_real() {
-        util::log::init();
         _read_video(VIDEO_PATH_REAL, video_meta_real());
     }
 
     #[test]
     fn test_cancel_before_start_sample() {
-        util::log::init();
         let mut video_controller = VideoController::default();
         let progress_bar = video_controller.prepare_read_video();
         // Cancel the previous one.
@@ -99,7 +93,6 @@ mod tests {
     #[ignore]
     #[test]
     fn test_cancel_while_reading_real() {
-        util::log::init();
         let mut video_controller = VideoController::default();
         let progress_bar = video_controller.prepare_read_video();
         let (_, _, packet_rx) = read_video(VIDEO_PATH_REAL, progress_bar).unwrap();

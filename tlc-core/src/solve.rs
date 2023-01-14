@@ -29,10 +29,41 @@ pub struct PhysicalParam {
     pub air_thermal_conductivity: f64,
 }
 
+impl Eq for PhysicalParam {} // non-nan
+
+impl std::hash::Hash for PhysicalParam {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.gmax_temperature.to_bits().hash(state);
+        self.solid_thermal_conductivity.to_bits().hash(state);
+        self.solid_thermal_diffusivity.to_bits().hash(state);
+        self.characteristic_length.to_bits().hash(state);
+        self.air_thermal_conductivity.to_bits().hash(state);
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq)]
 pub enum IterationMethod {
     NewtonTangent { h0: f64, max_iter_num: usize },
     NewtonDown { h0: f64, max_iter_num: usize },
+}
+
+impl Eq for IterationMethod {} // non-nan
+
+impl std::hash::Hash for IterationMethod {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        match self {
+            IterationMethod::NewtonTangent { h0, max_iter_num } => {
+                state.write_u8(0);
+                h0.to_bits().hash(state);
+                max_iter_num.hash(state);
+            }
+            IterationMethod::NewtonDown { h0, max_iter_num } => {
+                state.write_u8(1);
+                h0.to_bits().hash(state);
+                max_iter_num.hash(state);
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -368,7 +399,7 @@ mod tests {
     }
 
     fn new_temps() -> Array1<f64> {
-        let daq_raw = daq::read_daq("./testdata/imp_20000_1.lvm").unwrap().1;
+        let daq_raw = daq::read_daq("./testdata/imp_20000_1.lvm").unwrap();
         daq_raw.column(3).to_owned()
     }
 
@@ -446,4 +477,14 @@ mod tests {
             }
         }
     }
+}
+
+#[salsa::interned]
+pub(crate) struct PyhsicalParamId {
+    physical_param: PhysicalParam,
+}
+
+#[salsa::interned]
+pub(crate) struct IterationMethodId {
+    iteration_method: IterationMethod,
 }

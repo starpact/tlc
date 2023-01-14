@@ -256,10 +256,9 @@ mod tests {
     use ndarray::ArcArray2;
 
     use crate::{
-        daq::{DaqData, DaqId, DaqMeta, InterpMethod, Interpolator, Thermocouple},
+        daq::{DaqData, DaqId, InterpMethod, Interpolator, Thermocouple},
         setting::{new_db_in_memory, CreateRequest, StartIndex},
         state::task::{TaskId, TaskRegistry},
-        util,
         video::{Packet, Parameters, VideoData, VideoId, VideoMeta},
     };
 
@@ -434,14 +433,12 @@ mod tests {
 
     #[test]
     fn test_eval_tasks_empty_state() {
-        util::log::init();
         let global_state = GlobalState::new(new_db_in_memory());
         assert!(global_state.eval_tasks().is_empty());
     }
 
     #[test]
     fn test_eval_read_video() {
-        util::log::init();
         let mut global_state = empty_global_state();
 
         assert_matches!(
@@ -461,7 +458,6 @@ mod tests {
 
     #[test]
     fn test_eval_read_daq() {
-        util::log::init();
         let mut global_state = empty_global_state();
 
         assert_matches!(
@@ -481,7 +477,6 @@ mod tests {
 
     #[test]
     fn test_eval_build_green2() {
-        util::log::init();
         let mut global_state = empty_global_state();
 
         assert_matches!(
@@ -549,7 +544,6 @@ mod tests {
 
     #[test]
     fn test_eval_detect_peak() {
-        util::log::init();
         let mut global_state = empty_global_state();
 
         assert_matches!(
@@ -612,7 +606,6 @@ mod tests {
 
     #[test]
     fn test_eval_interp() {
-        util::log::init();
         let mut global_state = empty_global_state();
 
         assert_matches!(
@@ -704,7 +697,6 @@ mod tests {
 
     #[test]
     fn test_eval_solve() {
-        util::log::init();
         let mut global_state = empty_global_state();
 
         assert_matches!(
@@ -818,8 +810,6 @@ mod tests {
 
     #[test]
     fn test_task_controller_accept_same_type_different_param() {
-        util::log::init();
-
         let mut task_controller = TaskRegistry::default();
         let _task_id = task_controller
             .register(TaskId::ReadVideo(VideoId {
@@ -835,8 +825,6 @@ mod tests {
 
     #[test]
     fn test_task_controller_reject_same_type_same_param() {
-        util::log::init();
-
         let mut task_controller = TaskRegistry::default();
         let _task_id = task_controller
             .register(TaskId::ReadVideo(VideoId {
@@ -852,8 +840,6 @@ mod tests {
 
     #[test]
     fn test_task_controller_accept_different_type() {
-        util::log::init();
-
         let mut task_controller = TaskRegistry::default();
         let _task_id = task_controller
             .register(TaskId::ReadVideo(VideoId {
@@ -869,8 +855,6 @@ mod tests {
 
     #[test]
     fn test_task_controller_accept_same_type_same_param_after_finished() {
-        util::log::init();
-
         let mut task_registry = TaskRegistry::default();
         let _task_id = task_registry
             .register(TaskId::ReadVideo(VideoId {
@@ -907,13 +891,7 @@ mod tests {
     }
 
     fn fake_daq_data() -> DaqData {
-        DaqData::new(
-            DaqMeta {
-                nrows: 120,
-                ncols: 10,
-            },
-            ArcArray2::zeros((120, 10)),
-        )
+        DaqData::new(ArcArray2::zeros((120, 10)))
     }
 
     impl PartialEq for Task {

@@ -219,7 +219,7 @@ mod tests {
     };
 
     use crate::{
-        util::{self, progress_bar::Progress},
+        util::progress_bar::Progress,
         video::{FilterMethod, VideoMeta},
     };
 
@@ -239,7 +239,6 @@ mod tests {
     #[ignore]
     #[tokio::test]
     async fn test_real() {
-        util::log::init();
         let (tx, rx) = bounded(3);
         spawn(move || main_loop(new_db_in_memory(), rx));
 
@@ -410,7 +409,6 @@ mod tests {
     #[ignore]
     #[tokio::test]
     async fn test_complete_setting_auto_compute_all() {
-        util::log::init();
         let (tx, rx) = bounded(3);
         spawn(move || main_loop(new_db_in_memory(), rx));
 

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use ndarray::Array2;
 
 use crate::{
-    daq::{DaqId, DaqMeta, InterpId, Interpolator},
+    daq::{DaqId, InterpId, Interpolator},
     solve::SolveId,
     video::{GmaxId, Green2Id, Packet, Parameters, VideoId, VideoMeta},
 };
@@ -20,7 +20,6 @@ pub enum Output {
     },
     ReadDaq {
         daq_id: DaqId,
-        daq_meta: DaqMeta,
         daq_raw: Array2<f64>,
     },
     BuildGreen2 {

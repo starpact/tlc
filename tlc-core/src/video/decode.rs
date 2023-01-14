@@ -25,7 +25,10 @@ use tokio::sync::oneshot;
 use tracing::instrument;
 
 use crate::{
-    util::progress_bar::{Progress, ProgressBar},
+    util::{
+        impl_eq_always_false,
+        progress_bar::{Progress, ProgressBar},
+    },
     video::VideoId,
 };
 
@@ -42,27 +45,13 @@ pub struct DecoderManager {
     inner: Arc<DecoderManagerInner>,
 }
 
-/// `DecoderManager` maintains a thread-local style decoder pool to avoid frequent
-/// initialization of decoder. It should be used by a small number of threads so
-/// that the thread-local decoders can be reused efficiently.
-struct DecoderManagerInner {
-    parameters: Mutex<Parameters>,
-    decoders: ThreadLocal<RefCell<Decoder>>,
-
-    /// When user drags the progress bar quickly, the decoding can not keep up
-    /// and there will be a significant lag. Actually, we do not have to decode
-    /// every frames, and the key is how to give up decoding some frames properly.
-    /// The naive solution to avoid too much backlog is maintaining the number of
-    /// pending tasks and directly abort current decoding if it already exceeds the
-    /// limit. But FIFO is not perfect for this use case because it's better to give
-    /// priority to newer frames, e.g. we should at least guarantee decoding the frame
-    /// where the progress bar **stops**.
-    /// `ring_buffer` is used to automatically eliminate the oldest frame to limit the
-    /// number of backlog frames.
-    /// `task_dispatcher` is a spmc used to trigger multiple workers.
-    ring_buffer: ArrayQueue<(Arc<Packet>, oneshot::Sender<Result<String>>)>,
-    task_dispatcher: Sender<()>,
+impl std::fmt::Debug for DecoderManager {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DecoderManager").finish()
+    }
 }
+
+impl_eq_always_false!(DecoderManager);
 
 impl DecoderManager {
     pub(crate) fn new(
@@ -128,6 +117,28 @@ impl DecoderManager {
             tx.send(self.inner.decode_frame_base64(&packet)).unwrap();
         }
     }
+}
+
+/// `DecoderManager` maintains a thread-local style decoder pool to avoid frequent
+/// initialization of decoder. It should be used by a small number of threads so
+/// that the thread-local decoders can be reused efficiently.
+struct DecoderManagerInner {
+    parameters: Mutex<Parameters>,
+    decoders: ThreadLocal<RefCell<Decoder>>,
+
+    /// When user drags the progress bar quickly, the decoding can not keep up
+    /// and there will be a significant lag. Actually, we do not have to decode
+    /// every frames, and the key is how to give up decoding some frames properly.
+    /// The naive solution to avoid too much backlog is maintaining the number of
+    /// pending tasks and directly abort current decoding if it already exceeds the
+    /// limit. But FIFO is not perfect for this use case because it's better to give
+    /// priority to newer frames, e.g. we should at least guarantee decoding the frame
+    /// where the progress bar **stops**.
+    /// `ring_buffer` is used to automatically eliminate the oldest frame to limit the
+    /// number of backlog frames.
+    /// `task_dispatcher` is a spmc used to trigger multiple workers.
+    ring_buffer: ArrayQueue<(Arc<Packet>, oneshot::Sender<Result<String>>)>,
+    task_dispatcher: Sender<()>,
 }
 
 impl DecoderManagerInner {
@@ -277,7 +288,7 @@ mod tests {
     };
 
     use crate::{
-        util::{self, progress_bar::ProgressBar},
+        util::progress_bar::ProgressBar,
         video::{
             read_video,
             test_util::{video_meta_real, video_meta_sample, VIDEO_PATH_REAL, VIDEO_PATH_SAMPLE},
@@ -287,26 +298,22 @@ mod tests {
 
     #[test]
     fn test_decode_frame_sample() {
-        util::log::init();
         _decode_frame(VIDEO_PATH_SAMPLE);
     }
 
     #[ignore]
     #[test]
     fn test_decode_frame_read() {
-        util::log::init();
         _decode_frame(VIDEO_PATH_REAL);
     }
 
     #[test]
     fn test_decode_all_sample() {
-        util::log::init();
         _decode_all(VIDEO_PATH_SAMPLE, 0, video_meta_sample().nframes);
     }
 
     #[test]
     fn test_decode_all_real() {
-        util::log::init();
         _decode_all(VIDEO_PATH_REAL, 10, video_meta_real().nframes - 10);
     }
 

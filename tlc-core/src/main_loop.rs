@@ -4,10 +4,9 @@ use crossbeam::channel::Receiver;
 use rusqlite::Connection;
 use tracing::info;
 
-use crate::{request::Request, setting::new_db, state::GlobalState, util, video};
+use crate::{request::Request, setting::new_db, state::GlobalState, video};
 
 pub fn run<P: AsRef<Path>>(db_path: P, request_receiver: Receiver<Request>) {
-    util::log::init();
     video::init();
     main_loop(new_db(db_path), request_receiver);
 }
