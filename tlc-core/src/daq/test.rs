@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use crate::log;
+use crate::util::log;
 
 #[test]
 fn test_read_daq() {

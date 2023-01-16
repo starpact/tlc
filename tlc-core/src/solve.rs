@@ -1,6 +1,5 @@
 use std::f64::{consts::PI, NAN};
 
-use anyhow::Result;
 use libm::erfc;
 use ndarray::{ArcArray2, Array2, ArrayView, Dimension};
 use packed_simd::{f64x4, Simd};
@@ -9,17 +8,12 @@ use serde::{Deserialize, Serialize};
 use tracing::{info, instrument};
 
 use crate::{
-    daq::{InterpId, Interpolator},
-    util::progress_bar::{Progress, ProgressBar},
-    video::GmaxId,
+    daq::{Interpolator, InterpolatorId},
+    util::impl_eq_always_false,
+    video::{GmaxFrameIndexesId, VideoDataId},
 };
 
-#[derive(Clone)]
-pub struct NuData {
-    pub nu2: ArcArray2<f64>,
-    pub nu_nan_mean: f64,
-}
-
+/// All fields not NAN.
 #[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq)]
 pub struct PhysicalParam {
     pub gmax_temperature: f64,
@@ -29,7 +23,7 @@ pub struct PhysicalParam {
     pub air_thermal_conductivity: f64,
 }
 
-impl Eq for PhysicalParam {} // non-nan
+impl Eq for PhysicalParam {}
 
 impl std::hash::Hash for PhysicalParam {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
@@ -41,13 +35,19 @@ impl std::hash::Hash for PhysicalParam {
     }
 }
 
+#[salsa::interned]
+pub(crate) struct PyhsicalParamId {
+    pub physical_param: PhysicalParam,
+}
+
+/// All fields not NAN.
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq)]
 pub enum IterationMethod {
     NewtonTangent { h0: f64, max_iter_num: usize },
     NewtonDown { h0: f64, max_iter_num: usize },
 }
 
-impl Eq for IterationMethod {} // non-nan
+impl Eq for IterationMethod {}
 
 impl std::hash::Hash for IterationMethod {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
@@ -66,29 +66,59 @@ impl std::hash::Hash for IterationMethod {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct SolveId {
-    pub gmax_id: GmaxId,
-    pub interp_id: InterpId,
-    pub frame_rate: usize,
+impl Default for IterationMethod {
+    fn default() -> IterationMethod {
+        IterationMethod::NewtonTangent {
+            h0: 50.0,
+            max_iter_num: 10,
+        }
+    }
+}
+
+#[salsa::interned]
+pub(crate) struct IterationMethodId {
     pub iteration_method: IterationMethod,
-    pub physical_param: PhysicalParam,
 }
 
-#[derive(Default)]
-pub struct SolveController {
-    solve: ProgressBar,
+#[derive(Debug, Clone)]
+pub struct NuData {
+    pub nu2: ArcArray2<f64>,
+    pub nu_nan_mean: f64,
 }
 
-impl SolveController {
-    pub fn solve_progress(&self) -> Progress {
-        self.solve.get()
-    }
+impl_eq_always_false!(NuData);
 
-    pub fn prepare_solve(&mut self) -> ProgressBar {
-        std::mem::take(&mut self.solve).cancel();
-        self.solve.clone()
-    }
+#[salsa::tracked]
+pub(crate) struct NuDataId {
+    pub nu_data: NuData,
+}
+
+#[salsa::tracked]
+pub(crate) fn solve_nu(
+    db: &dyn crate::Db,
+    video_data_id: VideoDataId,
+    gmax_frame_indexes_id: GmaxFrameIndexesId,
+    interpolator_id: InterpolatorId,
+    physical_param_id: PyhsicalParamId,
+    iteration_method_id: IterationMethodId,
+) -> NuDataId {
+    let frame_rate = video_data_id.frame_rate(db);
+    let gmax_frame_indexes = gmax_frame_indexes_id.gmax_frame_indexes(db);
+    let interpolator = interpolator_id.interpolater(db);
+    let physical_param = physical_param_id.physical_param(db);
+    let iteration_method = iteration_method_id.iteration_method(db);
+
+    let nu2 = solve(
+        &gmax_frame_indexes,
+        interpolator,
+        physical_param,
+        iteration_method,
+        frame_rate,
+    )
+    .into_shared();
+    let nu_nan_mean = nan_mean(nu2.view());
+
+    NuDataId::new(db, NuData { nu2, nu_nan_mean })
 }
 
 #[derive(Clone, Copy)]
@@ -98,7 +128,7 @@ struct PointData<'a> {
 }
 
 impl PointData<'_> {
-    fn heat_transfer_equation(&self, h: f64, dt: f64, k: f64, a: f64, tw: f64) -> (f64, f64) {
+    fn heat_transfer_equation(self, h: f64, dt: f64, k: f64, a: f64, tw: f64) -> (f64, f64) {
         let gmax_frame_index = self.gmax_frame_index;
         let temps = self.temperatures;
 
@@ -181,7 +211,6 @@ where
             }
             h = next_h;
         }
-
         h
     }
 }
@@ -216,29 +245,18 @@ where
                 return NAN;
             }
         }
-
         h
     }
 }
 
-impl Default for IterationMethod {
-    fn default() -> IterationMethod {
-        IterationMethod::NewtonTangent {
-            h0: 50.0,
-            max_iter_num: 10,
-        }
-    }
-}
-
-#[instrument(skip(gmax_frame_indexes, interpolator, progress_bar))]
-pub fn solve(
+#[instrument(skip(gmax_frame_indexes, interpolator))]
+fn solve(
     gmax_frame_indexes: &[usize],
-    interpolator: &Interpolator,
+    interpolator: Interpolator,
     physical_param: PhysicalParam,
     iteration_method: IterationMethod,
     frame_rate: usize,
-    progress_bar: ProgressBar,
-) -> Result<Array2<f64>> {
+) -> Array2<f64> {
     let dt = 1.0 / frame_rate as f64;
     let shape = interpolator.shape();
     let shape = (shape.0 as usize, shape.1 as usize);
@@ -255,25 +273,23 @@ pub fn solve(
         move |point_data: PointData, h| point_data.heat_transfer_equation(h, dt, k, a, tw);
 
     let nu1 = match iteration_method {
-        IterationMethod::NewtonTangent { h0, max_iter_num } => solve_inner(
+        IterationMethod::NewtonTangent { h0, max_iter_num } => solve_core(
             gmax_frame_indexes,
             interpolator,
             newtow_tangent(equation, h0, max_iter_num),
             characteristic_length,
             air_thermal_conductivity,
-            progress_bar,
         ),
-        IterationMethod::NewtonDown { h0, max_iter_num } => solve_inner(
+        IterationMethod::NewtonDown { h0, max_iter_num } => solve_core(
             gmax_frame_indexes,
             interpolator,
             newtow_down(equation, h0, max_iter_num),
             characteristic_length,
             air_thermal_conductivity,
-            progress_bar,
         ),
-    }?;
+    };
 
-    Ok(Array2::from_shape_vec(shape, nu1)?)
+    Array2::from_shape_vec(shape, nu1).unwrap()
 }
 
 pub fn nan_mean<D: Dimension>(data: ArrayView<f64, D>) -> f64 {
@@ -291,27 +307,23 @@ pub fn nan_mean<D: Dimension>(data: ArrayView<f64, D>) -> f64 {
     sum / non_nan_cnt as f64
 }
 
-fn solve_inner<F>(
+fn solve_core<F>(
     gmax_frame_indexes: &[usize],
-    interpolator: &Interpolator,
+    interpolator: Interpolator,
     solve_single_point: F,
     characteristic_length: f64,
     air_thermal_conductivity: f64,
-    progress_bar: ProgressBar,
-) -> Result<Vec<f64>>
+) -> Vec<f64>
 where
     F: Fn(PointData) -> f64 + Send + Sync + 'static,
 {
     const FIRST_FEW_TO_CAL_T0: usize = 4;
-    progress_bar.start(gmax_frame_indexes.len() as u32)?;
-    let nu1 = gmax_frame_indexes
+    gmax_frame_indexes
         .par_iter()
         .enumerate()
         .map(|(point_index, &gmax_frame_index)| {
-            progress_bar.add(1)?;
-
             if gmax_frame_index <= FIRST_FEW_TO_CAL_T0 {
-                return Ok(NAN);
+                return NAN;
             }
             let temperatures = interpolator.interp_point(point_index);
             let temperatures = temperatures.as_slice().unwrap();
@@ -321,11 +333,9 @@ where
             };
             let h = solve_single_point(point_data);
 
-            Ok(h * characteristic_length / air_thermal_conductivity)
+            h * characteristic_length / air_thermal_conductivity
         })
-        .collect::<Result<_>>()?;
-
-    Ok(nu1)
+        .collect()
 }
 
 #[cfg(test)]
@@ -335,8 +345,9 @@ mod tests {
     use ndarray::Array1;
     use test::Bencher;
 
-    use super::*;
     use crate::daq;
+
+    use super::*;
 
     impl PointData<'_> {
         fn iter_no_simd(&self, h: f64, dt: f64, k: f64, a: f64, tw: f64) -> (f64, f64) {
@@ -399,7 +410,7 @@ mod tests {
     }
 
     fn new_temps() -> Array1<f64> {
-        let daq_raw = daq::read_daq("./testdata/imp_20000_1.lvm").unwrap();
+        let daq_raw = daq::read::read_daq("./testdata/imp_20000_1.lvm").unwrap();
         daq_raw.column(3).to_owned()
     }
 
@@ -477,14 +488,4 @@ mod tests {
             }
         }
     }
-}
-
-#[salsa::interned]
-pub(crate) struct PyhsicalParamId {
-    physical_param: PhysicalParam,
-}
-
-#[salsa::interned]
-pub(crate) struct IterationMethodId {
-    iteration_method: IterationMethod,
 }

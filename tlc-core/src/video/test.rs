@@ -2,7 +2,7 @@ use std::{path::PathBuf, thread, time::Duration};
 
 use salsa::ParallelDatabase;
 
-use crate::log;
+use crate::util::log;
 
 #[test]
 fn test_decode_frame() {

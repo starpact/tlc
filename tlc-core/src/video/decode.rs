@@ -1,5 +1,4 @@
 use std::{
-    assert_matches::debug_assert_matches,
     cell::{RefCell, RefMut},
     ops::{Deref, DerefMut},
     sync::{Arc, Mutex},
@@ -24,21 +23,7 @@ use thread_local::ThreadLocal;
 use tokio::sync::oneshot;
 use tracing::instrument;
 
-use crate::{
-    util::{
-        impl_eq_always_false,
-        progress_bar::{Progress, ProgressBar},
-    },
-    video::VideoId,
-};
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct Green2Id {
-    pub video_id: VideoId,
-    pub start_frame: usize,
-    pub cal_num: usize,
-    pub area: (u32, u32, u32, u32),
-}
+use crate::util::impl_eq_always_false;
 
 #[derive(Clone)]
 pub struct DecoderManager {
@@ -82,39 +67,48 @@ impl DecoderManager {
         decode_manager
     }
 
-    pub fn decode_frame_base64(&self, packet: Arc<Packet>) -> Result<String> {
+    pub fn decode_frame_base64(
+        &self,
+        packets: Arc<Vec<Packet>>,
+        frame_index: usize,
+    ) -> Result<String> {
         let (tx, rx) = oneshot::channel();
-
         // When the returned value which contains a `Sender` is dropped, its corresponding
         // `Receiver` which is waiting on another thread will be disconnected.
-        self.inner.ring_buffer.force_push((packet, tx));
+        self.inner.ring_buffer.force_push(Task {
+            packets,
+            frame_index,
+            tx,
+        });
         let _ = self.inner.task_dispatcher.try_send(());
-
         rx.blocking_recv()?
     }
 
     pub fn decode_all(
         &self,
-        packets: Vec<Arc<Packet>>,
+        packets: Arc<Vec<Packet>>,
         start_frame: usize,
         cal_num: usize,
         area: (u32, u32, u32, u32),
-        progress_bar: ProgressBar,
     ) -> Result<Array2<u8>> {
-        self.inner
-            .decode_all(packets, start_frame, cal_num, area, progress_bar)
+        self.inner.decode_all(packets, start_frame, cal_num, area)
     }
 
     fn decode_frame_worker(&self, task_notifier: Receiver<()>) {
         for _ in task_notifier {
             // `ring_buffer` and `task_dispatcher` are given the same number of elements,
             // so at this point ring_buffer should not be empty.
-            let (packet, tx) = self
+            let Task {
+                packets,
+                frame_index,
+                tx,
+            } = self
                 .inner
                 .ring_buffer
                 .pop()
                 .expect("ring_buffer should not be empty here");
-            tx.send(self.inner.decode_frame_base64(&packet)).unwrap();
+            tx.send(self.inner.decode_frame_base64(&packets[frame_index]))
+                .unwrap();
         }
     }
 }
@@ -137,8 +131,14 @@ struct DecoderManagerInner {
     /// `ring_buffer` is used to automatically eliminate the oldest frame to limit the
     /// number of backlog frames.
     /// `task_dispatcher` is a spmc used to trigger multiple workers.
-    ring_buffer: ArrayQueue<(Arc<Packet>, oneshot::Sender<Result<String>>)>,
+    ring_buffer: ArrayQueue<Task>,
     task_dispatcher: Sender<()>,
+}
+
+struct Task {
+    packets: Arc<Vec<Packet>>,
+    frame_index: usize,
+    tx: oneshot::Sender<Result<String>>,
 }
 
 impl DecoderManagerInner {
@@ -162,20 +162,18 @@ impl DecoderManagerInner {
         Ok(base64::encode(buf))
     }
 
-    #[instrument(skip(self, packets, progress_bar), err)]
+    #[instrument(skip(self, packets), err)]
     fn decode_all(
         &self,
-        packets: Vec<Arc<Packet>>,
+        packets: Arc<Vec<Packet>>,
         start_frame: usize,
         cal_num: usize,
         area: (u32, u32, u32, u32),
-        progress_bar: ProgressBar,
     ) -> Result<Array2<u8>> {
         let byte_w = self.decoder()?.shape().1 as usize * 3;
         let (tl_y, tl_x, cal_h, cal_w) = area;
         let (tl_y, tl_x, cal_h, cal_w) =
             (tl_y as usize, tl_x as usize, cal_h as usize, cal_w as usize);
-        progress_bar.start(cal_num as u32)?;
         let mut green2 = Array2::zeros((cal_num, cal_h * cal_w));
         packets
             .par_iter()
@@ -184,7 +182,6 @@ impl DecoderManagerInner {
             .try_for_each(|(packet, mut row)| -> Result<()> {
                 // Cancel point.
                 // This does not add noticeable overhead.
-                progress_bar.add(1)?;
                 let mut decoder = self.decoder()?;
                 let dst_frame = decoder.decode(packet)?;
 
@@ -193,7 +190,6 @@ impl DecoderManagerInner {
                 // |.......row_0.......|.......row_1.......|......|.......row_n.......|
                 let rgb = dst_frame.data(0);
                 let mut row_iter = row.iter_mut();
-
                 for i in (0..).step_by(byte_w).skip(tl_y).take(cal_h) {
                     for j in (i..).skip(1).step_by(3).skip(tl_x).take(cal_w) {
                         // Bounds check can be removed by optimization so no need to use unsafe.
@@ -203,14 +199,8 @@ impl DecoderManagerInner {
                         }
                     }
                 }
-
                 Ok(())
             })?;
-
-        debug_assert_matches!(
-            progress_bar.get(),
-            Progress::Finished { total } if total == cal_num as u32
-        );
 
         Ok(green2)
     }
@@ -247,7 +237,6 @@ impl Decoder {
         self.codec_ctx.send_packet(packet)?;
         self.codec_ctx.receive_frame(&mut self.src_frame)?;
         self.sws_ctx.run(&self.src_frame, &mut self.dst_frame)?;
-
         Ok(&self.dst_frame)
     }
 
@@ -287,13 +276,10 @@ mod tests {
         time::Duration,
     };
 
-    use crate::{
-        util::progress_bar::ProgressBar,
-        video::{
-            read_video,
-            test_util::{video_meta_real, video_meta_sample, VIDEO_PATH_REAL, VIDEO_PATH_SAMPLE},
-            DecoderManager,
-        },
+    use crate::video::{
+        read::read_video,
+        test_util::{video_meta_real, video_meta_sample, VIDEO_PATH_REAL, VIDEO_PATH_SAMPLE},
+        DecoderManager,
     };
 
     #[test]
@@ -312,30 +298,31 @@ mod tests {
         _decode_all(VIDEO_PATH_SAMPLE, 0, video_meta_sample().nframes);
     }
 
+    #[ignore]
     #[test]
     fn test_decode_all_real() {
         _decode_all(VIDEO_PATH_REAL, 10, video_meta_real().nframes - 10);
     }
 
     fn _decode_frame(video_path: &str) {
-        let progress_bar = ProgressBar::default();
-        let (_, parameters, packet_rx) = read_video(video_path, progress_bar).unwrap();
+        let (_, parameters, packets) = read_video(video_path).unwrap();
         let decode_manager = DecoderManager::new(parameters, 10, 20);
 
         let mut handles = Vec::new();
         let ok_cnt = Arc::new(AtomicU32::new(0));
         let abort_cnt = Arc::new(AtomicU32::new(0));
-        for packet in packet_rx {
+        let packets = Arc::new(packets);
+        for i in 0..packets.len() {
+            let packets = packets.clone();
             let decode_manager = decode_manager.clone();
             let ok_cnt = ok_cnt.clone();
             let abort_cnt = abort_cnt.clone();
-            let handle =
-                spawn(
-                    move || match decode_manager.decode_frame_base64(Arc::new(packet)) {
-                        Ok(_) => ok_cnt.fetch_add(1, Relaxed),
-                        Err(_) => abort_cnt.fetch_add(1, Relaxed),
-                    },
-                );
+            let handle = spawn(
+                move || match decode_manager.decode_frame_base64(packets, i) {
+                    Ok(_) => ok_cnt.fetch_add(1, Relaxed),
+                    Err(_) => abort_cnt.fetch_add(1, Relaxed),
+                },
+            );
             handles.push(handle);
             sleep(Duration::from_millis(1));
         }
@@ -348,21 +335,10 @@ mod tests {
     }
 
     fn _decode_all(video_path: &str, start_frame: usize, cal_num: usize) {
-        let progress_bar = ProgressBar::default();
-        let (_, parameters, packet_rx) = read_video(video_path, progress_bar).unwrap();
+        let (_, parameters, packets) = read_video(video_path).unwrap();
         let decode_manager = DecoderManager::new(parameters, 10, 20);
-
-        let packets = packet_rx.into_iter().map(Arc::new).collect();
-        let progress_bar = ProgressBar::default();
-
         decode_manager
-            .decode_all(
-                packets,
-                start_frame,
-                cal_num,
-                (10, 10, 600, 800),
-                progress_bar,
-            )
+            .decode_all(Arc::new(packets), start_frame, cal_num, (10, 10, 600, 800))
             .unwrap();
     }
 }

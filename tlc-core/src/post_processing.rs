@@ -1,11 +1,17 @@
-use std::path::Path;
+use std::{
+    io::Write,
+    path::{Path, PathBuf},
+};
 
 use anyhow::Result;
 use image::ColorType::Rgb8;
 use ndarray::prelude::*;
 use once_cell::sync::OnceCell;
 use plotters::prelude::*;
+use serde::Serialize;
 use tracing::{instrument, warn};
+
+use crate::{FilterMethod, InterpMethod, IterationMethod, PhysicalParam, Thermocouple, VideoMeta};
 
 #[instrument(skip(area), fields(plot_path = ?plot_path.as_ref()), err)]
 pub fn draw_area<P: AsRef<Path>>(
@@ -61,6 +67,72 @@ pub fn save_matrix<P: AsRef<Path>>(data_path: P, data: ArrayView2<f64>) -> Resul
     }
 
     Ok(())
+}
+
+/// `SettingSnapshot` will be saved together with the results for later check.
+#[derive(Debug, Serialize)]
+pub struct SettingSnapshot {
+    /// User defined unique name of this experiment setting.
+    pub name: String,
+
+    /// Directory in which you save your data(parameters and results) of this experiment.
+    /// * setting_path: {root_dir}/{expertiment_name}/setting.json
+    /// * nu_matrix_path: {root_dir}/{expertiment_name}/nu_matrix.csv
+    /// * plot_matrix_path: {root_dir}/{expertiment_name}/nu_plot.png
+    pub save_root_dir: PathBuf,
+
+    pub video_path: PathBuf,
+
+    pub video_meta: VideoMeta,
+
+    pub daq_path: PathBuf,
+
+    /// Start frame of video involved in the calculation.
+    /// Updated simultaneously with start_row.
+    pub start_frame: usize,
+
+    /// Start row of DAQ data involved in the calculation.
+    /// Updated simultaneously with start_frame.
+    pub start_row: usize,
+
+    /// Calculation area(top_left_y, top_left_x, area_height, area_width).
+    pub area: (u32, u32, u32, u32),
+
+    /// Storage info and positions of thermocouples.
+    pub thermocouples: Vec<Thermocouple>,
+
+    /// Filter method of green matrix along the time axis.
+    pub filter_method: FilterMethod,
+
+    /// Interpolation method of thermocouple temperature distribution.
+    pub interp_method: InterpMethod,
+
+    pub iteration_method: IterationMethod,
+
+    /// All physical parameters used when solving heat transfer equation.
+    pub physical_param: PhysicalParam,
+
+    /// Final result.
+    pub nu_nan_mean: f64,
+
+    /// Timestamp in milliseconds.
+    #[serde(with = "time::serde::rfc3339")]
+    pub completed_at: time::OffsetDateTime,
+}
+
+impl SettingSnapshot {
+    #[instrument(skip(self), fields(setting_path = ?setting_path.as_ref()), err)]
+    pub fn save<P: AsRef<Path>>(&self, setting_path: P) -> anyhow::Result<()> {
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(setting_path)?;
+        let buf = serde_json::to_string_pretty(&self)?;
+        file.write_all(buf.as_bytes())?;
+
+        Ok(())
+    }
 }
 
 static CELL: OnceCell<[[f64; 3]; 256]> = OnceCell::new();
