@@ -3,7 +3,7 @@ mod decode;
 mod detect_peak;
 mod read;
 #[cfg(test)]
-mod test;
+pub mod tests;
 
 use std::{path::PathBuf, sync::Arc};
 
@@ -136,10 +136,11 @@ pub(crate) fn filter_detect_peak(
     db: &dyn crate::Db,
     green2_id: Green2Id,
     filter_method_id: FilterMethodId,
-) -> Vec<usize> {
+) -> GmaxFrameIndexesId {
     let green2 = green2_id.green2(db);
     let filter_method = filter_method_id.filter_method(db);
-    detect_peak::filter_detect_peak(green2, filter_method)
+    let gmax_frame_indexes = detect_peak::filter_detect_peak(green2, filter_method);
+    GmaxFrameIndexesId::new(db, Arc::new(gmax_frame_indexes))
 }
 
 #[salsa::tracked]
@@ -165,40 +166,16 @@ pub(crate) fn filter_point(
 /// Meanwhile, `decode_frame_base64` is not part of the overall computation but just for display.
 /// It can already yield the final output, so there is no benefit to extract out the impure part and
 /// make it deterministic.
-pub(crate) fn decode_frame_base64(
-    db: &dyn crate::Db,
-    video_data_id: VideoDataId,
+pub(crate) async fn decode_frame_base64(
+    decoder_manager: DecoderManager,
+    packets: Arc<Vec<Packet>>,
     frame_index: usize,
 ) -> anyhow::Result<String> {
-    let decoder_manager = video_data_id.decoder_manager(db);
-    let packets = video_data_id.packets(db).0;
     let nframes = packets.len();
     if frame_index >= packets.len() {
         bail!("frame_index({frame_index}) exceeds nframes({nframes})");
     }
-    decoder_manager.decode_frame_base64(packets, frame_index)
-}
-
-#[cfg(test)]
-mod test_util {
-    use crate::VideoMeta;
-
-    pub const VIDEO_PATH_SAMPLE: &str = "./testdata/almost_empty.avi";
-    pub const VIDEO_PATH_REAL: &str = "/home/yhj/Downloads/EXP/imp/videos/imp_20000_1_up.avi";
-
-    pub fn video_meta_sample() -> VideoMeta {
-        VideoMeta {
-            frame_rate: 25,
-            nframes: 3,
-            shape: (1024, 1280),
-        }
-    }
-
-    pub fn video_meta_real() -> VideoMeta {
-        VideoMeta {
-            frame_rate: 25,
-            nframes: 2444,
-            shape: (1024, 1280),
-        }
-    }
+    decoder_manager
+        .decode_frame_base64(packets, frame_index)
+        .await
 }

@@ -2,10 +2,11 @@ use std::{path::PathBuf, thread, time::Duration};
 
 use salsa::ParallelDatabase;
 
+use super::*;
 use crate::util::log;
 
-#[test]
-fn test_decode_frame() {
+#[tokio::test]
+async fn test_decode_frame() {
     log::init();
 
     let mut db = crate::Database::default();
@@ -25,15 +26,6 @@ fn test_decode_frame() {
     println!("set");
     db.set_video_path(PathBuf::from("./testdata/almost_empty.avi"));
     db.get_video_nframes().unwrap();
-
-    (0..3)
-        .map(|i| {
-            let db = db.snapshot();
-            thread::spawn(move || println!("{i}---------{}", db.decode_frame(i).is_ok()))
-        })
-        .collect::<Vec<_>>()
-        .into_iter()
-        .for_each(|handle| handle.join().unwrap());
 }
 
 #[test]
@@ -56,4 +48,23 @@ fn test_read_video_cancel() {
 
     tracing::debug_span!("set_input").in_scope(|| db.set_video_path(video_path));
     assert_eq!(db.get_video_nframes().unwrap(), 3);
+}
+
+pub const VIDEO_PATH_SAMPLE: &str = "./testdata/almost_empty.avi";
+pub const VIDEO_PATH_REAL: &str = "/home/yhj/Downloads/EXP/imp/videos/imp_20000_1_up.avi";
+
+pub fn video_meta_sample() -> VideoMeta {
+    VideoMeta {
+        frame_rate: 25,
+        nframes: 3,
+        shape: (1024, 1280),
+    }
+}
+
+pub fn video_meta_real() -> VideoMeta {
+    VideoMeta {
+        frame_rate: 25,
+        nframes: 2444,
+        shape: (1024, 1280),
+    }
 }

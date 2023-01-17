@@ -5,14 +5,7 @@
 
 mod command;
 
-use std::thread::spawn;
-
-use crossbeam::channel::bounded;
 use tracing::error;
-
-use command::*;
-
-const SQLITE_FILEPATH: &str = "./var/db.sqlite3";
 
 fn main() {
     // let (request_sender, request_receiver) = bounded(3);

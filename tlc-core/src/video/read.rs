@@ -42,7 +42,7 @@ pub fn read_video<P: AsRef<Path>>(video_path: P) -> Result<(VideoMeta, Parameter
 
 #[cfg(test)]
 mod tests {
-    use crate::video::test_util::{
+    use crate::video::tests::{
         video_meta_real, video_meta_sample, VIDEO_PATH_REAL, VIDEO_PATH_SAMPLE,
     };
 

@@ -5,10 +5,7 @@ use std::{
 };
 
 use anyhow::Result;
-use crossbeam::{
-    channel::{bounded, Receiver, Sender},
-    queue::ArrayQueue,
-};
+use crossbeam::queue::ArrayQueue;
 use ffmpeg::{
     codec,
     codec::{packet::Packet, Parameters},
@@ -18,9 +15,9 @@ use ffmpeg::{
 };
 use image::{codecs::jpeg::JpegEncoder, ColorType::Rgb8};
 use ndarray::prelude::*;
-use rayon::prelude::*;
+use rayon::{prelude::*, ThreadPool, ThreadPoolBuilder};
 use thread_local::ThreadLocal;
-use tokio::sync::oneshot;
+use tokio::sync::{oneshot, Semaphore};
 use tracing::instrument;
 
 use crate::util::impl_eq_always_false;
@@ -47,41 +44,42 @@ impl DecoderManager {
         assert!(num_decode_frame_workers > 0);
 
         let ring_buffer = ArrayQueue::new(frame_backlog_capacity);
-        let (task_dispatcher, task_notifier) = bounded(frame_backlog_capacity);
+        let sema = Semaphore::new(frame_backlog_capacity);
+        let thread_pool = ThreadPoolBuilder::new()
+            .num_threads(num_decode_frame_workers)
+            .build()
+            .unwrap();
 
-        let decode_manager = DecoderManager {
+        DecoderManager {
             inner: Arc::new(DecoderManagerInner {
                 parameters: Mutex::new(parameters),
                 decoders: ThreadLocal::new(),
                 ring_buffer,
-                task_dispatcher,
+                sema,
+                thread_pool,
             }),
-        };
-
-        for _ in 0..num_decode_frame_workers {
-            let decode_manager = decode_manager.clone();
-            let task_notifier = task_notifier.clone();
-            std::thread::spawn(move || decode_manager.decode_frame_worker(task_notifier));
         }
-
-        decode_manager
     }
 
-    pub fn decode_frame_base64(
+    pub async fn decode_frame_base64(
         &self,
         packets: Arc<Vec<Packet>>,
         frame_index: usize,
     ) -> Result<String> {
         let (tx, rx) = oneshot::channel();
+        if let Ok(_permit) = self.inner.sema.try_acquire() {
+            self.spawn_decode_frame_base64(packets, frame_index, tx);
+            return rx.await?;
+        }
         // When the returned value which contains a `Sender` is dropped, its corresponding
         // `Receiver` which is waiting on another thread will be disconnected.
-        self.inner.ring_buffer.force_push(Task {
-            packets,
-            frame_index,
-            tx,
-        });
-        let _ = self.inner.task_dispatcher.try_send(());
-        rx.blocking_recv()?
+        self.inner.ring_buffer.force_push(tx);
+        let _permit = self.inner.sema.acquire().await.unwrap();
+        if let Some(tx) = self.inner.ring_buffer.pop() {
+            // `tx` here may be from other task.
+            self.spawn_decode_frame_base64(packets, frame_index, tx);
+        }
+        rx.await?
     }
 
     pub fn decode_all(
@@ -94,22 +92,17 @@ impl DecoderManager {
         self.inner.decode_all(packets, start_frame, cal_num, area)
     }
 
-    fn decode_frame_worker(&self, task_notifier: Receiver<()>) {
-        for _ in task_notifier {
-            // `ring_buffer` and `task_dispatcher` are given the same number of elements,
-            // so at this point ring_buffer should not be empty.
-            let Task {
-                packets,
-                frame_index,
-                tx,
-            } = self
-                .inner
-                .ring_buffer
-                .pop()
-                .expect("ring_buffer should not be empty here");
-            tx.send(self.inner.decode_frame_base64(&packets[frame_index]))
+    fn spawn_decode_frame_base64(
+        &self,
+        packets: Arc<Vec<Packet>>,
+        frame_index: usize,
+        tx: oneshot::Sender<Result<String>>,
+    ) {
+        let inner = self.inner.clone();
+        self.inner.thread_pool.spawn(move || {
+            tx.send(inner.decode_frame_base64(&packets[frame_index]))
                 .unwrap();
-        }
+        });
     }
 }
 
@@ -130,15 +123,9 @@ struct DecoderManagerInner {
     /// where the progress bar **stops**.
     /// `ring_buffer` is used to automatically eliminate the oldest frame to limit the
     /// number of backlog frames.
-    /// `task_dispatcher` is a spmc used to trigger multiple workers.
-    ring_buffer: ArrayQueue<Task>,
-    task_dispatcher: Sender<()>,
-}
-
-struct Task {
-    packets: Arc<Vec<Packet>>,
-    frame_index: usize,
-    tx: oneshot::Sender<Result<String>>,
+    ring_buffer: ArrayQueue<oneshot::Sender<Result<String>>>,
+    sema: Semaphore,
+    thread_pool: ThreadPool,
 }
 
 impl DecoderManagerInner {
@@ -147,7 +134,6 @@ impl DecoderManagerInner {
             let decoder = Decoder::new(self.parameters.lock().unwrap().clone())?;
             Ok(RefCell::new(decoder))
         })?;
-
         Ok(decoder.borrow_mut())
     }
 
@@ -158,7 +144,6 @@ impl DecoderManagerInner {
         let mut buf = Vec::new();
         let mut jpeg_encoder = JpegEncoder::new_with_quality(&mut buf, 100);
         jpeg_encoder.encode(decoder.decode(packet)?.data(0), w, h, Rgb8)?;
-
         Ok(base64::encode(buf))
     }
 
@@ -201,7 +186,6 @@ impl DecoderManagerInner {
                 }
                 Ok(())
             })?;
-
         Ok(green2)
     }
 }
@@ -224,7 +208,6 @@ impl Decoder {
         let (h, w) = (codec_ctx.height(), codec_ctx.width());
         let sws_ctx =
             scaling::Context::get(codec_ctx.format(), w, h, RGB24, w, h, Flags::BILINEAR)?;
-
         Ok(Self {
             codec_ctx,
             sws_ctx: SendableSwsCtx(sws_ctx),
@@ -272,25 +255,24 @@ mod tests {
             atomic::{AtomicU32, Ordering::Relaxed},
             Arc,
         },
-        thread::{sleep, spawn},
         time::Duration,
     };
 
     use crate::video::{
         read::read_video,
-        test_util::{video_meta_real, video_meta_sample, VIDEO_PATH_REAL, VIDEO_PATH_SAMPLE},
+        tests::{video_meta_real, video_meta_sample, VIDEO_PATH_REAL, VIDEO_PATH_SAMPLE},
         DecoderManager,
     };
 
-    #[test]
-    fn test_decode_frame_sample() {
-        _decode_frame(VIDEO_PATH_SAMPLE);
+    #[tokio::test]
+    async fn test_decode_frame_sample() {
+        _decode_frame(VIDEO_PATH_SAMPLE).await;
     }
 
     #[ignore]
-    #[test]
-    fn test_decode_frame_read() {
-        _decode_frame(VIDEO_PATH_REAL);
+    #[tokio::test]
+    async fn test_decode_frame_read() {
+        _decode_frame(VIDEO_PATH_REAL).await;
     }
 
     #[test]
@@ -304,7 +286,7 @@ mod tests {
         _decode_all(VIDEO_PATH_REAL, 10, video_meta_real().nframes - 10);
     }
 
-    fn _decode_frame(video_path: &str) {
+    async fn _decode_frame(video_path: &str) {
         let (_, parameters, packets) = read_video(video_path).unwrap();
         let decode_manager = DecoderManager::new(parameters, 10, 20);
 
@@ -317,18 +299,18 @@ mod tests {
             let decode_manager = decode_manager.clone();
             let ok_cnt = ok_cnt.clone();
             let abort_cnt = abort_cnt.clone();
-            let handle = spawn(
-                move || match decode_manager.decode_frame_base64(packets, i) {
+            let handle = tokio::spawn(async move {
+                match decode_manager.decode_frame_base64(packets, i).await {
                     Ok(_) => ok_cnt.fetch_add(1, Relaxed),
                     Err(_) => abort_cnt.fetch_add(1, Relaxed),
-                },
-            );
+                }
+            });
             handles.push(handle);
-            sleep(Duration::from_millis(1));
+            tokio::time::sleep(Duration::from_millis(1)).await;
         }
 
         for handle in handles {
-            handle.join().unwrap();
+            let _ = handle.await;
         }
 
         dbg!(ok_cnt, abort_cnt);

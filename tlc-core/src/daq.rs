@@ -1,7 +1,7 @@
 mod interp;
 pub(crate) mod read;
 #[cfg(test)]
-mod test;
+mod tests;
 
 use std::path::PathBuf;
 
