@@ -1,25 +1,22 @@
+#[cfg(test)]
+mod tests;
+
 use std::f64::{consts::PI, NAN};
 
-use anyhow::Result;
 use libm::erfc;
-use ndarray::{ArcArray2, Array2, ArrayView, Dimension};
+use ndarray::{ArcArray2, Array2};
 use packed_simd::{f64x4, Simd};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
-use tracing::{info, instrument};
+use tracing::instrument;
 
 use crate::{
-    daq::{InterpId, Interpolator},
-    util::progress_bar::{Progress, ProgressBar},
-    video::GmaxId,
+    daq::{Interpolator, InterpolatorId},
+    util::impl_eq_always_false,
+    video::{GmaxFrameIndexesId, VideoDataId},
 };
 
-#[derive(Clone)]
-pub struct NuData {
-    pub nu2: ArcArray2<f64>,
-    pub nu_nan_mean: f64,
-}
-
+/// All fields not NAN.
 #[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq)]
 pub struct PhysicalParam {
     pub gmax_temperature: f64,
@@ -29,35 +26,88 @@ pub struct PhysicalParam {
     pub air_thermal_conductivity: f64,
 }
 
+impl Eq for PhysicalParam {}
+
+impl std::hash::Hash for PhysicalParam {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.gmax_temperature.to_bits().hash(state);
+        self.solid_thermal_conductivity.to_bits().hash(state);
+        self.solid_thermal_diffusivity.to_bits().hash(state);
+        self.characteristic_length.to_bits().hash(state);
+        self.air_thermal_conductivity.to_bits().hash(state);
+    }
+}
+
+#[salsa::interned]
+pub(crate) struct PhysicalParamId {
+    pub physical_param: PhysicalParam,
+}
+
+/// All fields not NAN.
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq)]
-pub enum IterationMethod {
+pub enum IterMethod {
     NewtonTangent { h0: f64, max_iter_num: usize },
     NewtonDown { h0: f64, max_iter_num: usize },
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct SolveId {
-    pub gmax_id: GmaxId,
-    pub interp_id: InterpId,
-    pub frame_rate: usize,
-    pub iteration_method: IterationMethod,
-    pub physical_param: PhysicalParam,
+impl Eq for IterMethod {}
+
+impl std::hash::Hash for IterMethod {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        match self {
+            IterMethod::NewtonTangent { h0, max_iter_num } => {
+                state.write_u8(0);
+                h0.to_bits().hash(state);
+                max_iter_num.hash(state);
+            }
+            IterMethod::NewtonDown { h0, max_iter_num } => {
+                state.write_u8(1);
+                h0.to_bits().hash(state);
+                max_iter_num.hash(state);
+            }
+        }
+    }
 }
 
-#[derive(Default)]
-pub struct SolveController {
-    solve: ProgressBar,
+#[salsa::interned]
+pub(crate) struct IterMethodId {
+    pub iter_method: IterMethod,
 }
 
-impl SolveController {
-    pub fn solve_progress(&self) -> Progress {
-        self.solve.get()
-    }
+#[derive(Debug, Clone)]
+pub struct Nu2(pub ArcArray2<f64>);
 
-    pub fn prepare_solve(&mut self) -> ProgressBar {
-        std::mem::take(&mut self.solve).cancel();
-        self.solve.clone()
-    }
+impl_eq_always_false!(Nu2);
+
+#[salsa::tracked]
+pub(crate) struct Nu2Id {
+    pub nu2: Nu2,
+}
+
+#[salsa::tracked]
+pub(crate) fn solve_nu(
+    db: &dyn crate::Db,
+    video_data_id: VideoDataId,
+    gmax_frame_indexes_id: GmaxFrameIndexesId,
+    interpolator_id: InterpolatorId,
+    physical_param_id: PhysicalParamId,
+    iteration_method_id: IterMethodId,
+) -> Nu2Id {
+    let frame_rate = video_data_id.frame_rate(db);
+    let gmax_frame_indexes = gmax_frame_indexes_id.gmax_frame_indexes(db);
+    let interpolator = interpolator_id.interpolater(db);
+    let physical_param = physical_param_id.physical_param(db);
+    let iteration_method = iteration_method_id.iter_method(db);
+
+    let nu2 = solve(
+        &gmax_frame_indexes,
+        interpolator,
+        physical_param,
+        iteration_method,
+        frame_rate,
+    )
+    .into_shared();
+    Nu2Id::new(db, Nu2(nu2))
 }
 
 #[derive(Clone, Copy)]
@@ -67,7 +117,7 @@ struct PointData<'a> {
 }
 
 impl PointData<'_> {
-    fn heat_transfer_equation(&self, h: f64, dt: f64, k: f64, a: f64, tw: f64) -> (f64, f64) {
+    fn heat_transfer_equation(self, h: f64, dt: f64, k: f64, a: f64, tw: f64) -> (f64, f64) {
         let gmax_frame_index = self.gmax_frame_index;
         let temps = self.temperatures;
 
@@ -150,7 +200,6 @@ where
             }
             h = next_h;
         }
-
         h
     }
 }
@@ -163,13 +212,13 @@ where
         let mut h = h0;
         let (mut f, mut df) = equation(point_data, h);
         for _ in 0..max_iter_num {
-            let mut lambda = 1.;
+            let mut lambda = 1.0;
             loop {
                 let next_h = h - lambda * f / df;
                 if (next_h - h).abs() < 1e-3 {
                     return next_h;
                 }
-                let (next_f, next_df) = equation(point_data, h);
+                let (next_f, next_df) = equation(point_data, next_h);
                 if next_f.abs() < f.abs() {
                     h = next_h;
                     f = next_f;
@@ -185,29 +234,18 @@ where
                 return NAN;
             }
         }
-
         h
     }
 }
 
-impl Default for IterationMethod {
-    fn default() -> IterationMethod {
-        IterationMethod::NewtonTangent {
-            h0: 50.0,
-            max_iter_num: 10,
-        }
-    }
-}
-
-#[instrument(skip(gmax_frame_indexes, interpolator, progress_bar))]
-pub fn solve(
+#[instrument(skip(gmax_frame_indexes, interpolator))]
+fn solve(
     gmax_frame_indexes: &[usize],
-    interpolator: &Interpolator,
+    interpolator: Interpolator,
     physical_param: PhysicalParam,
-    iteration_method: IterationMethod,
+    iteration_method: IterMethod,
     frame_rate: usize,
-    progress_bar: ProgressBar,
-) -> Result<Array2<f64>> {
+) -> Array2<f64> {
     let dt = 1.0 / frame_rate as f64;
     let shape = interpolator.shape();
     let shape = (shape.0 as usize, shape.1 as usize);
@@ -224,63 +262,42 @@ pub fn solve(
         move |point_data: PointData, h| point_data.heat_transfer_equation(h, dt, k, a, tw);
 
     let nu1 = match iteration_method {
-        IterationMethod::NewtonTangent { h0, max_iter_num } => solve_inner(
+        IterMethod::NewtonTangent { h0, max_iter_num } => solve_core(
             gmax_frame_indexes,
             interpolator,
             newtow_tangent(equation, h0, max_iter_num),
             characteristic_length,
             air_thermal_conductivity,
-            progress_bar,
         ),
-        IterationMethod::NewtonDown { h0, max_iter_num } => solve_inner(
+        IterMethod::NewtonDown { h0, max_iter_num } => solve_core(
             gmax_frame_indexes,
             interpolator,
             newtow_down(equation, h0, max_iter_num),
             characteristic_length,
             air_thermal_conductivity,
-            progress_bar,
         ),
-    }?;
+    };
 
-    Ok(Array2::from_shape_vec(shape, nu1)?)
+    Array2::from_shape_vec(shape, nu1).unwrap()
 }
 
-pub fn nan_mean<D: Dimension>(data: ArrayView<f64, D>) -> f64 {
-    let (sum, non_nan_cnt, cnt) = data.iter().fold((0., 0, 0), |(sum, non_nan_cnt, cnt), &x| {
-        if x.is_nan() {
-            (sum, non_nan_cnt, cnt + 1)
-        } else {
-            (sum + x, non_nan_cnt + 1, cnt + 1)
-        }
-    });
-
-    let nan_ratio = (cnt - non_nan_cnt) as f64 / cnt as f64;
-    info!(non_nan_cnt, cnt, nan_ratio);
-
-    sum / non_nan_cnt as f64
-}
-
-fn solve_inner<F>(
+fn solve_core<F>(
     gmax_frame_indexes: &[usize],
-    interpolator: &Interpolator,
+    interpolator: Interpolator,
     solve_single_point: F,
     characteristic_length: f64,
     air_thermal_conductivity: f64,
-    progress_bar: ProgressBar,
-) -> Result<Vec<f64>>
+) -> Vec<f64>
 where
     F: Fn(PointData) -> f64 + Send + Sync + 'static,
 {
     const FIRST_FEW_TO_CAL_T0: usize = 4;
-    progress_bar.start(gmax_frame_indexes.len() as u32)?;
-    let nu1 = gmax_frame_indexes
+    gmax_frame_indexes
         .par_iter()
         .enumerate()
         .map(|(point_index, &gmax_frame_index)| {
-            progress_bar.add(1)?;
-
             if gmax_frame_index <= FIRST_FEW_TO_CAL_T0 {
-                return Ok(NAN);
+                return NAN;
             }
             let temperatures = interpolator.interp_point(point_index);
             let temperatures = temperatures.as_slice().unwrap();
@@ -290,160 +307,7 @@ where
             };
             let h = solve_single_point(point_data);
 
-            Ok(h * characteristic_length / air_thermal_conductivity)
+            h * characteristic_length / air_thermal_conductivity
         })
-        .collect::<Result<_>>()?;
-
-    Ok(nu1)
-}
-
-#[cfg(test)]
-mod tests {
-    extern crate test;
-    use approx::assert_relative_eq;
-    use ndarray::Array1;
-    use test::Bencher;
-
-    use super::*;
-    use crate::daq;
-
-    impl PointData<'_> {
-        fn iter_no_simd(&self, h: f64, dt: f64, k: f64, a: f64, tw: f64) -> (f64, f64) {
-            let gmax_frame_index = self.gmax_frame_index;
-            let temperatures = self.temperatures;
-            // We use the average of first 4 values to calculate the initial temperature.
-            const FIRST_FEW_TO_CAL_T0: usize = 4;
-            let t0 = temperatures[..FIRST_FEW_TO_CAL_T0].iter().sum::<f64>()
-                / FIRST_FEW_TO_CAL_T0 as f64;
-
-            let (sum, diff_sum) = temperatures
-                .array_windows()
-                .take(gmax_frame_index)
-                .enumerate()
-                .fold(
-                    (0.0, 0.0),
-                    |(sum, diff_sum), (frame_index, [temp1, temp2])| {
-                        let delta_temp = temp2 - temp1;
-                        let at = a * dt * (gmax_frame_index - frame_index - 1) as f64;
-                        let exp_erfc =
-                            (h.powf(2.0) / k.powf(2.0) * at).exp() * erfc(h / k * at.sqrt());
-
-                        let step = (1.0 - exp_erfc) * delta_temp;
-                        let diff_step = -delta_temp
-                            * (2.0 * at.sqrt() / k / PI.sqrt()
-                                - (2.0 * at * h * exp_erfc) / k.powf(2.));
-
-                        (sum + step, diff_sum + diff_step)
-                    },
-                );
-
-            (tw - t0 - sum, diff_sum)
-        }
-
-        fn no_iter_no_simd(&self, h: f64, dt: f64, k: f64, a: f64, tw: f64) -> (f64, f64) {
-            let gmax_frame_index = self.gmax_frame_index;
-            let temps = self.temperatures;
-            // We use the average of first 4 values to calculate the initial temperature.
-            const FIRST_FEW_TO_CAL_T0: usize = 4;
-            let t0 = temps[..FIRST_FEW_TO_CAL_T0].iter().sum::<f64>() / FIRST_FEW_TO_CAL_T0 as f64;
-
-            let (mut sum, mut diff_sum) = (0., 0.);
-            for frame_index in 0..gmax_frame_index {
-                let delta_temp = unsafe {
-                    temps.get_unchecked(frame_index + 1) - temps.get_unchecked(frame_index)
-                };
-                let at = a * dt * (gmax_frame_index - frame_index - 1) as f64;
-                let exp_erfc = (h.powf(2.0) / k.powf(2.0) * at).exp() * erfc(h / k * at.sqrt());
-
-                let step = (1.0 - exp_erfc) * delta_temp;
-                let diff_step = -delta_temp
-                    * (2.0 * at.sqrt() / k / PI.sqrt() - (2.0 * at * h * exp_erfc) / k.powf(2.));
-
-                sum += step;
-                diff_sum += diff_step;
-            }
-
-            (tw - t0 - sum, diff_sum)
-        }
-    }
-
-    fn new_temps() -> Array1<f64> {
-        let daq_raw = daq::read_daq("./testdata/imp_20000_1.lvm").unwrap().1;
-        daq_raw.column(3).to_owned()
-    }
-
-    const I: (f64, f64, f64, f64, f64) = (100.0, 0.04, 0.19, 1.091e-7, 35.48);
-
-    #[test]
-    fn test_single_point_correct() {
-        let temps = new_temps();
-        let point_data = PointData {
-            gmax_frame_index: 800,
-            temperatures: temps.as_slice_memory_order().unwrap(),
-        };
-        let r1 = point_data.heat_transfer_equation(I.0, I.1, I.2, I.3, I.4);
-        let r2 = point_data.iter_no_simd(I.0, I.1, I.2, I.3, I.4);
-        let r3 = point_data.no_iter_no_simd(I.0, I.1, I.2, I.3, I.4);
-        println!("simd:\t\t\t{r1:?}\niter_no_simd:\t\t{r2:?}\nno_iter_no_simd:\t{r3:?}");
-
-        assert_relative_eq!(r1.0, r2.0, max_relative = 1e-6);
-        assert_relative_eq!(r1.1, r2.1, max_relative = 1e-6);
-        assert_relative_eq!(r1.0, r3.0, max_relative = 1e-6);
-        assert_relative_eq!(r1.1, r3.1, max_relative = 1e-6);
-    }
-
-    // Bench on AMD Ryzen 7 4800H with Radeon Graphics (16) @ 2.900GHz.
-    //
-    // 1. SIMD is about 40% faster than scalar version. Considering that we do not
-    // find vectorized erfc implementation for rust, this is acceptable.
-    // 2. Generally iteration has the same performance as for loop. No auto-vectorization
-    // in this case.
-
-    #[bench]
-    fn bench_simd(b: &mut Bencher) {
-        let temps = new_temps();
-        let point_data = PointData {
-            gmax_frame_index: 800,
-            temperatures: temps.as_slice_memory_order().unwrap(),
-        };
-
-        // 8,658 ns/iter (+/- 90)
-        b.iter(|| point_data.heat_transfer_equation(I.0, I.1, I.2, I.3, I.4));
-    }
-
-    #[bench]
-    fn bench_iter_no_simd(b: &mut Bencher) {
-        let temps = new_temps();
-        let point_data = PointData {
-            gmax_frame_index: 800,
-            temperatures: temps.as_slice_memory_order().unwrap(),
-        };
-
-        // 13,194 ns/iter (+/- 194)
-        b.iter(|| point_data.iter_no_simd(I.0, I.1, I.2, I.3, I.4));
-    }
-
-    #[bench]
-    fn bench_no_iter_no_simd(b: &mut Bencher) {
-        let temps = new_temps();
-        let point_data = PointData {
-            gmax_frame_index: 800,
-            temperatures: temps.as_slice_memory_order().unwrap(),
-        };
-
-        // 13,198 ns/iter (+/- 175)
-        b.iter(|| point_data.no_iter_no_simd(I.0, I.1, I.2, I.3, I.4));
-    }
-
-    impl Default for PhysicalParam {
-        fn default() -> PhysicalParam {
-            PhysicalParam {
-                gmax_temperature: 35.48,
-                solid_thermal_conductivity: 0.19,
-                solid_thermal_diffusivity: 1.091e-7,
-                characteristic_length: 0.015,
-                air_thermal_conductivity: 0.0276,
-            }
-        }
-    }
+        .collect()
 }

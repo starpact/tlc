@@ -1,468 +1,515 @@
-mod handle;
-mod output_handler;
-mod request_handler;
-mod task;
+use std::path::{Path, PathBuf};
 
-use std::path::PathBuf;
+use ndarray::{ArcArray2, Array2};
+use salsa::{DebugWithDb, Snapshot};
+use tracing::trace;
 
-use anyhow::{anyhow, Result};
-use crossbeam::channel::{bounded, Receiver, Sender};
-use rusqlite::Connection;
-
-use self::task::TaskRegistry;
 use crate::{
-    daq::{DaqData, DaqId, InterpId, InterpMethod, Interpolator, Thermocouple},
-    setting::{Setting, SettingSnapshot, StartIndex},
-    solve::{NuData, SolveController, SolveId},
-    video::{GmaxId, Green2Id, VideoController, VideoData, VideoId},
+    daq::{make_interpolator, read_daq, DaqDataId, DaqPathId, InterpMethodId, ThermocouplesId},
+    post_processing::{nan_mean, save_nu_matrix, save_nu_plot, save_setting, Trunc, TruncId},
+    solve::{solve_nu, IterMethodId, Nu2Id, PhysicalParamId},
+    video::{
+        decode_all, decode_frame_base64, filter_detect_peak, filter_point, read_video, AreaId,
+        FilterMethodId, PointId, VideoDataId, VideoPathId,
+    },
 };
-pub use task::Output;
+pub use crate::{
+    daq::{InterpMethod, Thermocouple},
+    solve::{IterMethod, PhysicalParam},
+    video::{FilterMethod, VideoMeta},
+    Jar,
+};
 
-pub struct GlobalState {
-    setting: Setting,
-    db: Connection,
-
-    output_sender: Sender<Output>,
-    output_receiver: Receiver<Output>,
-
-    task_registry: TaskRegistry,
-
-    video_data: Option<VideoData>,
-    video_controller: VideoController,
-
-    daq_data: Option<DaqData>,
-
-    nu_data: Option<NuData>,
-    solve_controller: SolveController,
+#[derive(Default)]
+#[salsa::db(Jar)]
+pub struct Database {
+    storage: salsa::Storage<Self>,
+    name_id: Option<NameId>,
+    save_root_dir_id: Option<SaveRootDirId>,
+    video_path_id: Option<VideoPathId>,
+    daq_path_id: Option<DaqPathId>,
+    start_index_id: Option<StartIndexId>,
+    area_id: Option<AreaId>,
+    thermocouples_id: Option<ThermocouplesId>,
+    filter_method_id: Option<FilterMethodId>,
+    interp_method_id: Option<InterpMethodId>,
+    physical_param_id: Option<PhysicalParamId>,
+    iter_method_id: Option<IterMethodId>,
 }
 
-impl GlobalState {
-    pub fn new(db: Connection) -> GlobalState {
-        let (output_sender, output_receiver) = bounded(0);
-        GlobalState {
-            setting: Setting::default(),
-            db,
-            output_sender,
-            output_receiver,
-            task_registry: TaskRegistry::default(),
-            video_data: None,
-            daq_data: None,
-            video_controller: VideoController::default(),
-            nu_data: None,
-            solve_controller: SolveController::default(),
+impl salsa::Database for Database {
+    fn salsa_event(&self, event: salsa::Event) {
+        match event.kind {
+            salsa::EventKind::WillCheckCancellation => {}
+            _ => trace!("salsa_event: {:?}", event.debug(self)),
         }
-    }
-
-    fn video_data(&self) -> Result<&VideoData> {
-        self.video_data
-            .as_ref()
-            .ok_or_else(|| anyhow!("video not loaded yet"))
-    }
-
-    fn daq_data(&self) -> Result<&DaqData> {
-        self.daq_data
-            .as_ref()
-            .ok_or_else(|| anyhow!("daq not loaded yet"))
-    }
-
-    fn video_id(&self) -> Result<VideoId> {
-        Ok(VideoId {
-            video_path: self.setting.video_path(&self.db)?,
-        })
-    }
-
-    fn daq_id(&self) -> Result<DaqId> {
-        Ok(DaqId {
-            daq_path: self.setting.daq_path(&self.db)?,
-        })
-    }
-
-    fn green2_id(&self) -> Result<Green2Id> {
-        let video_id = self.video_id()?;
-        let nframes = self.video_data()?.video_meta().nframes;
-        let nrows = self.daq_data()?.daq_meta().nrows;
-        let StartIndex {
-            start_frame,
-            start_row,
-        } = self.start_index()?;
-        let cal_num = (nframes - start_frame).min(nrows - start_row);
-        let area = self.area()?;
-
-        Ok(Green2Id {
-            video_id,
-            start_frame,
-            cal_num,
-            area,
-        })
-    }
-
-    fn gmax_id(&self) -> Result<GmaxId> {
-        let green2_id = self.green2_id()?;
-        let filter_method = self.setting.filter_method(&self.db)?;
-
-        Ok(GmaxId {
-            green2_id,
-            filter_method,
-        })
-    }
-
-    fn interp_id(&self) -> Result<InterpId> {
-        let daq_path = self.setting.daq_path(&self.db)?;
-        let start_row = self.start_index()?.start_row;
-        let Green2Id { cal_num, area, .. } = self.green2_id()?;
-        let thermocouples = self.thermocouples()?;
-        let interp_method = self.interp_method()?;
-
-        Ok(InterpId {
-            daq_id: DaqId { daq_path },
-            start_row,
-            cal_num,
-            area,
-            interp_method,
-            thermocouples,
-        })
-    }
-
-    fn solve_id(&self) -> Result<SolveId> {
-        Ok(SolveId {
-            gmax_id: self.gmax_id()?,
-            interp_id: self.interp_id()?,
-            frame_rate: self.video_data()?.video_meta().frame_rate,
-            iteration_method: self.setting.iteration_method(&self.db)?,
-            physical_param: self.setting.physical_param(&self.db)?,
-        })
-    }
-
-    fn start_index(&self) -> Result<StartIndex> {
-        self.setting
-            .start_index(&self.db)?
-            .ok_or_else(|| anyhow!("video and daq not synchronized yet"))
-    }
-
-    fn area(&self) -> Result<(u32, u32, u32, u32)> {
-        self.setting
-            .area(&self.db)?
-            .ok_or_else(|| anyhow!("area not selected yet"))
-    }
-
-    fn interp_method(&self) -> Result<InterpMethod> {
-        self.setting
-            .interp_method(&self.db)?
-            .ok_or_else(|| anyhow!("interp method unset"))
-    }
-
-    fn thermocouples(&self) -> Result<Vec<Thermocouple>> {
-        self.setting
-            .thermocouples(&self.db)?
-            .ok_or_else(|| anyhow!("thermocouples unset"))
-    }
-
-    fn interpolator(&self) -> Result<Interpolator> {
-        Ok(self
-            .daq_data()?
-            .interpolator()
-            .ok_or_else(|| anyhow!("not interpolated yet"))?
-            .clone())
-    }
-
-    fn setting_snapshot(&self, nu_nan_mean: f64) -> Result<SettingSnapshot> {
-        let StartIndex {
-            start_frame,
-            start_row,
-        } = self.start_index()?;
-        let setting_snapshot = SettingSnapshot {
-            name: self.setting.name(&self.db)?,
-            save_root_dir: self.setting.save_root_dir(&self.db)?,
-            video_path: self.setting.video_path(&self.db)?,
-            video_meta: self.video_data()?.video_meta(),
-            daq_path: self.setting.daq_path(&self.db)?,
-            daq_meta: self.daq_data()?.daq_meta(),
-            start_frame,
-            start_row,
-            area: self.area()?,
-            thermocouples: self.thermocouples()?,
-            filter_method: self.setting.filter_method(&self.db)?,
-            interp_method: self.interp_method()?,
-            iteration_method: self.setting.iteration_method(&self.db)?,
-            physical_param: self.setting.physical_param(&self.db)?,
-            nu_nan_mean,
-            completed_at: time::OffsetDateTime::now_local()?,
-        };
-
-        Ok(setting_snapshot)
-    }
-
-    fn output_file_stem(&self) -> Result<PathBuf> {
-        let save_root_dir = self.setting.save_root_dir(&self.db)?;
-        let name = self.setting.name(&self.db)?;
-        Ok(save_root_dir.join(name))
-    }
-
-    fn nu_path(&self) -> Result<PathBuf> {
-        Ok(self.output_file_stem()?.with_extension("csv"))
-    }
-
-    fn plot_path(&self) -> Result<PathBuf> {
-        Ok(self.output_file_stem()?.with_extension("png"))
-    }
-
-    fn setting_snapshot_path(&self) -> Result<PathBuf> {
-        Ok(self.output_file_stem()?.with_extension("json"))
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use std::{
-        thread::{sleep, spawn},
-        time::Duration,
-    };
+impl salsa::ParallelDatabase for Database {
+    fn snapshot(&self) -> salsa::Snapshot<Self> {
+        Snapshot::new(Self {
+            storage: self.storage.snapshot(),
+            name_id: self.name_id,
+            save_root_dir_id: self.save_root_dir_id,
+            video_path_id: self.video_path_id,
+            daq_path_id: self.daq_path_id,
+            start_index_id: self.start_index_id,
+            area_id: self.area_id,
+            thermocouples_id: self.thermocouples_id,
+            filter_method_id: self.filter_method_id,
+            interp_method_id: self.interp_method_id,
+            physical_param_id: self.physical_param_id,
+            iter_method_id: self.iter_method_id,
+        })
+    }
+}
 
-    use crate::{
-        util::{self, progress_bar::Progress},
-        video::{FilterMethod, VideoMeta},
-    };
+impl crate::Db for Database {}
 
-    use crate::{
-        daq::DaqMeta,
-        main_loop::main_loop,
-        request::{self, NuView, SettingData},
-        setting::new_db_in_memory,
-        solve::{IterationMethod, PhysicalParam},
-    };
+impl Database {
+    pub fn get_name(&self) -> Option<&str> {
+        Some(self.name_id?.name(self))
+    }
 
-    use super::*;
+    pub fn set_name(&mut self, name: String) {
+        self.name_id = Some(NameId::new(self, name));
+    }
 
-    pub const VIDEO_PATH_REAL: &str = "/home/yhj/Downloads/EXP/imp/videos/imp_20000_1_up.avi";
-    pub const DAQ_PATH_REAL: &str = "/home/yhj/Downloads/EXP/imp/daq/imp_20000_1.lvm";
+    pub fn get_save_root_dir(&self) -> Option<&Path> {
+        Some(self.save_root_dir_id?.save_root_dir(self))
+    }
 
-    #[ignore]
-    #[tokio::test]
-    async fn test_real() {
-        util::log::init();
-        let (tx, rx) = bounded(3);
-        spawn(move || main_loop(new_db_in_memory(), rx));
+    pub fn set_save_root_dir(&mut self, save_root_dir: PathBuf) -> Result<(), String> {
+        if !save_root_dir.exists() {
+            return Err(format!("{save_root_dir:?} not exists"));
+        }
+        self.save_root_dir_id = Some(SaveRootDirId::new(self, save_root_dir));
+        Ok(())
+    }
 
-        request::create_setting(SettingData::default(), &tx)
-            .await
-            .unwrap();
-        assert_eq!(request::get_name(&tx).await.unwrap(), "test_case");
-        assert_eq!(
-            request::get_save_root_dir(&tx).await.unwrap(),
-            PathBuf::from("/tmp")
-        );
+    pub fn get_video_path(&self) -> Option<&Path> {
+        Some(self.video_path_id?.path(self))
+    }
 
-        assert_eq!(
-            request::get_read_video_progress(&tx).await.unwrap(),
-            Progress::Uninitialized
-        );
-        request::set_video_path(PathBuf::from(VIDEO_PATH_REAL), &tx)
-            .await
-            .unwrap();
-        assert_eq!(
-            request::get_video_path(&tx).await.unwrap(),
-            PathBuf::from(VIDEO_PATH_REAL)
-        );
-        request::set_daq_path(PathBuf::from(DAQ_PATH_REAL), &tx)
-            .await
-            .unwrap();
-        assert_eq!(
-            request::get_daq_path(&tx).await.unwrap(),
-            PathBuf::from(DAQ_PATH_REAL)
-        );
+    pub fn set_video_path(&mut self, video_path: PathBuf) {
+        self.start_index_id = None;
+        match self.video_path_id {
+            Some(video_path_id) => {
+                video_path_id.set_path(self).to(video_path);
+            }
+            None => self.video_path_id = Some(VideoPathId::new(self, video_path)),
+        }
+    }
 
-        loop {
-            let progress = request::get_read_video_progress(&tx).await.unwrap();
-            match progress {
-                Progress::Uninitialized | Progress::InProgress { .. } => {
-                    sleep(Duration::from_millis(200))
+    pub fn get_video_nframes(&self) -> Result<usize, String> {
+        Ok(self.video_data_id()?.packets(self).0.len())
+    }
+
+    pub fn get_video_frame_rate(&self) -> Result<usize, String> {
+        Ok(self.video_data_id()?.frame_rate(self))
+    }
+
+    pub fn get_video_shape(&self) -> Result<(u32, u32), String> {
+        Ok(self.video_data_id()?.shape(self))
+    }
+
+    pub fn get_daq_path(&self) -> Option<&Path> {
+        Some(self.daq_path_id?.path(self))
+    }
+
+    pub fn set_daq_path(&mut self, daq_path: PathBuf) {
+        self.start_index_id = None;
+        match self.daq_path_id {
+            Some(daq_path_id) => {
+                daq_path_id.set_path(self).to(daq_path);
+            }
+            None => self.daq_path_id = Some(DaqPathId::new(self, daq_path)),
+        }
+    }
+
+    pub fn get_daq_data(&self) -> Result<ArcArray2<f64>, String> {
+        Ok(read_daq(self, self.daq_path_id()?)?.data(self).0)
+    }
+
+    pub fn synchronize_video_and_daq(
+        &mut self,
+        start_frame: usize,
+        start_row: usize,
+    ) -> Result<(), String> {
+        let nframes = self.get_video_nframes()?;
+        if start_frame >= nframes {
+            return Err(format!(
+                "frame_index({start_frame}) out of range({nframes})"
+            ));
+        }
+        let nrows = self.get_daq_data()?.nrows();
+        if start_row >= nrows {
+            return Err(format!("row_index({start_row}) out of range({nrows})"));
+        }
+        self.start_index_id = Some(StartIndexId::new(self, start_frame, start_row));
+        Ok(())
+    }
+
+    pub fn get_start_frame(&self) -> Result<usize, String> {
+        Ok(self.start_index_id()?.start_frame(self))
+    }
+
+    pub fn set_start_frame(&mut self, start_frame: usize) -> Result<(), String> {
+        let nframes = self.get_video_nframes()?;
+        if start_frame >= nframes {
+            return Err(format!(
+                "frame_index({start_frame}) out of range({nframes})"
+            ));
+        }
+        let nrows = self.get_daq_data()?.nrows();
+        let old_start_frame = self.get_start_frame()?;
+        let old_start_row = self.get_start_row()?;
+        if old_start_row + start_frame < old_start_frame {
+            return Err("invalid start_frame".to_owned());
+        }
+        let start_row = old_start_row + start_frame - old_start_frame;
+        if start_row >= nrows {
+            return Err(format!("row_index({start_row}) out of range({nrows})"));
+        }
+        self.start_index_id = Some(StartIndexId::new(self, start_frame, start_row));
+        Ok(())
+    }
+
+    pub fn get_start_row(&self) -> Result<usize, String> {
+        Ok(self.start_index_id()?.start_row(self))
+    }
+
+    pub fn set_start_row(&mut self, start_row: usize) -> Result<(), String> {
+        let nrows = self.get_daq_data()?.nrows();
+        if start_row >= nrows {
+            return Err(format!("row_index({start_row}) out of range({nrows})"));
+        }
+        let nframes = self.get_video_nframes()?;
+        let old_start_frame = self.get_start_frame()?;
+        let old_start_row = self.get_start_row()?;
+        if old_start_frame + start_row < old_start_row {
+            return Err("invalid start_frame".to_owned());
+        }
+        let start_frame = old_start_frame + start_row - old_start_row;
+        if start_frame >= nframes {
+            return Err(format!(
+                "frames_index({start_frame}) out of range({nframes})"
+            ));
+        }
+        self.start_index_id = Some(StartIndexId::new(self, start_frame, start_row));
+        Ok(())
+    }
+
+    pub fn get_area(&self) -> Option<(u32, u32, u32, u32)> {
+        Some(self.area_id?.area(self))
+    }
+
+    pub fn set_area(&mut self, area: (u32, u32, u32, u32)) -> Result<(), String> {
+        let (h, w) = self.get_video_shape()?;
+        let (tl_y, tl_x, cal_h, cal_w) = area;
+        if tl_x + cal_w > w {
+            return Err(format!(
+                "area X out of range: top_left_x({tl_x}) + width({cal_w}) > video_width({w})"
+            ));
+        }
+        if tl_y + cal_h > h {
+            return Err(format!(
+                "area Y out of range: top_left_y({tl_y}) + height({cal_h}) > video_height({h})"
+            ));
+        }
+        self.area_id = Some(AreaId::new(self, area));
+        Ok(())
+    }
+
+    pub fn get_filter_method(&self) -> Option<FilterMethod> {
+        Some(self.filter_method_id?.filter_method(self))
+    }
+
+    pub fn set_filter_method(&mut self, filter_method: FilterMethod) -> Result<(), String> {
+        match filter_method {
+            FilterMethod::No => {}
+            FilterMethod::Median { window_size } => {
+                if window_size == 0 {
+                    return Err("window size can not be zero".to_owned());
                 }
-                Progress::Finished { .. } => break,
+                if window_size > self.get_video_nframes()? / 10 {
+                    return Err(format!("window size too large: {window_size}"));
+                }
+            }
+            FilterMethod::Wavelet { threshold_ratio } => {
+                if !(0.0..1.0).contains(&threshold_ratio) {
+                    return Err(format!(
+                        "thershold ratio must belong to (0, 1): {threshold_ratio}"
+                    ));
+                }
             }
         }
+        self.filter_method_id = Some(FilterMethodId::new(self, filter_method));
+        Ok(())
+    }
 
-        let video_meta = request::get_video_meta(&tx).await.unwrap();
-        assert_eq!(
-            video_meta,
-            VideoMeta {
-                frame_rate: 25,
-                nframes: 2444,
-                shape: (1024, 1280),
-            }
-        );
-        assert_eq!(
-            request::get_daq_meta(&tx).await.unwrap(),
-            DaqMeta {
-                nrows: 2589,
-                ncols: 10,
-            }
-        );
-        request::decode_frame_base64(video_meta.nframes, &tx)
-            .await
-            .unwrap_err();
-        request::decode_frame_base64(video_meta.nframes - 1, &tx)
-            .await
-            .unwrap();
-        request::set_area((660, 20, 340, 1248), &tx).await.unwrap();
-        assert_eq!(
-            request::get_build_green2_progress(&tx).await.unwrap(),
-            Progress::Uninitialized
-        );
-        request::synchronize_video_and_daq(71, 140, &tx)
-            .await
-            .unwrap();
-        sleep(Duration::from_millis(200));
-        request::get_build_green2_progress(&tx).await.unwrap();
+    pub fn filter_point(&self, point: (usize, usize)) -> Result<Vec<u8>, String> {
+        let video_data_id = self.video_data_id()?;
+        let daq_data_id = self.daq_data_id()?;
+        let start_index_id = self.start_index_id()?;
+        let cal_num_id = eval_cal_num(self, video_data_id, daq_data_id, start_index_id);
+        let area_id = self.area_id()?;
+        let green2_id = decode_all(self, video_data_id, start_index_id, cal_num_id, area_id)?;
+        let filter_method_id = self.filter_method_id()?;
+        let point_id = PointId::new(self, point);
+        filter_point(self, green2_id, filter_method_id, area_id, point_id)
+    }
 
-        // Will cancel the current computation.
-        request::set_start_frame(81, &tx).await.unwrap();
-        // Same parameters, evaluated task will be rejected by task registry.
-        request::set_start_row(150, &tx).await.unwrap();
+    pub fn get_thermocouples(&self) -> Option<&[Thermocouple]> {
+        Some(self.thermocouples_id?.thermocouples(self))
+    }
 
-        loop {
-            let progress = request::get_build_green2_progress(&tx).await.unwrap();
-            match progress {
-                Progress::Uninitialized | Progress::InProgress { .. } => {
-                    sleep(Duration::from_millis(500))
-                }
-                Progress::Finished { .. } => break,
+    pub fn set_thermocouples(&mut self, thermocouples: Vec<Thermocouple>) -> Result<(), String> {
+        let daq_ncols = self.get_daq_data()?.ncols();
+        for thermocouple in &thermocouples {
+            let column_index = thermocouple.column_index;
+            if thermocouple.column_index >= daq_ncols {
+                return Err(format!(
+                    "thermocouple column_index({column_index}) exceeds daq ncols({daq_ncols})"
+                ));
             }
         }
+        self.thermocouples_id = Some(ThermocouplesId::new(self, thermocouples));
+        Ok(())
+    }
 
-        request::set_filter_method(FilterMethod::Median { window_size: 10 }, &tx)
-            .await
-            .unwrap();
+    pub fn get_interp_method(&self) -> Option<InterpMethod> {
+        Some(self.interp_method_id?.interp_method(self))
+    }
 
-        loop {
-            let progress = request::get_detect_peak_progress(&tx).await.unwrap();
-            match progress {
-                Progress::Uninitialized | Progress::InProgress { .. } => {
-                    sleep(Duration::from_millis(500))
-                }
-                Progress::Finished { .. } => break,
+    pub fn set_interp_method(&mut self, interp_method: InterpMethod) -> Result<(), String> {
+        let thermocouples = self
+            .get_thermocouples()
+            .ok_or("thermocouples unset".to_owned())?;
+        if let InterpMethod::Bilinear(y, x) | InterpMethod::BilinearExtra(y, x) = interp_method {
+            if (x * y) as usize != thermocouples.len() {
+                return Err("invalid interp method".to_owned());
             }
         }
+        self.interp_method_id = Some(InterpMethodId::new(self, interp_method));
+        Ok(())
+    }
 
-        let thermocouples = vec![
-            Thermocouple {
-                column_index: 1,
-                position: (0, 166),
-            },
-            Thermocouple {
-                column_index: 2,
-                position: (0, 355),
-            },
-            Thermocouple {
-                column_index: 3,
-                position: (0, 543),
-            },
-            Thermocouple {
-                column_index: 4,
-                position: (0, 731),
-            },
-            Thermocouple {
-                column_index: 1,
-                position: (0, 922),
-            },
-            Thermocouple {
-                column_index: 6,
-                position: (0, 1116),
-            },
-        ];
+    pub fn interp_frame(&self, frame_index: usize) -> Result<Array2<f64>, String> {
+        let video_data_id = self.video_data_id()?;
+        let daq_data_id = self.daq_data_id()?;
+        let start_index_id = self.start_index_id()?;
+        let cal_num_id = eval_cal_num(self, video_data_id, daq_data_id, start_index_id);
+        let area_id = self.area_id()?;
+        let thermocouples_id = self.thermocouples_id()?;
+        let interp_method_id = self.interp_method_id()?;
+        let interpolator = make_interpolator(
+            self,
+            daq_data_id,
+            start_index_id,
+            cal_num_id,
+            area_id,
+            thermocouples_id,
+            interp_method_id,
+        )
+        .interpolater(self);
+        Ok(interpolator.interp_frame(frame_index))
+    }
 
-        request::set_thermocouples(thermocouples.clone(), &tx)
-            .await
-            .unwrap();
-        assert_eq!(
-            request::get_thermocouples(&tx).await.unwrap(),
-            thermocouples
-        );
-        assert_eq!(
-            request::get_solve_progress(&tx).await.unwrap(),
-            Progress::Uninitialized
-        );
-        request::set_interp_method(InterpMethod::Horizontal, &tx)
-            .await
-            .unwrap();
-        assert_eq!(
-            request::get_interp_method(&tx).await.unwrap(),
-            InterpMethod::Horizontal
-        );
+    pub fn get_iter_method(&self) -> Option<IterMethod> {
+        Some(self.iter_method_id?.iter_method(self))
+    }
 
-        loop {
-            let progress = request::get_solve_progress(&tx).await.unwrap();
-            match progress {
-                Progress::Uninitialized | Progress::InProgress { .. } => {
-                    sleep(Duration::from_millis(200))
-                }
-                Progress::Finished { .. } => break,
-            }
-        }
+    pub fn set_iteration_method(&mut self, iteration_method: IterMethod) {
+        self.iter_method_id = Some(IterMethodId::new(self, iteration_method));
+    }
 
-        let NuView {
+    pub fn get_physical_param(&self) -> Option<PhysicalParam> {
+        Some(self.physical_param_id?.physical_param(self))
+    }
+
+    pub fn set_physical_param(&mut self, physical_param: PhysicalParam) {
+        self.physical_param_id = Some(PhysicalParamId::new(self, physical_param));
+    }
+
+    pub fn get_nu_data(&self, trunc: Option<(f64, f64)>) -> Result<NuData, String> {
+        let nu2_id = self.nu2_id()?;
+        let name_id = self.name_id()?;
+        let save_root_dir_id = self.save_root_dir_id()?;
+
+        save_nu_matrix(self, name_id, save_root_dir_id, nu2_id)?;
+        save_setting(
+            self,
+            name_id,
+            save_root_dir_id,
+            self.video_path_id()?,
+            self.daq_path_id()?,
+            self.start_index_id()?,
+            self.area_id()?,
+            self.thermocouples_id()?,
+            self.filter_method_id()?,
+            self.interp_method_id()?,
+            self.iter_method_id()?,
+            self.physical_param_id()?,
+            nu2_id,
+        )?;
+        let nu_plot_base64 = save_nu_plot(
+            self,
+            name_id,
+            save_root_dir_id,
+            nu2_id,
+            TruncId::new(self, trunc.map(|(min, max)| Trunc(min, max))),
+        )?;
+
+        let nu2 = nu2_id.nu2(self).0;
+        let nu_nan_mean = nan_mean(nu2.view());
+        Ok(NuData {
+            nu2,
             nu_nan_mean,
-            edge_truncation,
-            ..
-        } = request::get_nu(None, &tx).await.unwrap();
-        dbg!(nu_nan_mean, edge_truncation);
+            nu_plot_base64,
+        })
     }
 
-    #[ignore]
-    #[tokio::test]
-    async fn test_complete_setting_auto_compute_all() {
-        util::log::init();
-        let (tx, rx) = bounded(3);
-        spawn(move || main_loop(new_db_in_memory(), rx));
-
-        let setting_data = SettingData {
-            name: "test_case".to_owned(),
-            save_root_dir: PathBuf::from("/tmp"),
-            video_path: Some(PathBuf::from(VIDEO_PATH_REAL)),
-            daq_path: Some(PathBuf::from(DAQ_PATH_REAL)),
-            start_frame: Some(81),
-            start_row: Some(150),
-            area: Some((660, 20, 340, 1248)),
-            thermocouples: Some(vec![
-                Thermocouple {
-                    column_index: 1,
-                    position: (0, 166),
-                },
-                Thermocouple {
-                    column_index: 2,
-                    position: (0, 355),
-                },
-                Thermocouple {
-                    column_index: 3,
-                    position: (0, 543),
-                },
-                Thermocouple {
-                    column_index: 4,
-                    position: (0, 731),
-                },
-                Thermocouple {
-                    column_index: 1,
-                    position: (0, 922),
-                },
-                Thermocouple {
-                    column_index: 6,
-                    position: (0, 1116),
-                },
-            ]),
-            interp_method: Some(InterpMethod::Horizontal),
-            filter_method: Some(FilterMethod::Median { window_size: 10 }),
-            iteration_method: Some(IterationMethod::default()),
-            physical_param: PhysicalParam::default(),
-        };
-        request::create_setting(setting_data, &tx).await.unwrap();
-
-        loop {
-            let progress = request::get_solve_progress(&tx).await.unwrap();
-            match progress {
-                Progress::Uninitialized | Progress::InProgress { .. } => {
-                    sleep(Duration::from_millis(200))
-                }
-                Progress::Finished { .. } => break,
-            }
-        }
+    fn name_id(&self) -> Result<NameId, String> {
+        self.name_id.ok_or("name unset".to_owned())
     }
+
+    fn save_root_dir_id(&self) -> Result<SaveRootDirId, String> {
+        self.save_root_dir_id
+            .ok_or("save root dir unset".to_owned())
+    }
+
+    fn video_path_id(&self) -> Result<VideoPathId, String> {
+        self.video_path_id.ok_or("video path unset".to_owned())
+    }
+
+    fn daq_path_id(&self) -> Result<DaqPathId, String> {
+        self.daq_path_id.ok_or("daq path unset".to_owned())
+    }
+
+    fn video_data_id(&self) -> Result<VideoDataId, String> {
+        read_video(self, self.video_path_id()?)
+    }
+
+    fn daq_data_id(&self) -> Result<DaqDataId, String> {
+        read_daq(self, self.daq_path_id()?)
+    }
+
+    fn start_index_id(&self) -> Result<StartIndexId, String> {
+        self.start_index_id
+            .ok_or("video and daq not synchronized yet".to_owned())
+    }
+
+    fn area_id(&self) -> Result<AreaId, String> {
+        self.area_id.ok_or("area unset".to_owned())
+    }
+
+    fn filter_method_id(&self) -> Result<FilterMethodId, String> {
+        self.filter_method_id
+            .ok_or("filter method unset".to_owned())
+    }
+
+    fn thermocouples_id(&self) -> Result<ThermocouplesId, String> {
+        self.thermocouples_id.ok_or("thermocouple unset".to_owned())
+    }
+
+    fn interp_method_id(&self) -> Result<InterpMethodId, String> {
+        self.interp_method_id
+            .ok_or("interp method unset".to_owned())
+    }
+
+    fn physical_param_id(&self) -> Result<PhysicalParamId, String> {
+        self.physical_param_id
+            .ok_or("physical param unset".to_owned())
+    }
+
+    fn iter_method_id(&self) -> Result<IterMethodId, String> {
+        self.iter_method_id.ok_or("iter method unset".to_owned())
+    }
+
+    fn nu2_id(&self) -> Result<Nu2Id, String> {
+        let video_data_id = self.video_data_id()?;
+        let daq_data_id = self.daq_data_id()?;
+        let start_index_id = self.start_index_id()?;
+        let cal_num_id = eval_cal_num(self, video_data_id, daq_data_id, start_index_id);
+        let area_id = self.area_id()?;
+        let green2_id = decode_all(self, video_data_id, start_index_id, cal_num_id, area_id)?;
+        let filter_method_id = self.filter_method_id()?;
+        let gmax_frame_indexes_id = filter_detect_peak(self, green2_id, filter_method_id);
+        let thermocouples_id = self.thermocouples_id()?;
+        let interp_method_id = self.interp_method_id()?;
+        let interpolator_id = make_interpolator(
+            self,
+            daq_data_id,
+            start_index_id,
+            cal_num_id,
+            area_id,
+            thermocouples_id,
+            interp_method_id,
+        );
+        let physical_param_id = self.physical_param_id()?;
+        let iteration_method_id = self.iter_method_id()?;
+        let nu2_id = solve_nu(
+            self,
+            video_data_id,
+            gmax_frame_indexes_id,
+            interpolator_id,
+            physical_param_id,
+            iteration_method_id,
+        );
+        Ok(nu2_id)
+    }
+}
+
+pub async fn decode_frame(db: &Database, frame_index: usize) -> Result<String, String> {
+    let video_data_id = db.video_data_id()?;
+    let decoder_manager = video_data_id.decoder_manager(db);
+    let packets = video_data_id.packets(db).0;
+    decode_frame_base64(decoder_manager, packets, frame_index)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[salsa::input]
+pub(crate) struct NameId {
+    #[return_ref]
+    pub name: String,
+}
+
+#[salsa::input]
+pub(crate) struct SaveRootDirId {
+    #[return_ref]
+    pub save_root_dir: PathBuf,
+}
+
+#[salsa::interned]
+pub(crate) struct StartIndexId {
+    pub start_frame: usize,
+    pub start_row: usize,
+}
+
+#[salsa::tracked]
+pub(crate) struct CalNumId {
+    pub cal_num: usize,
+}
+
+#[salsa::tracked]
+pub(crate) fn eval_cal_num(
+    db: &dyn crate::Db,
+    video_data_id: VideoDataId,
+    daq_data_id: DaqDataId,
+    start_index_id: StartIndexId,
+) -> CalNumId {
+    let nframes = video_data_id.packets(db).0.len();
+    let nrows = daq_data_id.data(db).0.nrows();
+    let start_frame = start_index_id.start_frame(db);
+    let start_row = start_index_id.start_row(db);
+    CalNumId::new(db, (nframes - start_frame).min(nrows - start_row))
+}
+
+pub struct NuData {
+    pub nu2: ArcArray2<f64>,
+    pub nu_nan_mean: f64,
+    pub nu_plot_base64: String,
 }

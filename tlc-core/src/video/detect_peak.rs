@@ -5,9 +5,6 @@ use ndarray::{parallel::prelude::*, prelude::*, ArcArray2};
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
 
-use super::Green2Id;
-use crate::util::progress_bar::ProgressBar;
-
 #[derive(Debug, Default, Deserialize, Serialize, Clone, Copy, PartialEq)]
 pub enum FilterMethod {
     #[default]
@@ -20,28 +17,33 @@ pub enum FilterMethod {
     },
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct GmaxId {
-    pub green2_id: Green2Id,
-    pub filter_method: FilterMethod,
+impl Eq for FilterMethod {}
+
+impl std::hash::Hash for FilterMethod {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        match self {
+            FilterMethod::No => state.write_u8(0),
+            FilterMethod::Median { window_size } => {
+                state.write_u8(1);
+                window_size.hash(state)
+            }
+            FilterMethod::Wavelet { threshold_ratio } => {
+                state.write_u8(2);
+                threshold_ratio.to_bits().hash(state);
+            }
+        }
+    }
 }
 
-#[instrument(skip(green2, progress_bar), err)]
-pub fn filter_detect_peak(
-    green2: ArcArray2<u8>,
-    filter_method: FilterMethod,
-    progress_bar: ProgressBar,
-) -> Result<Vec<usize>> {
-    let total = green2.dim().1;
-    progress_bar.start(total as u32)?;
-
+#[instrument(skip(green2))]
+pub fn filter_detect_peak(green2: ArcArray2<u8>, filter_method: FilterMethod) -> Vec<usize> {
     use FilterMethod::*;
     match filter_method {
-        No => apply(green2, progress_bar, filter_detect_peak_no),
-        Median { window_size } => apply(green2, progress_bar, move |g1| {
-            filter_detect_peak_median(g1, window_size)
-        }),
-        Wavelet { threshold_ratio } => apply(green2, progress_bar, move |g1| {
+        No => apply(green2, filter_detect_peak_no),
+        Median { window_size } => {
+            apply(green2, move |g1| filter_detect_peak_median(g1, window_size))
+        }
+        Wavelet { threshold_ratio } => apply(green2, move |g1| {
             filter_detect_peak_wavelet(g1, threshold_ratio)
         }),
     }
@@ -73,18 +75,11 @@ pub fn filter_point(
     Ok(temp_history)
 }
 
-fn apply<F>(green2: ArcArray2<u8>, progress_bar: ProgressBar, f: F) -> Result<Vec<usize>>
+fn apply<F>(green2: ArcArray2<u8>, f: F) -> Vec<usize>
 where
     F: Fn(ArrayView1<u8>) -> usize + Send + Sync,
 {
-    green2
-        .axis_iter(Axis(1))
-        .into_par_iter()
-        .map(|green_history| {
-            progress_bar.add(1)?;
-            Ok(f(green_history))
-        })
-        .collect()
+    green2.axis_iter(Axis(1)).into_par_iter().map(f).collect()
 }
 
 fn filter_detect_peak_no(green1: ArrayView1<u8>) -> usize {

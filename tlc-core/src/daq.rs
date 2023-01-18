@@ -1,32 +1,48 @@
 mod interp;
-mod raw;
+pub(crate) mod read;
 
 use std::path::PathBuf;
 
 use ndarray::ArcArray2;
 use serde::{Deserialize, Serialize};
 
-pub use interp::{interp, InterpId, InterpMethod, Interpolator};
-pub use raw::read_daq;
+use crate::{util::impl_eq_always_false, video::AreaId, CalNumId, StartIndexId};
+pub use interp::{InterpMethod, Interpolator};
 
-pub struct DaqData {
-    daq_meta: DaqMeta,
-    daq_raw: ArcArray2<f64>,
-    interpolator: Option<Interpolator>,
-}
-
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct DaqId {
-    pub daq_path: PathBuf,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq)]
+#[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq)]
 pub struct DaqMeta {
     pub nrows: usize,
     pub ncols: usize,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Hash)]
+#[salsa::input]
+pub(crate) struct DaqPathId {
+    #[return_ref]
+    pub path: PathBuf,
+}
+
+#[salsa::tracked]
+pub(crate) struct DaqDataId {
+    pub data: DaqData,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct DaqData(pub ArcArray2<f64>);
+
+#[salsa::tracked]
+pub(crate) struct InterpolatorId {
+    pub interpolater: Interpolator,
+}
+
+impl_eq_always_false!(DaqData, Interpolator);
+
+#[salsa::input]
+pub(crate) struct ThermocouplesId {
+    #[return_ref]
+    pub thermocouples: Vec<Thermocouple>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq)]
 pub struct Thermocouple {
     /// Column index of this thermocouple in the DAQ file.
     pub column_index: usize,
@@ -35,28 +51,42 @@ pub struct Thermocouple {
     pub position: (i32, i32),
 }
 
-impl DaqData {
-    pub fn new(daq_meta: DaqMeta, daq_raw: ArcArray2<f64>) -> DaqData {
-        DaqData {
-            daq_meta,
-            daq_raw,
-            interpolator: None,
-        }
-    }
+#[salsa::interned]
+pub(crate) struct InterpMethodId {
+    pub interp_method: InterpMethod,
+}
 
-    pub fn daq_meta(&self) -> DaqMeta {
-        self.daq_meta
-    }
+/// See `read_video`.
+#[salsa::tracked]
+pub(crate) fn read_daq(db: &dyn crate::Db, daq_path_id: DaqPathId) -> Result<DaqDataId, String> {
+    let daq_path = daq_path_id.path(db);
+    let daq_data = read::read_daq(daq_path).map_err(|e| e.to_string())?;
+    Ok(DaqDataId::new(db, DaqData(daq_data.into_shared())))
+}
 
-    pub fn daq_raw(&self) -> ArcArray2<f64> {
-        self.daq_raw.clone()
-    }
-
-    pub fn interpolator(&self) -> Option<&Interpolator> {
-        self.interpolator.as_ref()
-    }
-
-    pub fn set_interpolator(&mut self, interpolator: Option<Interpolator>) {
-        self.interpolator = interpolator;
-    }
+#[salsa::tracked]
+pub(crate) fn make_interpolator(
+    db: &dyn crate::Db,
+    daq_data_id: DaqDataId,
+    start_index_id: StartIndexId,
+    cal_num_id: CalNumId,
+    area_id: AreaId,
+    thermocouples_id: ThermocouplesId,
+    interp_method_id: InterpMethodId,
+) -> InterpolatorId {
+    let daq_data = daq_data_id.data(db).0;
+    let start_row = start_index_id.start_row(db);
+    let cal_num = cal_num_id.cal_num(db);
+    let area = area_id.area(db);
+    let interp_method = interp_method_id.interp_method(db);
+    let thermocouples = thermocouples_id.thermocouples(db);
+    let interpolator = Interpolator::new(
+        start_row,
+        cal_num,
+        area,
+        interp_method,
+        thermocouples,
+        daq_data.view(),
+    );
+    InterpolatorId::new(db, interpolator)
 }
