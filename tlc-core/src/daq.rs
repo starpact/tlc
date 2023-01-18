@@ -1,7 +1,5 @@
 mod interp;
 pub(crate) mod read;
-#[cfg(test)]
-mod tests;
 
 use std::path::PathBuf;
 
@@ -11,8 +9,15 @@ use serde::{Deserialize, Serialize};
 use crate::{util::impl_eq_always_false, video::AreaId, CalNumId, StartIndexId};
 pub use interp::{InterpMethod, Interpolator};
 
+#[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq)]
+pub struct DaqMeta {
+    pub nrows: usize,
+    pub ncols: usize,
+}
+
 #[salsa::input]
 pub(crate) struct DaqPathId {
+    #[return_ref]
     pub path: PathBuf,
 }
 
@@ -33,6 +38,7 @@ impl_eq_always_false!(DaqData, Interpolator);
 
 #[salsa::input]
 pub(crate) struct ThermocouplesId {
+    #[return_ref]
     pub thermocouples: Vec<Thermocouple>,
 }
 
@@ -79,7 +85,7 @@ pub(crate) fn make_interpolator(
         cal_num,
         area,
         interp_method,
-        &thermocouples,
+        thermocouples,
         daq_data.view(),
     );
     InterpolatorId::new(db, interpolator)

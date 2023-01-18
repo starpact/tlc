@@ -1,17 +1,20 @@
 use std::path::PathBuf;
 
 use super::*;
-use crate::{video::tests::*, Database, FilterMethod, Thermocouple};
+use crate::video::tests::*;
 
 #[ignore]
 #[tokio::test]
-async fn test_whole_process() {
+async fn test_whole_process_step_by_step() {
     crate::init();
     let mut db = Database::default();
 
+    db.set_name("test_case_1".to_owned());
+    db.set_save_root_dir(PathBuf::from("/tmp/tlc")).unwrap();
+
     let video_path = PathBuf::from(VIDEO_PATH_REAL);
     db.set_video_path(video_path.clone());
-    assert_eq!(db.get_video_path().unwrap(), video_path);
+    assert_eq!(db.get_video_path().unwrap(), &video_path);
     assert_eq!(db.get_video_shape().unwrap(), (1024, 1280));
     assert_eq!(db.get_video_frame_rate().unwrap(), 25);
     assert_eq!(db.get_video_nframes().unwrap(), 2444);
@@ -59,9 +62,33 @@ async fn test_whole_process() {
     assert_eq!(db.get_physical_param().unwrap(), _physical_param());
 
     db.set_iteration_method(_iteration_method());
-    assert_eq!(db.get_iteration_method().unwrap(), _iteration_method());
+    assert_eq!(db.get_iter_method().unwrap(), _iteration_method());
 
-    db.solve_nu().unwrap();
+    db.get_nu_data(None).unwrap();
+}
+
+#[test]
+fn test_all_onetime_auto() {
+    crate::init();
+    let mut db = Database::default();
+    db.set_name("test_case_2".to_owned());
+    db.set_save_root_dir(PathBuf::from("/tmp/tlc")).unwrap();
+    db.set_video_path(PathBuf::from(VIDEO_PATH_REAL));
+    db.set_daq_path(PathBuf::from(
+        "/home/yhj/Downloads/EXP/imp/daq/imp_20000_1.lvm",
+    ));
+    db.set_start_frame(81).unwrap_err();
+    db.set_start_row(151).unwrap_err();
+    db.synchronize_video_and_daq(81, 150).unwrap();
+    db.set_start_frame(80).unwrap();
+    db.set_start_row(150).unwrap();
+    db.set_area((660, 20, 340, 1248)).unwrap();
+    db.set_filter_method(_filter_method()).unwrap();
+    db.set_thermocouples(_thermocouples()).unwrap();
+    db.set_interp_method(InterpMethod::Horizontal).unwrap();
+    db.set_physical_param(_physical_param());
+    db.set_iteration_method(_iteration_method());
+    db.get_nu_data(None).unwrap();
 }
 
 fn _filter_method() -> FilterMethod {
@@ -107,8 +134,8 @@ fn _physical_param() -> PhysicalParam {
     }
 }
 
-fn _iteration_method() -> IterationMethod {
-    IterationMethod::NewtonDown {
+fn _iteration_method() -> IterMethod {
+    IterMethod::NewtonDown {
         h0: 50.0,
         max_iter_num: 10,
     }

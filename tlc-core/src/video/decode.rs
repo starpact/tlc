@@ -165,8 +165,6 @@ impl DecoderManagerInner {
             .skip(start_frame)
             .zip(green2.axis_iter_mut(Axis(0)))
             .try_for_each(|(packet, mut row)| -> Result<()> {
-                // Cancel point.
-                // This does not add noticeable overhead.
                 let mut decoder = self.decoder()?;
                 let dst_frame = decoder.decode(packet)?;
 

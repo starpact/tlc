@@ -1,15 +1,13 @@
-#[cfg(test)]
-mod tests;
-
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use ndarray::{ArcArray2, Array2};
 use salsa::{DebugWithDb, Snapshot};
-use tracing::debug;
+use tracing::trace;
 
 use crate::{
     daq::{make_interpolator, read_daq, DaqDataId, DaqPathId, InterpMethodId, ThermocouplesId},
-    solve::{solve_nu, IterMethodId, NuData, PyhsicalParamId},
+    post_processing::{nan_mean, save_nu_matrix, save_nu_plot, save_setting, Trunc, TruncId},
+    solve::{solve_nu, IterMethodId, Nu2Id, PhysicalParamId},
     video::{
         decode_all, decode_frame_base64, filter_detect_peak, filter_point, read_video, AreaId,
         FilterMethodId, PointId, VideoDataId, VideoPathId,
@@ -17,7 +15,7 @@ use crate::{
 };
 pub use crate::{
     daq::{InterpMethod, Thermocouple},
-    solve::{IterationMethod, PhysicalParam},
+    solve::{IterMethod, PhysicalParam},
     video::{FilterMethod, VideoMeta},
     Jar,
 };
@@ -26,8 +24,8 @@ pub use crate::{
 #[salsa::db(Jar)]
 pub struct Database {
     storage: salsa::Storage<Self>,
-    name: Option<String>,
-    save_root_dir: Option<PathBuf>,
+    name_id: Option<NameId>,
+    save_root_dir_id: Option<SaveRootDirId>,
     video_path_id: Option<VideoPathId>,
     daq_path_id: Option<DaqPathId>,
     start_index_id: Option<StartIndexId>,
@@ -35,7 +33,7 @@ pub struct Database {
     thermocouples_id: Option<ThermocouplesId>,
     filter_method_id: Option<FilterMethodId>,
     interp_method_id: Option<InterpMethodId>,
-    physical_param_id: Option<PyhsicalParamId>,
+    physical_param_id: Option<PhysicalParamId>,
     iter_method_id: Option<IterMethodId>,
 }
 
@@ -43,7 +41,7 @@ impl salsa::Database for Database {
     fn salsa_event(&self, event: salsa::Event) {
         match event.kind {
             salsa::EventKind::WillCheckCancellation => {}
-            _ => debug!("salsa_event: {:?}", event.debug(self)),
+            _ => trace!("salsa_event: {:?}", event.debug(self)),
         }
     }
 }
@@ -52,8 +50,8 @@ impl salsa::ParallelDatabase for Database {
     fn snapshot(&self) -> salsa::Snapshot<Self> {
         Snapshot::new(Self {
             storage: self.storage.snapshot(),
-            name: self.name.clone(),
-            save_root_dir: self.save_root_dir.clone(),
+            name_id: self.name_id,
+            save_root_dir_id: self.save_root_dir_id,
             video_path_id: self.video_path_id,
             daq_path_id: self.daq_path_id,
             start_index_id: self.start_index_id,
@@ -70,23 +68,27 @@ impl salsa::ParallelDatabase for Database {
 impl crate::Db for Database {}
 
 impl Database {
-    pub fn get_name(&self) -> Option<String> {
-        self.name.clone()
+    pub fn get_name(&self) -> Option<&str> {
+        Some(self.name_id?.name(self))
     }
 
     pub fn set_name(&mut self, name: String) {
-        self.name = Some(name);
+        self.name_id = Some(NameId::new(self, name));
     }
 
-    pub fn get_save_root_dir(&self) -> Option<PathBuf> {
-        self.save_root_dir.clone()
+    pub fn get_save_root_dir(&self) -> Option<&Path> {
+        Some(self.save_root_dir_id?.save_root_dir(self))
     }
 
-    pub fn set_save_root_dir(&mut self, save_root_dir: PathBuf) {
-        self.save_root_dir = Some(save_root_dir);
+    pub fn set_save_root_dir(&mut self, save_root_dir: PathBuf) -> Result<(), String> {
+        if !save_root_dir.exists() {
+            return Err(format!("{save_root_dir:?} not exists"));
+        }
+        self.save_root_dir_id = Some(SaveRootDirId::new(self, save_root_dir));
+        Ok(())
     }
 
-    pub fn get_video_path(&self) -> Option<PathBuf> {
+    pub fn get_video_path(&self) -> Option<&Path> {
         Some(self.video_path_id?.path(self))
     }
 
@@ -112,7 +114,7 @@ impl Database {
         Ok(self.video_data_id()?.shape(self))
     }
 
-    pub fn get_daq_path(&self) -> Option<PathBuf> {
+    pub fn get_daq_path(&self) -> Option<&Path> {
         Some(self.daq_path_id?.path(self))
     }
 
@@ -127,9 +129,7 @@ impl Database {
     }
 
     pub fn get_daq_data(&self) -> Result<ArcArray2<f64>, String> {
-        let daq_path_id = self.daq_path_id.ok_or("daq path unset".to_owned())?;
-        let daq_data = read_daq(self, daq_path_id)?.data(self).0;
-        Ok(daq_data)
+        Ok(read_daq(self, self.daq_path_id()?)?.data(self).0)
     }
 
     pub fn synchronize_video_and_daq(
@@ -261,7 +261,7 @@ impl Database {
         filter_point(self, green2_id, filter_method_id, area_id, point_id)
     }
 
-    pub fn get_thermocouples(&self) -> Option<Vec<Thermocouple>> {
+    pub fn get_thermocouples(&self) -> Option<&[Thermocouple]> {
         Some(self.thermocouples_id?.thermocouples(self))
     }
 
@@ -317,11 +317,11 @@ impl Database {
         Ok(interpolator.interp_frame(frame_index))
     }
 
-    pub fn get_iteration_method(&self) -> Option<IterationMethod> {
+    pub fn get_iter_method(&self) -> Option<IterMethod> {
         Some(self.iter_method_id?.iter_method(self))
     }
 
-    pub fn set_iteration_method(&mut self, iteration_method: IterationMethod) {
+    pub fn set_iteration_method(&mut self, iteration_method: IterMethod) {
         self.iter_method_id = Some(IterMethodId::new(self, iteration_method));
     }
 
@@ -330,51 +330,70 @@ impl Database {
     }
 
     pub fn set_physical_param(&mut self, physical_param: PhysicalParam) {
-        self.physical_param_id = Some(PyhsicalParamId::new(self, physical_param));
+        self.physical_param_id = Some(PhysicalParamId::new(self, physical_param));
     }
 
-    pub fn solve_nu(&self) -> Result<NuData, String> {
-        let video_data_id = self.video_data_id()?;
-        let daq_data_id = self.daq_data_id()?;
-        let start_index_id = self.start_index_id()?;
-        let cal_num_id = eval_cal_num(self, video_data_id, daq_data_id, start_index_id);
-        let area_id = self.area_id()?;
-        let green2_id = decode_all(self, video_data_id, start_index_id, cal_num_id, area_id)?;
-        let filter_method_id = self.filter_method_id()?;
-        let gmax_frame_indexes_id = filter_detect_peak(self, green2_id, filter_method_id);
-        let thermocouples_id = self.thermocouples_id()?;
-        let interp_method_id = self.interp_method_id()?;
-        let interpolator_id = make_interpolator(
+    pub fn get_nu_data(&self, trunc: Option<(f64, f64)>) -> Result<NuData, String> {
+        let nu2_id = self.nu2_id()?;
+        let name_id = self.name_id()?;
+        let save_root_dir_id = self.save_root_dir_id()?;
+
+        save_nu_matrix(self, name_id, save_root_dir_id, nu2_id)?;
+        save_setting(
             self,
-            daq_data_id,
-            start_index_id,
-            cal_num_id,
-            area_id,
-            thermocouples_id,
-            interp_method_id,
-        );
-        let physical_param_id = self.physical_param_id()?;
-        let iteration_method_id = self.iter_method_id()?;
-        let nu_data = solve_nu(
+            name_id,
+            save_root_dir_id,
+            self.video_path_id()?,
+            self.daq_path_id()?,
+            self.start_index_id()?,
+            self.area_id()?,
+            self.thermocouples_id()?,
+            self.filter_method_id()?,
+            self.interp_method_id()?,
+            self.iter_method_id()?,
+            self.physical_param_id()?,
+            nu2_id,
+        )?;
+        let nu_plot_base64 = save_nu_plot(
             self,
-            video_data_id,
-            gmax_frame_indexes_id,
-            interpolator_id,
-            physical_param_id,
-            iteration_method_id,
-        )
-        .nu_data(self);
-        Ok(nu_data)
+            name_id,
+            save_root_dir_id,
+            nu2_id,
+            TruncId::new(self, trunc.map(|(min, max)| Trunc(min, max))),
+        )?;
+
+        let nu2 = nu2_id.nu2(self).0;
+        let nu_nan_mean = nan_mean(nu2.view());
+        Ok(NuData {
+            nu2,
+            nu_nan_mean,
+            nu_plot_base64,
+        })
     }
 
-    pub(crate) fn video_data_id(&self) -> Result<VideoDataId, String> {
-        let video_path_id = self.video_path_id.ok_or("video path unset".to_owned())?;
-        read_video(self, video_path_id)
+    fn name_id(&self) -> Result<NameId, String> {
+        self.name_id.ok_or("name unset".to_owned())
+    }
+
+    fn save_root_dir_id(&self) -> Result<SaveRootDirId, String> {
+        self.save_root_dir_id
+            .ok_or("save root dir unset".to_owned())
+    }
+
+    fn video_path_id(&self) -> Result<VideoPathId, String> {
+        self.video_path_id.ok_or("video path unset".to_owned())
+    }
+
+    fn daq_path_id(&self) -> Result<DaqPathId, String> {
+        self.daq_path_id.ok_or("daq path unset".to_owned())
+    }
+
+    fn video_data_id(&self) -> Result<VideoDataId, String> {
+        read_video(self, self.video_path_id()?)
     }
 
     fn daq_data_id(&self) -> Result<DaqDataId, String> {
-        let daq_path_id = self.daq_path_id.ok_or("daq path unset".to_owned())?;
-        read_daq(self, daq_path_id)
+        read_daq(self, self.daq_path_id()?)
     }
 
     fn start_index_id(&self) -> Result<StartIndexId, String> {
@@ -400,13 +419,46 @@ impl Database {
             .ok_or("interp method unset".to_owned())
     }
 
-    fn physical_param_id(&self) -> Result<PyhsicalParamId, String> {
+    fn physical_param_id(&self) -> Result<PhysicalParamId, String> {
         self.physical_param_id
             .ok_or("physical param unset".to_owned())
     }
 
     fn iter_method_id(&self) -> Result<IterMethodId, String> {
         self.iter_method_id.ok_or("iter method unset".to_owned())
+    }
+
+    fn nu2_id(&self) -> Result<Nu2Id, String> {
+        let video_data_id = self.video_data_id()?;
+        let daq_data_id = self.daq_data_id()?;
+        let start_index_id = self.start_index_id()?;
+        let cal_num_id = eval_cal_num(self, video_data_id, daq_data_id, start_index_id);
+        let area_id = self.area_id()?;
+        let green2_id = decode_all(self, video_data_id, start_index_id, cal_num_id, area_id)?;
+        let filter_method_id = self.filter_method_id()?;
+        let gmax_frame_indexes_id = filter_detect_peak(self, green2_id, filter_method_id);
+        let thermocouples_id = self.thermocouples_id()?;
+        let interp_method_id = self.interp_method_id()?;
+        let interpolator_id = make_interpolator(
+            self,
+            daq_data_id,
+            start_index_id,
+            cal_num_id,
+            area_id,
+            thermocouples_id,
+            interp_method_id,
+        );
+        let physical_param_id = self.physical_param_id()?;
+        let iteration_method_id = self.iter_method_id()?;
+        let nu2_id = solve_nu(
+            self,
+            video_data_id,
+            gmax_frame_indexes_id,
+            interpolator_id,
+            physical_param_id,
+            iteration_method_id,
+        );
+        Ok(nu2_id)
     }
 }
 
@@ -417,6 +469,18 @@ pub async fn decode_frame(db: &Database, frame_index: usize) -> Result<String, S
     decode_frame_base64(decoder_manager, packets, frame_index)
         .await
         .map_err(|e| e.to_string())
+}
+
+#[salsa::input]
+pub(crate) struct NameId {
+    #[return_ref]
+    pub name: String,
+}
+
+#[salsa::input]
+pub(crate) struct SaveRootDirId {
+    #[return_ref]
+    pub save_root_dir: PathBuf,
 }
 
 #[salsa::interned]
@@ -442,4 +506,10 @@ pub(crate) fn eval_cal_num(
     let start_frame = start_index_id.start_frame(db);
     let start_row = start_index_id.start_row(db);
     CalNumId::new(db, (nframes - start_frame).min(nrows - start_row))
+}
+
+pub struct NuData {
+    pub nu2: ArcArray2<f64>,
+    pub nu_nan_mean: f64,
+    pub nu_plot_base64: String,
 }

@@ -4,11 +4,11 @@ mod tests;
 use std::f64::{consts::PI, NAN};
 
 use libm::erfc;
-use ndarray::{ArcArray2, Array2, ArrayView, Dimension};
+use ndarray::{ArcArray2, Array2};
 use packed_simd::{f64x4, Simd};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
-use tracing::{info, instrument};
+use tracing::instrument;
 
 use crate::{
     daq::{Interpolator, InterpolatorId},
@@ -39,28 +39,28 @@ impl std::hash::Hash for PhysicalParam {
 }
 
 #[salsa::interned]
-pub(crate) struct PyhsicalParamId {
+pub(crate) struct PhysicalParamId {
     pub physical_param: PhysicalParam,
 }
 
 /// All fields not NAN.
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq)]
-pub enum IterationMethod {
+pub enum IterMethod {
     NewtonTangent { h0: f64, max_iter_num: usize },
     NewtonDown { h0: f64, max_iter_num: usize },
 }
 
-impl Eq for IterationMethod {}
+impl Eq for IterMethod {}
 
-impl std::hash::Hash for IterationMethod {
+impl std::hash::Hash for IterMethod {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         match self {
-            IterationMethod::NewtonTangent { h0, max_iter_num } => {
+            IterMethod::NewtonTangent { h0, max_iter_num } => {
                 state.write_u8(0);
                 h0.to_bits().hash(state);
                 max_iter_num.hash(state);
             }
-            IterationMethod::NewtonDown { h0, max_iter_num } => {
+            IterMethod::NewtonDown { h0, max_iter_num } => {
                 state.write_u8(1);
                 h0.to_bits().hash(state);
                 max_iter_num.hash(state);
@@ -71,20 +71,17 @@ impl std::hash::Hash for IterationMethod {
 
 #[salsa::interned]
 pub(crate) struct IterMethodId {
-    pub iter_method: IterationMethod,
+    pub iter_method: IterMethod,
 }
 
 #[derive(Debug, Clone)]
-pub struct NuData {
-    pub nu2: ArcArray2<f64>,
-    pub nu_nan_mean: f64,
-}
+pub struct Nu2(pub ArcArray2<f64>);
 
-impl_eq_always_false!(NuData);
+impl_eq_always_false!(Nu2);
 
 #[salsa::tracked]
-pub(crate) struct NuDataId {
-    pub nu_data: NuData,
+pub(crate) struct Nu2Id {
+    pub nu2: Nu2,
 }
 
 #[salsa::tracked]
@@ -93,9 +90,9 @@ pub(crate) fn solve_nu(
     video_data_id: VideoDataId,
     gmax_frame_indexes_id: GmaxFrameIndexesId,
     interpolator_id: InterpolatorId,
-    physical_param_id: PyhsicalParamId,
+    physical_param_id: PhysicalParamId,
     iteration_method_id: IterMethodId,
-) -> NuDataId {
+) -> Nu2Id {
     let frame_rate = video_data_id.frame_rate(db);
     let gmax_frame_indexes = gmax_frame_indexes_id.gmax_frame_indexes(db);
     let interpolator = interpolator_id.interpolater(db);
@@ -110,9 +107,7 @@ pub(crate) fn solve_nu(
         frame_rate,
     )
     .into_shared();
-    let nu_nan_mean = nan_mean(nu2.view());
-
-    NuDataId::new(db, NuData { nu2, nu_nan_mean })
+    Nu2Id::new(db, Nu2(nu2))
 }
 
 #[derive(Clone, Copy)]
@@ -248,7 +243,7 @@ fn solve(
     gmax_frame_indexes: &[usize],
     interpolator: Interpolator,
     physical_param: PhysicalParam,
-    iteration_method: IterationMethod,
+    iteration_method: IterMethod,
     frame_rate: usize,
 ) -> Array2<f64> {
     let dt = 1.0 / frame_rate as f64;
@@ -267,14 +262,14 @@ fn solve(
         move |point_data: PointData, h| point_data.heat_transfer_equation(h, dt, k, a, tw);
 
     let nu1 = match iteration_method {
-        IterationMethod::NewtonTangent { h0, max_iter_num } => solve_core(
+        IterMethod::NewtonTangent { h0, max_iter_num } => solve_core(
             gmax_frame_indexes,
             interpolator,
             newtow_tangent(equation, h0, max_iter_num),
             characteristic_length,
             air_thermal_conductivity,
         ),
-        IterationMethod::NewtonDown { h0, max_iter_num } => solve_core(
+        IterMethod::NewtonDown { h0, max_iter_num } => solve_core(
             gmax_frame_indexes,
             interpolator,
             newtow_down(equation, h0, max_iter_num),
@@ -315,18 +310,4 @@ where
             h * characteristic_length / air_thermal_conductivity
         })
         .collect()
-}
-
-pub fn nan_mean<D: Dimension>(data: ArrayView<f64, D>) -> f64 {
-    let (sum, non_nan_cnt, cnt) = data.iter().fold((0., 0, 0), |(sum, non_nan_cnt, cnt), &x| {
-        if x.is_nan() {
-            (sum, non_nan_cnt, cnt + 1)
-        } else {
-            (sum + x, non_nan_cnt + 1, cnt + 1)
-        }
-    });
-
-    let nan_ratio = (cnt - non_nan_cnt) as f64 / cnt as f64;
-    info!(non_nan_cnt, cnt, nan_ratio);
-    sum / non_nan_cnt as f64
 }

@@ -7,6 +7,8 @@ mod daq;
 mod post_processing;
 mod solve;
 mod state;
+#[cfg(test)]
+mod tests;
 mod util;
 mod video;
 
@@ -15,10 +17,11 @@ use daq::{
     ThermocouplesId,
 };
 pub use daq::{InterpMethod, Thermocouple};
-use solve::{IterMethodId, NuDataId, PyhsicalParamId};
-pub use solve::{IterationMethod, PhysicalParam};
+use post_processing::TruncId;
+pub use solve::{IterMethod, PhysicalParam};
+use solve::{IterMethodId, Nu2Id, PhysicalParamId};
 pub use state::{decode_frame, Database};
-use state::{eval_cal_num, CalNumId, StartIndexId};
+use state::{eval_cal_num, CalNumId, NameId, SaveRootDirId, StartIndexId};
 use video::{
     decode_all, filter_detect_peak, filter_point, read_video, AreaId, FilterMethodId,
     GmaxFrameIndexesId, Green2Id, PointId, VideoDataId, VideoPathId,
@@ -31,11 +34,14 @@ pub struct Jar(
     VideoPathId,
     DaqPathId,
     ThermocouplesId,
+    TruncId,
     // interned
+    NameId,
+    SaveRootDirId,
     AreaId,
     FilterMethodId,
     InterpMethodId,
-    PyhsicalParamId,
+    PhysicalParamId,
     IterMethodId,
     StartIndexId,
     // tracked
@@ -46,7 +52,7 @@ pub struct Jar(
     DaqDataId,
     InterpolatorId,
     CalNumId,
-    NuDataId,
+    Nu2Id,
     // tracked function
     read_video,
     decode_all,
@@ -56,6 +62,9 @@ pub struct Jar(
     make_interpolator,
     eval_cal_num,
     solve::solve_nu,
+    post_processing::save_nu_matrix,
+    post_processing::save_setting,
+    post_processing::save_nu_plot,
 );
 
 pub trait Db: salsa::DbWithJar<Jar> {}

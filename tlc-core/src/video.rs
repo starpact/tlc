@@ -1,4 +1,3 @@
-mod controller;
 mod decode;
 mod detect_peak;
 mod read;
@@ -26,6 +25,7 @@ pub struct VideoMeta {
 
 #[salsa::input]
 pub(crate) struct VideoPathId {
+    #[return_ref]
     pub path: PathBuf,
 }
 

@@ -1,24 +1,221 @@
-use std::{
-    io::Write,
-    path::{Path, PathBuf},
-};
+use std::{io::Write, path::Path};
 
-use anyhow::Result;
 use image::ColorType::Rgb8;
-use ndarray::prelude::*;
+use ndarray::{prelude::*, ArrayView, Dimension};
 use once_cell::sync::OnceCell;
 use plotters::prelude::*;
 use serde::Serialize;
-use tracing::{instrument, warn};
+use tracing::{info, instrument};
 
-use crate::{FilterMethod, InterpMethod, IterationMethod, PhysicalParam, Thermocouple, VideoMeta};
+use crate::{
+    daq::{read_daq, DaqMeta, DaqPathId, InterpMethodId, ThermocouplesId},
+    solve::{IterMethodId, Nu2Id, PhysicalParamId},
+    state::{NameId, SaveRootDirId, StartIndexId},
+    video::{read_video, AreaId, FilterMethodId, VideoPathId},
+    FilterMethod, InterpMethod, IterMethod, PhysicalParam, Thermocouple, VideoMeta,
+};
 
-#[instrument(skip(area), fields(plot_path = ?plot_path.as_ref()), err)]
-pub fn draw_area<P: AsRef<Path>>(
-    plot_path: P,
-    area: ArrayView2<f64>,
-    edge_truncation: (f64, f64),
-) -> Result<String> {
+/// `SettingSnapshot` will be saved together with the results for later check.
+#[derive(Debug, Serialize)]
+struct Setting<'a> {
+    /// User defined unique name of this experiment setting.
+    pub name: &'a str,
+
+    /// Directory in which you save your data(parameters and results) of this experiment.
+    /// * setting_path: {root_dir}/setting_{expertiment_name}.json
+    /// * nu_matrix_path: {root_dir}/nu_matrix_{expertiment_name}.csv
+    /// * nu_plot_path: {root_dir}/nu_plot_{expertiment_name}.png
+    pub save_root_dir: &'a Path,
+
+    pub video_path: &'a Path,
+
+    pub video_meta: VideoMeta,
+
+    pub daq_path: &'a Path,
+
+    pub daq_meta: DaqMeta,
+
+    /// Start frame of video involved in the calculation.
+    /// Updated simultaneously with start_row.
+    pub start_frame: usize,
+
+    /// Start row of DAQ data involved in the calculation.
+    /// Updated simultaneously with start_frame.
+    pub start_row: usize,
+
+    /// Calculation area(top_left_y, top_left_x, area_height, area_width).
+    pub area: (u32, u32, u32, u32),
+
+    /// Columns in the csv file and positions of thermocouples.
+    pub thermocouples: &'a [Thermocouple],
+
+    /// Filter method of green matrix along the time axis.
+    pub filter_method: FilterMethod,
+
+    /// Interpolation method for calculating thermocouple temperature distribution.
+    pub interp_method: InterpMethod,
+
+    /// Iteration method for solving heat transfer equataion.
+    pub iter_method: IterMethod,
+
+    /// All physical parameters used when solving heat transfer equation.
+    pub physical_param: PhysicalParam,
+
+    /// Final result.
+    pub nu_nan_mean: f64,
+
+    /// Timestamp in milliseconds.
+    #[serde(with = "time::serde::rfc3339")]
+    pub saved_at: time::OffsetDateTime,
+}
+
+#[salsa::tracked]
+pub(crate) fn save_setting(
+    db: &dyn crate::Db,
+    name_id: NameId,
+    save_root_dir_id: SaveRootDirId,
+    video_path_id: VideoPathId,
+    daq_path_id: DaqPathId,
+    start_index_id: StartIndexId,
+    area_id: AreaId,
+    thermocouples_id: ThermocouplesId,
+    filter_method_id: FilterMethodId,
+    interp_method_id: InterpMethodId,
+    iter_method_id: IterMethodId,
+    physical_param_id: PhysicalParamId,
+    nu2_id: Nu2Id,
+) -> Result<(), String> {
+    let video_data_id = read_video(db, video_path_id)?;
+    let video_meta = VideoMeta {
+        frame_rate: video_data_id.frame_rate(db),
+        nframes: video_data_id.packets(db).0.len(),
+        shape: video_data_id.shape(db),
+    };
+    let daq_data = read_daq(db, daq_path_id)?.data(db).0;
+    let daq_meta = DaqMeta {
+        nrows: daq_data.nrows(),
+        ncols: daq_data.ncols(),
+    };
+
+    let nu2 = nu2_id.nu2(db).0;
+    let setting_path = save_root_dir_id
+        .save_root_dir(db)
+        .join(format!("{}_setting", name_id.name(db)))
+        .with_extension("json");
+
+    let setting = Setting {
+        name: name_id.name(db),
+        save_root_dir: save_root_dir_id.save_root_dir(db),
+        video_path: video_path_id.path(db),
+        video_meta,
+        daq_path: daq_path_id.path(db),
+        daq_meta,
+        start_frame: start_index_id.start_frame(db),
+        start_row: start_index_id.start_row(db),
+        area: area_id.area(db),
+        thermocouples: thermocouples_id.thermocouples(db),
+        filter_method: filter_method_id.filter_method(db),
+        interp_method: interp_method_id.interp_method(db),
+        iter_method: iter_method_id.iter_method(db),
+        physical_param: physical_param_id.physical_param(db),
+        saved_at: time::OffsetDateTime::now_local().unwrap(),
+        nu_nan_mean: nan_mean(nu2.view()),
+    };
+
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(setting_path)
+        .map_err(|e| e.to_string())?;
+    let buf = serde_json::to_string_pretty(&setting).map_err(|e| e.to_string())?;
+    file.write_all(buf.as_bytes()).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[salsa::tracked]
+pub(crate) fn save_nu_matrix(
+    db: &dyn crate::Db,
+    name_id: NameId,
+    save_root_dir_id: SaveRootDirId,
+    nu2_id: Nu2Id,
+) -> Result<(), String> {
+    let nu2 = nu2_id.nu2(db).0;
+    let nu_matrix_path = save_root_dir_id
+        .save_root_dir(db)
+        .join(format!("{}_nu_matrix", name_id.name(db)))
+        .with_extension("csv");
+    let mut wtr = csv::WriterBuilder::new()
+        .has_headers(false)
+        .from_path(nu_matrix_path)
+        .map_err(|e| e.to_string())?;
+    for row in nu2.rows() {
+        let v: Vec<_> = row.iter().map(|x| x.to_string()).collect();
+        wtr.write_record(&csv::StringRecord::from(v))
+            .map_err(|e| e.to_string())?
+    }
+    Ok(())
+}
+
+pub(crate) fn nan_mean<D: Dimension>(data: ArrayView<f64, D>) -> f64 {
+    let (sum, non_nan_cnt, cnt) = data.iter().fold((0., 0, 0), |(sum, non_nan_cnt, cnt), &x| {
+        if x.is_nan() {
+            (sum, non_nan_cnt, cnt + 1)
+        } else {
+            (sum + x, non_nan_cnt + 1, cnt + 1)
+        }
+    });
+    let nan_ratio = (cnt - non_nan_cnt) as f64 / cnt as f64;
+    info!(non_nan_cnt, cnt, nan_ratio);
+    sum / non_nan_cnt as f64
+}
+
+/// All fields not NAN.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Trunc(pub f64, pub f64);
+
+impl Eq for Trunc {}
+
+impl std::hash::Hash for Trunc {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.0.to_bits().hash(state);
+        self.1.to_bits().hash(state);
+    }
+}
+
+#[salsa::interned]
+pub(crate) struct TruncId {
+    trunc: Option<Trunc>,
+}
+
+#[salsa::tracked]
+pub(crate) fn save_nu_plot(
+    db: &dyn crate::Db,
+    name_id: NameId,
+    save_root_dir_id: SaveRootDirId,
+    nu2_id: Nu2Id,
+    trunc_id: TruncId,
+) -> Result<String, String> {
+    let nu2 = nu2_id.nu2(db).0;
+    let nu_nan_mean = nan_mean(nu2.view());
+    let trunc = match trunc_id.trunc(db) {
+        Some(Trunc(min, max)) => (min, max),
+        None => (nu_nan_mean * 0.6, nu_nan_mean * 2.0),
+    };
+    let buf = draw_area(nu2.view(), trunc).map_err(|e| e.to_string())?;
+    let nu_plot_path = save_root_dir_id
+        .save_root_dir(db)
+        .join(format!("{}_nu_plot", name_id.name(db)))
+        .with_extension("png");
+    let (h, w) = nu2.dim();
+    image::save_buffer(nu_plot_path, &buf, w as u32, h as u32, Rgb8).map_err(|e| e.to_string())?;
+    Ok(base64::encode(buf))
+}
+
+#[instrument(skip_all, fields(edge_truncation), err)]
+fn draw_area(area: ArrayView2<f64>, edge_truncation: (f64, f64)) -> anyhow::Result<Vec<u8>> {
+    static CELL: OnceCell<[[f64; 3]; 256]> = OnceCell::new();
+
     let (h, w) = area.dim();
     let mut buf = vec![0; h * w * 3];
     {
@@ -44,98 +241,8 @@ pub fn draw_area<P: AsRef<Path>>(
             }
         }
     }
-
-    let plot_path = plot_path.as_ref();
-    if plot_path.exists() {
-        warn!("overwrite: {plot_path:?}")
-    }
-    image::save_buffer(plot_path, &buf, w as u32, h as u32, Rgb8)?;
-    let plot_base64 = base64::encode(&buf);
-
-    Ok(plot_base64)
+    Ok(buf)
 }
-
-#[instrument(skip(data), fields(data_path = ?data_path.as_ref()), err)]
-pub fn save_matrix<P: AsRef<Path>>(data_path: P, data: ArrayView2<f64>) -> Result<()> {
-    let mut wtr = csv::WriterBuilder::new()
-        .has_headers(false)
-        .from_path(data_path.as_ref())?;
-
-    for row in data.rows() {
-        let v: Vec<_> = row.iter().map(|x| x.to_string()).collect();
-        wtr.write_record(&csv::StringRecord::from(v))?
-    }
-
-    Ok(())
-}
-
-/// `SettingSnapshot` will be saved together with the results for later check.
-#[derive(Debug, Serialize)]
-pub struct SettingSnapshot {
-    /// User defined unique name of this experiment setting.
-    pub name: String,
-
-    /// Directory in which you save your data(parameters and results) of this experiment.
-    /// * setting_path: {root_dir}/{expertiment_name}/setting.json
-    /// * nu_matrix_path: {root_dir}/{expertiment_name}/nu_matrix.csv
-    /// * plot_matrix_path: {root_dir}/{expertiment_name}/nu_plot.png
-    pub save_root_dir: PathBuf,
-
-    pub video_path: PathBuf,
-
-    pub video_meta: VideoMeta,
-
-    pub daq_path: PathBuf,
-
-    /// Start frame of video involved in the calculation.
-    /// Updated simultaneously with start_row.
-    pub start_frame: usize,
-
-    /// Start row of DAQ data involved in the calculation.
-    /// Updated simultaneously with start_frame.
-    pub start_row: usize,
-
-    /// Calculation area(top_left_y, top_left_x, area_height, area_width).
-    pub area: (u32, u32, u32, u32),
-
-    /// Storage info and positions of thermocouples.
-    pub thermocouples: Vec<Thermocouple>,
-
-    /// Filter method of green matrix along the time axis.
-    pub filter_method: FilterMethod,
-
-    /// Interpolation method of thermocouple temperature distribution.
-    pub interp_method: InterpMethod,
-
-    pub iteration_method: IterationMethod,
-
-    /// All physical parameters used when solving heat transfer equation.
-    pub physical_param: PhysicalParam,
-
-    /// Final result.
-    pub nu_nan_mean: f64,
-
-    /// Timestamp in milliseconds.
-    #[serde(with = "time::serde::rfc3339")]
-    pub completed_at: time::OffsetDateTime,
-}
-
-impl SettingSnapshot {
-    #[instrument(skip(self), fields(setting_path = ?setting_path.as_ref()), err)]
-    pub fn save<P: AsRef<Path>>(&self, setting_path: P) -> anyhow::Result<()> {
-        let mut file = std::fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .open(setting_path)?;
-        let buf = serde_json::to_string_pretty(&self)?;
-        file.write_all(buf.as_bytes())?;
-
-        Ok(())
-    }
-}
-
-static CELL: OnceCell<[[f64; 3]; 256]> = OnceCell::new();
 
 /// jet colormap from Matlab
 const JET: [[f64; 3]; 256] = [

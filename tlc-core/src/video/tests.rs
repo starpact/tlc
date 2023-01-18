@@ -13,7 +13,7 @@ async fn test_decode_frame() {
     assert!(db.get_video_path().is_none());
     let video_path = PathBuf::from("./testdata/almost_empty.avi");
     db.set_video_path(video_path.clone());
-    assert_eq!(db.get_video_path().unwrap(), video_path);
+    assert_eq!(db.get_video_path().unwrap(), &video_path);
 
     println!("first");
     assert_eq!(db.get_video_nframes().unwrap(), 3);
