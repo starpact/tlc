@@ -5,14 +5,14 @@ use ndarray::{prelude::*, ArrayView, Dimension};
 use once_cell::sync::OnceCell;
 use plotters::prelude::*;
 use serde::Serialize;
-use tracing::{info, instrument};
+use tracing::{info, info_span, instrument};
 
 use crate::{
     daq::{read_daq, DaqMeta, DaqPathId, InterpMethodId, ThermocouplesId},
     solve::{IterMethodId, Nu2Id, PhysicalParamId},
     state::{NameId, SaveRootDirId, StartIndexId},
-    video::{read_video, AreaId, FilterMethodId, VideoPathId},
-    FilterMethod, InterpMethod, IterMethod, PhysicalParam, Thermocouple, VideoMeta,
+    video::{read_video, AreaId, FilterMethodId, VideoMeta, VideoPathId},
+    FilterMethod, InterpMethod, IterMethod, PhysicalParam, Thermocouple,
 };
 
 /// `SettingSnapshot` will be saved together with the results for later check.
@@ -22,9 +22,9 @@ struct Setting<'a> {
     pub name: &'a str,
 
     /// Directory in which you save your data(parameters and results) of this experiment.
-    /// * setting_path: {root_dir}/setting_{expertiment_name}.json
-    /// * nu_matrix_path: {root_dir}/nu_matrix_{expertiment_name}.csv
-    /// * nu_plot_path: {root_dir}/nu_plot_{expertiment_name}.png
+    /// * setting_path: {root_dir}/{expertiment_name}_setting.json
+    /// * nu_matrix_path: {root_dir}/{expertiment_name}_nu_matrix.csv
+    /// * nu_plot_path: {root_dir}/{expertiment_name}_nu_plot.png
     pub save_root_dir: &'a Path,
 
     pub video_path: &'a Path,
@@ -85,6 +85,7 @@ pub(crate) fn save_setting(
     physical_param_id: PhysicalParamId,
     nu2_id: Nu2Id,
 ) -> Result<(), String> {
+    let _span = info_span!("save setting").entered();
     let video_data_id = read_video(db, video_path_id)?;
     let video_meta = VideoMeta {
         frame_rate: video_data_id.frame_rate(db),
@@ -140,6 +141,7 @@ pub(crate) fn save_nu_matrix(
     save_root_dir_id: SaveRootDirId,
     nu2_id: Nu2Id,
 ) -> Result<(), String> {
+    let _span = info_span!("save nu").entered();
     let nu2 = nu2_id.nu2(db).0;
     let nu_matrix_path = save_root_dir_id
         .save_root_dir(db)
@@ -166,7 +168,7 @@ pub(crate) fn nan_mean<D: Dimension>(data: ArrayView<f64, D>) -> f64 {
         }
     });
     let nan_ratio = (cnt - non_nan_cnt) as f64 / cnt as f64;
-    info!(non_nan_cnt, cnt, nan_ratio);
+    info!(cnt, nan_ratio);
     sum / non_nan_cnt as f64
 }
 
@@ -212,7 +214,7 @@ pub(crate) fn save_nu_plot(
     Ok(base64::encode(buf))
 }
 
-#[instrument(skip_all, fields(edge_truncation), err)]
+#[instrument(skip(area), err)]
 fn draw_area(area: ArrayView2<f64>, edge_truncation: (f64, f64)) -> anyhow::Result<Vec<u8>> {
     static CELL: OnceCell<[[f64; 3]; 256]> = OnceCell::new();
 

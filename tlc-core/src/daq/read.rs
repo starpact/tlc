@@ -8,17 +8,16 @@ use tracing::instrument;
 #[instrument(fields(daq_path = ?daq_path.as_ref()), err)]
 pub(crate) fn read_daq<P: AsRef<Path>>(daq_path: P) -> Result<Array2<f64>> {
     let daq_path = daq_path.as_ref();
-    let daq_raw = match daq_path
+    let daq_data = match daq_path
         .extension()
-        .ok_or_else(|| anyhow!("invalid daq path: {:?}", daq_path))?
+        .ok_or_else(|| anyhow!("invalid daq path: {daq_path:?}"))?
         .to_str()
     {
         Some("lvm") => read_daq_lvm(daq_path),
         Some("xlsx") => read_daq_excel(daq_path),
         _ => bail!("only .lvm and .xlsx are supported"),
     }?;
-
-    Ok(daq_raw)
+    Ok(daq_data)
 }
 
 fn read_daq_lvm(daq_path: &Path) -> Result<Array2<f64>> {
@@ -26,7 +25,7 @@ fn read_daq_lvm(daq_path: &Path) -> Result<Array2<f64>> {
         .has_headers(false)
         .delimiter(b'\t')
         .from_path(daq_path)
-        .map_err(|e| anyhow!("failed to read daq from {:?}: {}", daq_path, e))?;
+        .map_err(|e| anyhow!("failed to read daq from {daq_path:?}: {e}"))?;
 
     let mut h = 0;
     let mut daq = Vec::new();
@@ -35,19 +34,15 @@ fn read_daq_lvm(daq_path: &Path) -> Result<Array2<f64>> {
         for v in &row? {
             daq.push(
                 v.parse()
-                    .map_err(|e| anyhow!("failed to read daq from {:?}: {}", daq_path, e))?,
+                    .map_err(|e| anyhow!("failed to read daq from {daq_path:?}: {e}"))?,
             );
         }
     }
     let w = daq.len() / h;
     if h * w != daq.len() {
-        bail!(
-            "failed to read daq from {:?}: not all rows are equal in length",
-            daq_path
-        );
+        bail!("failed to read daq from {daq_path:?}: not all rows are equal in length");
     }
     let daq = Array2::from_shape_vec((h, w), daq)?;
-
     Ok(daq)
 }
 
@@ -64,11 +59,10 @@ fn read_daq_excel(daq_path: &Path) -> Result<Array2<f64>> {
             if let Some(daq_v) = daq_it.next() {
                 *daq_v = v
                     .get_float()
-                    .ok_or_else(|| anyhow!("invalid daq: {:?}", daq_path))?;
+                    .ok_or_else(|| anyhow!("invalid daq: {daq_path:?}"))?;
             }
         }
     }
-
     Ok(daq)
 }
 

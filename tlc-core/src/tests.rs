@@ -1,5 +1,7 @@
 use std::path::PathBuf;
 
+use salsa::ParallelDatabase;
+
 use super::*;
 use crate::video::tests::*;
 
@@ -9,18 +11,18 @@ async fn test_whole_process_step_by_step() {
     crate::init();
     let mut db = Database::default();
 
-    db.set_name("test_case_1".to_owned());
+    db.set_name("test_case_1".to_owned()).unwrap();
     db.set_save_root_dir(PathBuf::from("/tmp/tlc")).unwrap();
 
     let video_path = PathBuf::from(VIDEO_PATH_REAL);
-    db.set_video_path(video_path.clone());
+    db.set_video_path(video_path.clone()).unwrap();
     assert_eq!(db.get_video_path().unwrap(), &video_path);
     assert_eq!(db.get_video_shape().unwrap(), (1024, 1280));
     assert_eq!(db.get_video_frame_rate().unwrap(), 25);
     assert_eq!(db.get_video_nframes().unwrap(), 2444);
 
     let daq_path = PathBuf::from("/home/yhj/Downloads/EXP/imp/daq/imp_20000_1.lvm");
-    db.set_daq_path(daq_path.clone());
+    db.set_daq_path(daq_path.clone()).unwrap();
     assert_eq!(db.get_daq_path().unwrap(), daq_path);
     assert_eq!(db.get_daq_data().unwrap().dim(), (2589, 10));
 
@@ -37,11 +39,11 @@ async fn test_whole_process_step_by_step() {
     assert_eq!(db.get_start_row().unwrap(), 150);
 
     let _ = tokio::join!(
-        decode_frame(&db, 1),
-        decode_frame(&db, 100),
-        decode_frame(&db, 200),
-        decode_frame(&db, 300),
-        decode_frame(&db, 1380),
+        decode_frame_base64(db.snapshot(), 1),
+        decode_frame_base64(db.snapshot(), 100),
+        decode_frame_base64(db.snapshot(), 200),
+        decode_frame_base64(db.snapshot(), 300),
+        decode_frame_base64(db.snapshot(), 1380),
     );
 
     db.set_area((660, 20, 340, 1248)).unwrap();
@@ -58,10 +60,10 @@ async fn test_whole_process_step_by_step() {
     db.set_interp_method(InterpMethod::Horizontal).unwrap();
     assert_eq!(db.get_interp_method().unwrap(), InterpMethod::Horizontal);
 
-    db.set_physical_param(_physical_param());
+    db.set_physical_param(_physical_param()).unwrap();
     assert_eq!(db.get_physical_param().unwrap(), _physical_param());
 
-    db.set_iteration_method(_iteration_method());
+    db.set_iter_method(_iteration_method()).unwrap();
     assert_eq!(db.get_iter_method().unwrap(), _iteration_method());
 
     db.get_nu_data(None).unwrap();
@@ -71,12 +73,13 @@ async fn test_whole_process_step_by_step() {
 fn test_all_onetime_auto() {
     crate::init();
     let mut db = Database::default();
-    db.set_name("test_case_2".to_owned());
+    db.set_name("test_case_2".to_owned()).unwrap();
     db.set_save_root_dir(PathBuf::from("/tmp/tlc")).unwrap();
-    db.set_video_path(PathBuf::from(VIDEO_PATH_REAL));
+    db.set_video_path(PathBuf::from(VIDEO_PATH_REAL)).unwrap();
     db.set_daq_path(PathBuf::from(
         "/home/yhj/Downloads/EXP/imp/daq/imp_20000_1.lvm",
-    ));
+    ))
+    .unwrap();
     db.set_start_frame(81).unwrap_err();
     db.set_start_row(151).unwrap_err();
     db.synchronize_video_and_daq(81, 150).unwrap();
@@ -86,13 +89,16 @@ fn test_all_onetime_auto() {
     db.set_filter_method(_filter_method()).unwrap();
     db.set_thermocouples(_thermocouples()).unwrap();
     db.set_interp_method(InterpMethod::Horizontal).unwrap();
-    db.set_physical_param(_physical_param());
-    db.set_iteration_method(_iteration_method());
+    db.set_physical_param(_physical_param()).unwrap();
+    db.set_iter_method(_iteration_method()).unwrap();
+    db.get_nu_data(None).unwrap();
     db.get_nu_data(None).unwrap();
 }
 
 fn _filter_method() -> FilterMethod {
-    FilterMethod::Median { window_size: 10 }
+    FilterMethod::Wavelet {
+        threshold_ratio: 0.8,
+    }
 }
 
 fn _thermocouples() -> Vec<Thermocouple> {

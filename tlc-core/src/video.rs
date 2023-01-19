@@ -16,7 +16,7 @@ pub use decode::DecoderManager;
 pub use detect_peak::FilterMethod;
 
 #[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq)]
-pub struct VideoMeta {
+pub(crate) struct VideoMeta {
     pub frame_rate: usize,
     pub nframes: usize,
     /// (video_height, video_width)

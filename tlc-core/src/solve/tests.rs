@@ -66,8 +66,8 @@ impl PointData<'_> {
 }
 
 fn new_temps() -> Array1<f64> {
-    let daq_raw = daq::read::read_daq("./testdata/imp_20000_1.lvm").unwrap();
-    daq_raw.column(3).to_owned()
+    let daq_data = daq::read::read_daq("./testdata/imp_20000_1.lvm").unwrap();
+    daq_data.column(3).to_owned()
 }
 
 const I: (f64, f64, f64, f64, f64) = (100.0, 0.04, 0.19, 1.091e-7, 35.48);

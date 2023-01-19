@@ -32,14 +32,14 @@ impl Interpolator {
         area: (u32, u32, u32, u32),
         interp_method: InterpMethod,
         thermocouples: &[Thermocouple],
-        daq_raw: ArrayView2<f64>,
+        daq_data: ArrayView2<f64>,
     ) -> Interpolator {
         assert!(thermocouples
             .iter()
-            .all(|tc| tc.column_index < daq_raw.ncols()));
+            .all(|tc| tc.column_index < daq_data.ncols()));
 
         let mut temp2 = Array2::zeros((thermocouples.len(), cal_num));
-        daq_raw
+        daq_data
             .rows()
             .into_iter()
             .skip(start_row)
@@ -269,7 +269,7 @@ mod test {
 
     #[test]
     fn test_interp() {
-        for (interp_method, thermocouples, daq_raw, frame0, frame1) in [
+        for (interp_method, thermocouples, daq_data, frame0, frame1) in [
             (
                 Horizontal,
                 &[
@@ -461,7 +461,7 @@ mod test {
                 (9, 9, 5, 5),
                 interp_method,
                 &thermocouples,
-                daq_raw.view(),
+                daq_data.view(),
             );
             assert_relative_eq!(interpolator.interp_frame(0), frame0);
             assert_relative_eq!(interpolator.interp_frame(1), frame1);

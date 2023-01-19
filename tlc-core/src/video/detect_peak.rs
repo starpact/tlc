@@ -39,13 +39,34 @@ impl std::hash::Hash for FilterMethod {
 pub fn filter_detect_peak(green2: ArcArray2<u8>, filter_method: FilterMethod) -> Vec<usize> {
     use FilterMethod::*;
     match filter_method {
-        No => apply(green2, filter_detect_peak_no),
-        Median { window_size } => {
-            apply(green2, move |g1| filter_detect_peak_median(g1, window_size))
-        }
-        Wavelet { threshold_ratio } => apply(green2, move |g1| {
-            filter_detect_peak_wavelet(g1, threshold_ratio)
+        No => apply(green2, |green1| {
+            green1
+                .into_iter()
+                .enumerate()
+                .max_by_key(|(_, &g)| g)
+                .unwrap()
+                .0
         }),
+        Median { window_size } => apply(green2, move |green1| {
+            let mut filter = Filter::new(window_size);
+            green1
+                .into_iter()
+                .enumerate()
+                .max_by_key(|(_, &g)| filter.consume(g))
+                .unwrap()
+                .0
+        }),
+        Wavelet { threshold_ratio } => {
+            let wavelet = db8_wavelet();
+            apply(green2, move |green1| {
+                wavelet_transform(green1, &wavelet, threshold_ratio)
+                    .into_iter()
+                    .enumerate()
+                    .max_by_key(|&(_, g)| g as u8)
+                    .unwrap()
+                    .0
+            })
+        }
     }
 }
 
@@ -69,9 +90,10 @@ pub fn filter_point(
     let temp_history = match filter_method {
         FilterMethod::No => green1.to_vec(),
         FilterMethod::Median { window_size } => filter_median(green1, window_size),
-        FilterMethod::Wavelet { threshold_ratio } => filter_wavelet(green1, threshold_ratio),
+        FilterMethod::Wavelet { threshold_ratio } => {
+            filter_wavelet(green1, &db8_wavelet(), threshold_ratio)
+        }
     };
-
     Ok(temp_history)
 }
 
@@ -82,50 +104,25 @@ where
     green2.axis_iter(Axis(1)).into_par_iter().map(f).collect()
 }
 
-fn filter_detect_peak_no(green1: ArrayView1<u8>) -> usize {
-    green1
-        .into_iter()
-        .enumerate()
-        .max_by_key(|(_, &g)| g)
-        .unwrap()
-        .0
-}
-
-fn filter_detect_peak_median(green1: ArrayView1<u8>, window_size: usize) -> usize {
-    let mut filter = Filter::new(window_size);
-    green1
-        .into_iter()
-        .enumerate()
-        .max_by_key(|(_, &g)| filter.consume(g))
-        .unwrap()
-        .0
-}
-
-fn filter_detect_peak_wavelet(green1: ArrayView1<u8>, threshold_ratio: f64) -> usize {
-    wavelet(green1, threshold_ratio)
-        .into_iter()
-        .enumerate()
-        .max_by_key(|&(_, g)| g as u8)
-        .unwrap()
-        .0
-}
-
 fn filter_median(green1: ArrayView1<u8>, window_size: usize) -> Vec<u8> {
     let mut filter = Filter::new(window_size);
     green1.into_iter().map(|&g| filter.consume(g)).collect()
 }
 
-fn filter_wavelet(green1: ArrayView1<u8>, threshold_ratio: f64) -> Vec<u8> {
-    wavelet(green1, threshold_ratio)
+fn filter_wavelet(green1: ArrayView1<u8>, wavelet: &Wavelet<f64>, threshold_ratio: f64) -> Vec<u8> {
+    wavelet_transform(green1, wavelet, threshold_ratio)
         .into_iter()
         .map(|x| x as u8)
         .collect()
 }
 
 /// Refer to [pywavelets](https://pywavelets.readthedocs.io/en/latest/ref).
-fn wavelet(green1: ArrayView1<u8>, threshold_ratio: f64) -> Vec<f64> {
+fn wavelet_transform(
+    green1: ArrayView1<u8>,
+    wavelet: &Wavelet<f64>,
+    threshold_ratio: f64,
+) -> Vec<f64> {
     let data_len = green1.len();
-    let wavelet = db8();
 
     let max_level = ((data_len / (wavelet.length - 1)) as f64).log2() as usize;
     let level_2 = 1 << max_level;
@@ -136,7 +133,7 @@ fn wavelet(green1: ArrayView1<u8>, threshold_ratio: f64) -> Vec<f64> {
     transform(
         &mut green1f[..filter_len],
         Operation::Forward,
-        &wavelet,
+        wavelet,
         max_level,
     );
 
@@ -155,17 +152,15 @@ fn wavelet(green1: ArrayView1<u8>, threshold_ratio: f64) -> Vec<f64> {
     transform(
         &mut green1f[..filter_len],
         Operation::Inverse,
-        &wavelet,
+        wavelet,
         max_level,
     );
-
     green1f
 }
 
 /// Refer to [Daubechies 8](http://wavelets.pybytes.com/wavelet/db8)。
 /// Horizontal flip.
-#[inline]
-fn db8() -> Wavelet<f64> {
+fn db8_wavelet() -> Wavelet<f64> {
     #[rustfmt::skip]
     let lo = vec![
         -0.00011747678400228192, 0.0006754494059985568,
@@ -188,7 +183,6 @@ fn db8() -> Wavelet<f64> {
         0.00487035299301066,     -0.0003917403729959771,
         -0.0006754494059985568,  -0.00011747678400228192,
     ];
-
     Wavelet {
         length: lo.len(),
         offset: 0,

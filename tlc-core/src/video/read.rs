@@ -5,14 +5,16 @@ use ffmpeg::codec;
 pub use ffmpeg::codec::{packet::Packet, Parameters};
 use tracing::instrument;
 
-use crate::VideoMeta;
+use super::VideoMeta;
 
 /// `read_video` will return after finished reading video metadata, which just takes
 /// several milliseconds. Then packets can be received from the returned channel
 /// asynchronously.
 /// `progress_bar` can be used to observe the progress and cancel it.
 #[instrument(fields(video_path), err)]
-pub fn read_video<P: AsRef<Path>>(video_path: P) -> Result<(VideoMeta, Parameters, Vec<Packet>)> {
+pub(crate) fn read_video<P: AsRef<Path>>(
+    video_path: P,
+) -> Result<(VideoMeta, Parameters, Vec<Packet>)> {
     let video_path = video_path.as_ref().to_owned();
     let mut input = ffmpeg::format::input(&video_path)?;
     let video_stream = input

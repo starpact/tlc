@@ -20,13 +20,13 @@ pub use daq::{InterpMethod, Thermocouple};
 use post_processing::TruncId;
 pub use solve::{IterMethod, PhysicalParam};
 use solve::{IterMethodId, Nu2Id, PhysicalParamId};
-pub use state::{decode_frame, Database};
+pub use state::{decode_frame_base64, Database, NuData};
 use state::{eval_cal_num, CalNumId, NameId, SaveRootDirId, StartIndexId};
+pub use video::FilterMethod;
 use video::{
     decode_all, filter_detect_peak, filter_point, read_video, AreaId, FilterMethodId,
     GmaxFrameIndexesId, Green2Id, PointId, VideoDataId, VideoPathId,
 };
-pub use video::{FilterMethod, VideoMeta};
 
 #[salsa::jar(db = Db)]
 pub struct Jar(

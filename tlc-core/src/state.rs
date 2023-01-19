@@ -2,21 +2,20 @@ use std::path::{Path, PathBuf};
 
 use ndarray::{ArcArray2, Array2};
 use salsa::{DebugWithDb, Snapshot};
-use tracing::trace;
+use serde::Serialize;
+use tracing::{instrument, trace};
 
 use crate::{
-    daq::{make_interpolator, read_daq, DaqDataId, DaqPathId, InterpMethodId, ThermocouplesId},
+    daq::{
+        make_interpolator, read_daq, DaqDataId, DaqPathId, InterpMethod, InterpMethodId,
+        Thermocouple, ThermocouplesId,
+    },
     post_processing::{nan_mean, save_nu_matrix, save_nu_plot, save_setting, Trunc, TruncId},
-    solve::{solve_nu, IterMethodId, Nu2Id, PhysicalParamId},
+    solve::{solve_nu, IterMethod, IterMethodId, Nu2Id, PhysicalParam, PhysicalParamId},
     video::{
-        decode_all, decode_frame_base64, filter_detect_peak, filter_point, read_video, AreaId,
+        self, decode_all, filter_detect_peak, filter_point, read_video, AreaId, FilterMethod,
         FilterMethodId, PointId, VideoDataId, VideoPathId,
     },
-};
-pub use crate::{
-    daq::{InterpMethod, Thermocouple},
-    solve::{IterMethod, PhysicalParam},
-    video::{FilterMethod, VideoMeta},
     Jar,
 };
 
@@ -67,19 +66,26 @@ impl salsa::ParallelDatabase for Database {
 
 impl crate::Db for Database {}
 
+// Operation setting an input of some heavy computations will cause blocking.
 impl Database {
     pub fn get_name(&self) -> Option<&str> {
         Some(self.name_id?.name(self))
     }
 
-    pub fn set_name(&mut self, name: String) {
+    #[instrument(level = "trace", skip(self), err)]
+    pub fn set_name(&mut self, name: String) -> Result<(), String> {
+        if name.is_empty() {
+            return Err("empty name".to_owned());
+        }
         self.name_id = Some(NameId::new(self, name));
+        Ok(())
     }
 
     pub fn get_save_root_dir(&self) -> Option<&Path> {
         Some(self.save_root_dir_id?.save_root_dir(self))
     }
 
+    #[instrument(level = "trace", skip(self), err)]
     pub fn set_save_root_dir(&mut self, save_root_dir: PathBuf) -> Result<(), String> {
         if !save_root_dir.exists() {
             return Err(format!("{save_root_dir:?} not exists"));
@@ -92,7 +98,11 @@ impl Database {
         Some(self.video_path_id?.path(self))
     }
 
-    pub fn set_video_path(&mut self, video_path: PathBuf) {
+    #[instrument(level = "trace", skip(self), err)]
+    pub fn set_video_path(&mut self, video_path: PathBuf) -> Result<(), String> {
+        if !video_path.exists() {
+            return Err(format!("{video_path:?} not exists"));
+        }
         self.start_index_id = None;
         match self.video_path_id {
             Some(video_path_id) => {
@@ -100,6 +110,7 @@ impl Database {
             }
             None => self.video_path_id = Some(VideoPathId::new(self, video_path)),
         }
+        Ok(())
     }
 
     pub fn get_video_nframes(&self) -> Result<usize, String> {
@@ -118,7 +129,11 @@ impl Database {
         Some(self.daq_path_id?.path(self))
     }
 
-    pub fn set_daq_path(&mut self, daq_path: PathBuf) {
+    #[instrument(level = "trace", skip(self), err)]
+    pub fn set_daq_path(&mut self, daq_path: PathBuf) -> Result<(), String> {
+        if !daq_path.exists() {
+            return Err(format!("{daq_path:?} not exists"));
+        }
         self.start_index_id = None;
         match self.daq_path_id {
             Some(daq_path_id) => {
@@ -126,12 +141,14 @@ impl Database {
             }
             None => self.daq_path_id = Some(DaqPathId::new(self, daq_path)),
         }
+        Ok(())
     }
 
     pub fn get_daq_data(&self) -> Result<ArcArray2<f64>, String> {
         Ok(read_daq(self, self.daq_path_id()?)?.data(self).0)
     }
 
+    #[instrument(level = "trace", skip(self), err)]
     pub fn synchronize_video_and_daq(
         &mut self,
         start_frame: usize,
@@ -155,6 +172,7 @@ impl Database {
         Ok(self.start_index_id()?.start_frame(self))
     }
 
+    #[instrument(level = "trace", skip(self), err)]
     pub fn set_start_frame(&mut self, start_frame: usize) -> Result<(), String> {
         let nframes = self.get_video_nframes()?;
         if start_frame >= nframes {
@@ -180,6 +198,7 @@ impl Database {
         Ok(self.start_index_id()?.start_row(self))
     }
 
+    #[instrument(level = "trace", skip(self), err)]
     pub fn set_start_row(&mut self, start_row: usize) -> Result<(), String> {
         let nrows = self.get_daq_data()?.nrows();
         if start_row >= nrows {
@@ -205,6 +224,7 @@ impl Database {
         Some(self.area_id?.area(self))
     }
 
+    #[instrument(level = "trace", skip(self), err)]
     pub fn set_area(&mut self, area: (u32, u32, u32, u32)) -> Result<(), String> {
         let (h, w) = self.get_video_shape()?;
         let (tl_y, tl_x, cal_h, cal_w) = area;
@@ -226,6 +246,7 @@ impl Database {
         Some(self.filter_method_id?.filter_method(self))
     }
 
+    #[instrument(level = "trace", skip(self), err)]
     pub fn set_filter_method(&mut self, filter_method: FilterMethod) -> Result<(), String> {
         match filter_method {
             FilterMethod::No => {}
@@ -249,6 +270,7 @@ impl Database {
         Ok(())
     }
 
+    #[instrument(level = "trace", skip(self), err)]
     pub fn filter_point(&self, point: (usize, usize)) -> Result<Vec<u8>, String> {
         let video_data_id = self.video_data_id()?;
         let daq_data_id = self.daq_data_id()?;
@@ -265,6 +287,7 @@ impl Database {
         Some(self.thermocouples_id?.thermocouples(self))
     }
 
+    #[instrument(level = "trace", skip(self), err)]
     pub fn set_thermocouples(&mut self, thermocouples: Vec<Thermocouple>) -> Result<(), String> {
         let daq_ncols = self.get_daq_data()?.ncols();
         for thermocouple in &thermocouples {
@@ -283,6 +306,7 @@ impl Database {
         Some(self.interp_method_id?.interp_method(self))
     }
 
+    #[instrument(level = "trace", skip(self), err)]
     pub fn set_interp_method(&mut self, interp_method: InterpMethod) -> Result<(), String> {
         let thermocouples = self
             .get_thermocouples()
@@ -296,6 +320,7 @@ impl Database {
         Ok(())
     }
 
+    #[instrument(level = "trace", skip(self), err)]
     pub fn interp_frame(&self, frame_index: usize) -> Result<Array2<f64>, String> {
         let video_data_id = self.video_data_id()?;
         let daq_data_id = self.daq_data_id()?;
@@ -321,18 +346,38 @@ impl Database {
         Some(self.iter_method_id?.iter_method(self))
     }
 
-    pub fn set_iteration_method(&mut self, iteration_method: IterMethod) {
-        self.iter_method_id = Some(IterMethodId::new(self, iteration_method));
+    #[instrument(level = "trace", skip(self), err)]
+    pub fn set_iter_method(&mut self, iter_method: IterMethod) -> Result<(), String> {
+        match iter_method {
+            IterMethod::NewtonTangent { h0, .. } | IterMethod::NewtonDown { h0, .. }
+                if h0.is_nan() =>
+            {
+                return Err("invalid iter method: {iter_method:?}".to_owned())
+            }
+            _ => {}
+        }
+        self.iter_method_id = Some(IterMethodId::new(self, iter_method));
+        Ok(())
     }
 
     pub fn get_physical_param(&self) -> Option<PhysicalParam> {
         Some(self.physical_param_id?.physical_param(self))
     }
 
-    pub fn set_physical_param(&mut self, physical_param: PhysicalParam) {
+    pub fn set_physical_param(&mut self, physical_param: PhysicalParam) -> Result<(), String> {
+        if physical_param.gmax_temperature.is_nan()
+            || physical_param.characteristic_length.is_nan()
+            || physical_param.air_thermal_conductivity.is_nan()
+            || physical_param.solid_thermal_diffusivity.is_nan()
+            || physical_param.solid_thermal_conductivity.is_nan()
+        {
+            return Err(format!("invalid physical param: {physical_param:?}"));
+        }
         self.physical_param_id = Some(PhysicalParamId::new(self, physical_param));
+        Ok(())
     }
 
+    #[instrument(level = "trace", skip(self), err)]
     pub fn get_nu_data(&self, trunc: Option<(f64, f64)>) -> Result<NuData, String> {
         let nu2_id = self.nu2_id()?;
         let name_id = self.name_id()?;
@@ -462,11 +507,14 @@ impl Database {
     }
 }
 
-pub async fn decode_frame(db: &Database, frame_index: usize) -> Result<String, String> {
+pub async fn decode_frame_base64(
+    db: Snapshot<Database>,
+    frame_index: usize,
+) -> Result<String, String> {
     let video_data_id = db.video_data_id()?;
-    let decoder_manager = video_data_id.decoder_manager(db);
-    let packets = video_data_id.packets(db).0;
-    decode_frame_base64(decoder_manager, packets, frame_index)
+    let decoder_manager = video_data_id.decoder_manager(&*db);
+    let packets = video_data_id.packets(&*db).0;
+    video::decode_frame_base64(decoder_manager, packets, frame_index)
         .await
         .map_err(|e| e.to_string())
 }
@@ -508,6 +556,7 @@ pub(crate) fn eval_cal_num(
     CalNumId::new(db, (nframes - start_frame).min(nrows - start_row))
 }
 
+#[derive(Debug, Serialize)]
 pub struct NuData {
     pub nu2: ArcArray2<f64>,
     pub nu_nan_mean: f64,
