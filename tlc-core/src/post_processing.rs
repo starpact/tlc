@@ -1,23 +1,20 @@
 use std::{io::Write, path::Path};
 
 use image::ColorType::Rgb8;
-use ndarray::{prelude::*, ArrayView, Dimension};
+use ndarray::prelude::*;
 use once_cell::sync::OnceCell;
 use plotters::prelude::*;
 use serde::Serialize;
-use tracing::{info, info_span, instrument};
+use tracing::{info, instrument};
 
 use crate::{
-    daq::{read_daq, DaqMeta, DaqPathId, InterpMethodId, ThermocouplesId},
-    solve::{IterMethodId, Nu2Id, PhysicalParamId},
-    state::{NameId, SaveRootDirId, StartIndexId},
-    video::{read_video, AreaId, FilterMethodId, VideoMeta, VideoPathId},
-    FilterMethod, InterpMethod, IterMethod, PhysicalParam, Thermocouple,
+    daq::DaqMeta, video::VideoMeta, FilterMethod, InterpMethod, IterMethod, PhysicalParam,
+    Thermocouple,
 };
 
 /// `SettingSnapshot` will be saved together with the results for later check.
 #[derive(Debug, Serialize)]
-struct Setting<'a> {
+pub(crate) struct Setting<'a> {
     /// User defined unique name of this experiment setting.
     pub name: &'a str,
 
@@ -69,60 +66,11 @@ struct Setting<'a> {
     pub saved_at: time::OffsetDateTime,
 }
 
-#[salsa::tracked]
-pub(crate) fn save_setting(
-    db: &dyn crate::Db,
-    name_id: NameId,
-    save_root_dir_id: SaveRootDirId,
-    video_path_id: VideoPathId,
-    daq_path_id: DaqPathId,
-    start_index_id: StartIndexId,
-    area_id: AreaId,
-    thermocouples_id: ThermocouplesId,
-    filter_method_id: FilterMethodId,
-    interp_method_id: InterpMethodId,
-    iter_method_id: IterMethodId,
-    physical_param_id: PhysicalParamId,
-    nu2_id: Nu2Id,
+#[instrument(skip_all, err)]
+pub(crate) fn save_setting<P: AsRef<Path>>(
+    setting: Setting,
+    setting_path: P,
 ) -> Result<(), String> {
-    let _span = info_span!("save setting").entered();
-    let video_data_id = read_video(db, video_path_id)?;
-    let video_meta = VideoMeta {
-        frame_rate: video_data_id.frame_rate(db),
-        nframes: video_data_id.packets(db).0.len(),
-        shape: video_data_id.shape(db),
-    };
-    let daq_data = read_daq(db, daq_path_id)?.data(db).0;
-    let daq_meta = DaqMeta {
-        nrows: daq_data.nrows(),
-        ncols: daq_data.ncols(),
-    };
-
-    let nu2 = nu2_id.nu2(db).0;
-    let setting_path = save_root_dir_id
-        .save_root_dir(db)
-        .join(format!("{}_setting", name_id.name(db)))
-        .with_extension("json");
-
-    let setting = Setting {
-        name: name_id.name(db),
-        save_root_dir: save_root_dir_id.save_root_dir(db),
-        video_path: video_path_id.path(db),
-        video_meta,
-        daq_path: daq_path_id.path(db),
-        daq_meta,
-        start_frame: start_index_id.start_frame(db),
-        start_row: start_index_id.start_row(db),
-        area: area_id.area(db),
-        thermocouples: thermocouples_id.thermocouples(db),
-        filter_method: filter_method_id.filter_method(db),
-        interp_method: interp_method_id.interp_method(db),
-        iter_method: iter_method_id.iter_method(db),
-        physical_param: physical_param_id.physical_param(db),
-        saved_at: time::OffsetDateTime::now_local().unwrap(),
-        nu_nan_mean: nan_mean(nu2.view()),
-    };
-
     let mut file = std::fs::OpenOptions::new()
         .write(true)
         .create(true)
@@ -134,32 +82,22 @@ pub(crate) fn save_setting(
     Ok(())
 }
 
-#[salsa::tracked]
-pub(crate) fn save_nu_matrix(
-    db: &dyn crate::Db,
-    name_id: NameId,
-    save_root_dir_id: SaveRootDirId,
-    nu2_id: Nu2Id,
-) -> Result<(), String> {
-    let _span = info_span!("save nu").entered();
-    let nu2 = nu2_id.nu2(db).0;
-    let nu_matrix_path = save_root_dir_id
-        .save_root_dir(db)
-        .join(format!("{}_nu_matrix", name_id.name(db)))
-        .with_extension("csv");
+#[instrument(skip_all, err)]
+pub(crate) fn save_nu_matrix<P: AsRef<Path>>(
+    nu2: ArrayView2<f64>,
+    nu_matrix_path: P,
+) -> anyhow::Result<()> {
     let mut wtr = csv::WriterBuilder::new()
         .has_headers(false)
-        .from_path(nu_matrix_path)
-        .map_err(|e| e.to_string())?;
+        .from_path(nu_matrix_path)?;
     for row in nu2.rows() {
         let v: Vec<_> = row.iter().map(|x| x.to_string()).collect();
-        wtr.write_record(&csv::StringRecord::from(v))
-            .map_err(|e| e.to_string())?
+        wtr.write_record(&csv::StringRecord::from(v))?;
     }
     Ok(())
 }
 
-pub(crate) fn nan_mean<D: Dimension>(data: ArrayView<f64, D>) -> f64 {
+pub(crate) fn nan_mean(data: ArrayView2<f64>) -> f64 {
     let (sum, non_nan_cnt, cnt) = data.iter().fold((0., 0, 0), |(sum, non_nan_cnt, cnt), &x| {
         if x.is_nan() {
             (sum, non_nan_cnt, cnt + 1)
@@ -172,43 +110,15 @@ pub(crate) fn nan_mean<D: Dimension>(data: ArrayView<f64, D>) -> f64 {
     sum / non_nan_cnt as f64
 }
 
-/// All fields not NAN.
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct Trunc(pub f64, pub f64);
-
-impl Eq for Trunc {}
-
-impl std::hash::Hash for Trunc {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.0.to_bits().hash(state);
-        self.1.to_bits().hash(state);
-    }
-}
-
-#[salsa::interned]
-pub(crate) struct TruncId {
-    trunc: Option<Trunc>,
-}
-
-#[salsa::tracked]
-pub(crate) fn save_nu_plot(
-    db: &dyn crate::Db,
-    name_id: NameId,
-    save_root_dir_id: SaveRootDirId,
-    nu2_id: Nu2Id,
-    trunc_id: TruncId,
+#[instrument(skip_all, err)]
+pub(crate) fn draw_nu_plot_and_save<P: AsRef<Path>>(
+    nu2: ArrayView2<f64>,
+    trunc: Option<(f64, f64)>,
+    nu_plot_path: P,
 ) -> Result<String, String> {
-    let nu2 = nu2_id.nu2(db).0;
     let nu_nan_mean = nan_mean(nu2.view());
-    let trunc = match trunc_id.trunc(db) {
-        Some(Trunc(min, max)) => (min, max),
-        None => (nu_nan_mean * 0.6, nu_nan_mean * 2.0),
-    };
+    let trunc = trunc.unwrap_or((nu_nan_mean * 0.6, nu_nan_mean * 2.0));
     let buf = draw_area(nu2.view(), trunc).map_err(|e| e.to_string())?;
-    let nu_plot_path = save_root_dir_id
-        .save_root_dir(db)
-        .join(format!("{}_nu_plot", name_id.name(db)))
-        .with_extension("png");
     let (h, w) = nu2.dim();
     image::save_buffer(nu_plot_path, &buf, w as u32, h as u32, Rgb8).map_err(|e| e.to_string())?;
     Ok(base64::encode(buf))

@@ -5,7 +5,7 @@
 
 mod command;
 
-use std::sync::Mutex;
+use tauri::async_runtime::Mutex;
 
 use command::*;
 
@@ -49,6 +49,8 @@ fn main() {
             get_physical_param,
             set_physical_param,
             get_nu_data,
+            get_nu_plot,
+            save_data,
         ])
         .run(tauri::generate_context!())
         .unwrap()

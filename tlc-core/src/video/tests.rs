@@ -10,7 +10,7 @@ async fn test_decode_frame() {
     log::init();
 
     let mut db = crate::Database::default();
-    assert!(db.get_video_path().is_none());
+    db.get_video_path().unwrap_err();
     let video_path = PathBuf::from("./testdata/almost_empty.avi");
     db.set_video_path(video_path.clone()).unwrap();
     assert_eq!(db.get_video_path().unwrap(), &video_path);

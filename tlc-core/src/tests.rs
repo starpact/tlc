@@ -66,7 +66,7 @@ async fn test_whole_process_step_by_step() {
     db.set_iter_method(_iteration_method()).unwrap();
     assert_eq!(db.get_iter_method().unwrap(), _iteration_method());
 
-    db.get_nu_data(None).unwrap();
+    db.get_nu_data().unwrap();
 }
 
 #[test]
@@ -91,8 +91,10 @@ fn test_all_onetime_auto() {
     db.set_interp_method(InterpMethod::Horizontal).unwrap();
     db.set_physical_param(_physical_param()).unwrap();
     db.set_iter_method(_iteration_method()).unwrap();
-    db.get_nu_data(None).unwrap();
-    db.get_nu_data(None).unwrap();
+    db.get_nu_data().unwrap();
+    db.get_nu_data().unwrap();
+    db.get_nu_plot(None).unwrap();
+    db.save_data().unwrap();
 }
 
 fn _filter_method() -> FilterMethod {

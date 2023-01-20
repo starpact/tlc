@@ -17,11 +17,10 @@ use daq::{
     ThermocouplesId,
 };
 pub use daq::{InterpMethod, Thermocouple};
-use post_processing::TruncId;
 pub use solve::{IterMethod, PhysicalParam};
 use solve::{IterMethodId, Nu2Id, PhysicalParamId};
 pub use state::{decode_frame_base64, Database, NuData};
-use state::{eval_cal_num, CalNumId, NameId, SaveRootDirId, StartIndexId};
+use state::{eval_cal_num, CalNumId, StartIndexId};
 pub use video::FilterMethod;
 use video::{
     decode_all, filter_detect_peak, filter_point, read_video, AreaId, FilterMethodId,
@@ -34,10 +33,7 @@ pub struct Jar(
     VideoPathId,
     DaqPathId,
     ThermocouplesId,
-    TruncId,
     // interned
-    NameId,
-    SaveRootDirId,
     AreaId,
     FilterMethodId,
     InterpMethodId,
@@ -62,9 +58,6 @@ pub struct Jar(
     make_interpolator,
     eval_cal_num,
     solve::solve_nu,
-    post_processing::save_nu_matrix,
-    post_processing::save_setting,
-    post_processing::save_nu_plot,
 );
 
 pub trait Db: salsa::DbWithJar<Jar> {}
