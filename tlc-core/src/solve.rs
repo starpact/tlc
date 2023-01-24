@@ -277,7 +277,6 @@ fn solve(
             air_thermal_conductivity,
         ),
     };
-
     Array2::from_shape_vec(shape, nu1).unwrap()
 }
 
@@ -306,7 +305,6 @@ where
                 temperatures,
             };
             let h = solve_single_point(point_data);
-
             h * characteristic_length / air_thermal_conductivity
         })
         .collect()

@@ -37,6 +37,7 @@ impl std::hash::Hash for FilterMethod {
 
 #[instrument(skip(green2))]
 pub fn filter_detect_peak(green2: ArcArray2<u8>, filter_method: FilterMethod) -> Vec<usize> {
+    assert!(green2.dim() > (0, 0));
     use FilterMethod::*;
     match filter_method {
         No => apply(green2, |green1| {

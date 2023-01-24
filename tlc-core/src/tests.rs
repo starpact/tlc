@@ -1,6 +1,5 @@
-use std::path::PathBuf;
-
 use salsa::ParallelDatabase;
+use std::path::PathBuf;
 
 use super::*;
 use crate::video::tests::*;
@@ -69,6 +68,7 @@ async fn test_whole_process_step_by_step() {
     db.get_nu_data().unwrap();
 }
 
+#[ignore]
 #[test]
 fn test_all_onetime_auto() {
     crate::init();

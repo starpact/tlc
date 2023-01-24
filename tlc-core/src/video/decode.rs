@@ -44,7 +44,7 @@ impl DecoderManager {
         assert!(num_decode_frame_workers > 0);
 
         let ring_buffer = ArrayQueue::new(frame_backlog_capacity);
-        let sema = Semaphore::new(frame_backlog_capacity);
+        let sem = Semaphore::new(frame_backlog_capacity);
         let thread_pool = ThreadPoolBuilder::new()
             .num_threads(num_decode_frame_workers)
             .build()
@@ -55,7 +55,7 @@ impl DecoderManager {
                 parameters: Mutex::new(parameters),
                 decoders: ThreadLocal::new(),
                 ring_buffer,
-                sema,
+                sem,
                 thread_pool,
             }),
         }
@@ -67,14 +67,14 @@ impl DecoderManager {
         frame_index: usize,
     ) -> Result<String> {
         let (tx, rx) = oneshot::channel();
-        if let Ok(_permit) = self.inner.sema.try_acquire() {
+        if let Ok(_permit) = self.inner.sem.try_acquire() {
             self.spawn_decode_frame_base64(packets, frame_index, tx);
             return rx.await?;
         }
         // When the returned value which contains a `Sender` is dropped, its corresponding
         // `Receiver` which is waiting on another thread will be disconnected.
         self.inner.ring_buffer.force_push(tx);
-        let _permit = self.inner.sema.acquire().await.unwrap();
+        let _permit = self.inner.sem.acquire().await.unwrap();
         if let Some(tx) = self.inner.ring_buffer.pop() {
             // `tx` here may be from other task.
             self.spawn_decode_frame_base64(packets, frame_index, tx);
@@ -124,7 +124,7 @@ struct DecoderManagerInner {
     /// `ring_buffer` is used to automatically eliminate the oldest frame to limit the
     /// number of backlog frames.
     ring_buffer: ArrayQueue<oneshot::Sender<Result<String>>>,
-    sema: Semaphore,
+    sem: Semaphore,
     thread_pool: ThreadPool,
 }
 
