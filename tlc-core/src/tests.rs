@@ -11,6 +11,7 @@ async fn test_whole_process_step_by_step() {
     let mut db = Database::default();
 
     db.set_name("test_case_1".to_owned()).unwrap();
+    std::fs::create_dir_all("/tmp/tlc").unwrap();
     db.set_save_root_dir(PathBuf::from("/tmp/tlc")).unwrap();
 
     let video_path = PathBuf::from(VIDEO_PATH_REAL);
