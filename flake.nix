@@ -5,7 +5,7 @@
     let
       system = "x86_64-linux";
       pkgs = import nixpkgs { inherit system; };
-      stdenv = pkgs.llvmPackages_14.stdenv;
+      stdenv = pkgs.llvmPackages_15.stdenv;
       libraries = with pkgs;[
         dbus.lib
         cairo
@@ -13,7 +13,7 @@
         gdk-pixbuf
         glib.out
         gtk3
-        llvmPackages_14.libclang.lib
+        llvmPackages_15.libclang.lib
         openssl.out
         webkitgtk
       ];

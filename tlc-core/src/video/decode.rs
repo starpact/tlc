@@ -5,6 +5,7 @@ use std::{
 };
 
 use anyhow::Result;
+use base64::{engine::general_purpose, Engine};
 use crossbeam::queue::ArrayQueue;
 use ffmpeg::{
     codec,
@@ -142,9 +143,11 @@ impl DecoderManagerInner {
         let mut decoder = self.decoder()?;
         let (w, h) = decoder.shape();
         let mut buf = Vec::new();
+        // `JpegEncoder` could be reused by thread-local to avoid allocation but
+        // as most time are spent on decoding/encoding, it's probably not necessary.
         let mut jpeg_encoder = JpegEncoder::new_with_quality(&mut buf, 100);
         jpeg_encoder.encode(decoder.decode(packet)?.data(0), w, h, Rgb8)?;
-        Ok(base64::encode(buf))
+        Ok(general_purpose::STANDARD.encode(buf))
     }
 
     #[instrument(skip(self, packets), err)]
@@ -168,7 +171,7 @@ impl DecoderManagerInner {
                 let mut decoder = self.decoder()?;
                 let dst_frame = decoder.decode(packet)?;
 
-                // each frame is stored in a u8 array:
+                // Each frame is stored in a u8 array:
                 // |r g b r g b...r g b|r g b r g b...r g b|......|r g b r g b...r g b|
                 // |.......row_0.......|.......row_1.......|......|.......row_n.......|
                 let rgb = dst_frame.data(0);

@@ -1,5 +1,6 @@
 use std::{io::Write, path::Path};
 
+use base64::engine::{general_purpose, Engine};
 use image::ColorType::Rgb8;
 use ndarray::prelude::*;
 use once_cell::sync::OnceCell;
@@ -121,7 +122,7 @@ pub(crate) fn draw_nu_plot_and_save<P: AsRef<Path>>(
     let buf = draw_area(nu2.view(), trunc).map_err(|e| e.to_string())?;
     let (h, w) = nu2.dim();
     image::save_buffer(nu_plot_path, &buf, w as u32, h as u32, Rgb8).map_err(|e| e.to_string())?;
-    Ok(base64::encode(buf))
+    Ok(general_purpose::STANDARD.encode(buf))
 }
 
 #[instrument(skip(area), err)]

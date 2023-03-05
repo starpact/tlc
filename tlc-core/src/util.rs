@@ -16,9 +16,11 @@ pub(crate) use impl_eq_always_false;
 
 pub(crate) mod log {
     use std::sync::Once;
+    use time::util::local_offset::Soundness;
     use tracing_subscriber::fmt::{format::FmtSpan, time::LocalTime};
 
     pub fn init() {
+        unsafe { time::util::local_offset::set_soundness(Soundness::Unsound) };
         static START: Once = Once::new();
         START.call_once(|| {
             let subscriber = tracing_subscriber::fmt()
