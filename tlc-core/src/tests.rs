@@ -75,6 +75,7 @@ fn test_all_onetime_auto() {
     crate::init();
     let mut db = Database::default();
     db.set_name("test_case_2".to_owned()).unwrap();
+    std::fs::create_dir_all("/tmp/tlc").unwrap();
     db.set_save_root_dir(PathBuf::from("/tmp/tlc")).unwrap();
     db.set_video_path(PathBuf::from(VIDEO_PATH_REAL)).unwrap();
     db.set_daq_path(PathBuf::from(

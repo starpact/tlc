@@ -1,6 +1,5 @@
 extern crate test;
 use approx::assert_relative_eq;
-use ndarray::Array1;
 use test::Bencher;
 
 use crate::daq;
@@ -65,9 +64,9 @@ impl PointData<'_> {
     }
 }
 
-fn new_temps() -> Array1<f64> {
+fn new_temps() -> Vec<f64> {
     let daq_data = daq::read::read_daq("./testdata/imp_20000_1.lvm").unwrap();
-    daq_data.column(3).to_owned()
+    daq_data.column(3).to_vec()
 }
 
 const I: (f64, f64, f64, f64, f64) = (100.0, 0.04, 0.19, 1.091e-7, 35.48);
@@ -77,7 +76,7 @@ fn test_single_point_correct() {
     let temps = new_temps();
     let point_data = PointData {
         gmax_frame_index: 800,
-        temperatures: temps.as_slice_memory_order().unwrap(),
+        temperatures: &temps,
     };
     let r1 = point_data.heat_transfer_equation(I.0, I.1, I.2, I.3, I.4);
     let r2 = point_data.iter_no_simd(I.0, I.1, I.2, I.3, I.4);
@@ -102,7 +101,7 @@ fn bench_simd(b: &mut Bencher) {
     let temps = new_temps();
     let point_data = PointData {
         gmax_frame_index: 800,
-        temperatures: temps.as_slice_memory_order().unwrap(),
+        temperatures: &temps,
     };
     // 8,658 ns/iter (+/- 90)
     b.iter(|| point_data.heat_transfer_equation(I.0, I.1, I.2, I.3, I.4));
@@ -113,7 +112,7 @@ fn bench_iter_no_simd(b: &mut Bencher) {
     let temps = new_temps();
     let point_data = PointData {
         gmax_frame_index: 800,
-        temperatures: temps.as_slice_memory_order().unwrap(),
+        temperatures: &temps,
     };
     // 13,194 ns/iter (+/- 194)
     b.iter(|| point_data.iter_no_simd(I.0, I.1, I.2, I.3, I.4));
@@ -124,7 +123,7 @@ fn bench_no_iter_no_simd(b: &mut Bencher) {
     let temps = new_temps();
     let point_data = PointData {
         gmax_frame_index: 800,
-        temperatures: temps.as_slice_memory_order().unwrap(),
+        temperatures: &temps,
     };
     // 13,198 ns/iter (+/- 175)
     b.iter(|| point_data.no_iter_no_simd(I.0, I.1, I.2, I.3, I.4));

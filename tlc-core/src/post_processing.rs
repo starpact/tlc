@@ -1,71 +1,12 @@
-use std::{io::Write, path::Path};
+use std::{io::Write, path::Path, sync::OnceLock};
 
 use base64::engine::{general_purpose, Engine};
 use image::ColorType::Rgb8;
 use ndarray::prelude::*;
-use once_cell::sync::OnceCell;
 use plotters::prelude::*;
-use serde::Serialize;
 use tracing::{info, instrument};
 
-use crate::{
-    daq::DaqMeta, video::VideoMeta, FilterMethod, InterpMethod, IterMethod, PhysicalParam,
-    Thermocouple,
-};
-
-/// `SettingSnapshot` will be saved together with the results for later check.
-#[derive(Debug, Serialize)]
-pub(crate) struct Setting<'a> {
-    /// User defined unique name of this experiment setting.
-    pub name: &'a str,
-
-    /// Directory in which you save your data(parameters and results) of this experiment.
-    /// * setting_path: {root_dir}/{expertiment_name}_setting.json
-    /// * nu_matrix_path: {root_dir}/{expertiment_name}_nu_matrix.csv
-    /// * nu_plot_path: {root_dir}/{expertiment_name}_nu_plot.png
-    pub save_root_dir: &'a Path,
-
-    pub video_path: &'a Path,
-
-    pub video_meta: VideoMeta,
-
-    pub daq_path: &'a Path,
-
-    pub daq_meta: DaqMeta,
-
-    /// Start frame of video involved in the calculation.
-    /// Updated simultaneously with start_row.
-    pub start_frame: usize,
-
-    /// Start row of DAQ data involved in the calculation.
-    /// Updated simultaneously with start_frame.
-    pub start_row: usize,
-
-    /// Calculation area(top_left_y, top_left_x, area_height, area_width).
-    pub area: (u32, u32, u32, u32),
-
-    /// Columns in the csv file and positions of thermocouples.
-    pub thermocouples: &'a [Thermocouple],
-
-    /// Filter method of green matrix along the time axis.
-    pub filter_method: FilterMethod,
-
-    /// Interpolation method for calculating thermocouple temperature distribution.
-    pub interp_method: InterpMethod,
-
-    /// Iteration method for solving heat transfer equataion.
-    pub iter_method: IterMethod,
-
-    /// All physical parameters used when solving heat transfer equation.
-    pub physical_param: PhysicalParam,
-
-    /// Final result.
-    pub nu_nan_mean: f64,
-
-    /// Timestamp in milliseconds.
-    #[serde(with = "time::serde::rfc3339")]
-    pub saved_at: time::OffsetDateTime,
-}
+use crate::state::Setting;
 
 #[instrument(skip_all, err)]
 pub(crate) fn save_setting<P: AsRef<Path>>(
@@ -127,7 +68,7 @@ pub(crate) fn draw_nu_plot_and_save<P: AsRef<Path>>(
 
 #[instrument(skip(area), err)]
 fn draw_area(area: ArrayView2<f64>, edge_truncation: (f64, f64)) -> anyhow::Result<Vec<u8>> {
-    static CELL: OnceCell<[[f64; 3]; 256]> = OnceCell::new();
+    static CELL: OnceLock<[[f64; 3]; 256]> = OnceLock::new();
 
     let (h, w) = area.dim();
     let mut buf = vec![0; h * w * 3];

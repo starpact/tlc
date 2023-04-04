@@ -10,7 +10,7 @@ use crate::{
         make_interpolator, read_daq, DaqDataId, DaqMeta, DaqPathId, InterpMethod, InterpMethodId,
         Thermocouple, ThermocouplesId,
     },
-    post_processing::{draw_nu_plot_and_save, nan_mean, save_nu_matrix, save_setting, Setting},
+    post_processing::{draw_nu_plot_and_save, nan_mean, save_nu_matrix, save_setting},
     solve::{solve_nu, IterMethod, IterMethodId, Nu2Id, PhysicalParam, PhysicalParamId},
     video::{
         self, decode_all, filter_detect_peak, filter_point, read_video, AreaId, FilterMethod,
@@ -23,17 +23,30 @@ use crate::{
 #[salsa::db(Jar)]
 pub struct Database {
     storage: salsa::Storage<Self>,
+    /// User defined unique name of this experiment setting.
     name: Option<String>,
+    /// Directory in which you save your data(parameters and results) of this experiment.
+    /// * setting_path: {root_dir}/{expertiment_name}_setting.json
+    /// * nu_matrix_path: {root_dir}/{expertiment_name}_nu_matrix.csv
+    /// * nu_plot_path: {root_dir}/{expertiment_name}_nu_plot.png
     save_root_dir: Option<PathBuf>,
     video_path_id: Option<VideoPathId>,
     daq_path_id: Option<DaqPathId>,
+    /// Start frame of video and start row of DAQ data involved in the calculation,
+    /// updated simultaneously.
     start_index_id: Option<StartIndexId>,
+    /// Calculation area(top_left_y, top_left_x, area_height, area_width).
     area_id: Option<AreaId>,
+    /// Columns in the csv file and positions of thermocouples.
     thermocouples_id: Option<ThermocouplesId>,
+    /// Filter method of green matrix along the time axis.
     filter_method_id: Option<FilterMethodId>,
+    /// Interpolation method for calculating thermocouple temperature distribution.
     interp_method_id: Option<InterpMethodId>,
-    physical_param_id: Option<PhysicalParamId>,
+    /// Iteration method for solving heat transfer equataion.
     iter_method_id: Option<IterMethodId>,
+    /// All physical parameters used when solving heat transfer equation.
+    physical_param_id: Option<PhysicalParamId>,
 }
 
 impl salsa::Database for Database {
@@ -65,6 +78,30 @@ impl salsa::ParallelDatabase for Database {
 }
 
 impl crate::Db for Database {}
+
+/// `Setting` will be saved together with the results for later check.
+#[derive(Debug, Serialize)]
+pub(crate) struct Setting<'a> {
+    pub name: &'a str,
+    pub save_root_dir: &'a Path,
+    pub video_path: &'a Path,
+    pub video_meta: VideoMeta,
+    pub daq_path: &'a Path,
+    pub daq_meta: DaqMeta,
+    pub start_frame: usize,
+    pub start_row: usize,
+    pub area: (u32, u32, u32, u32),
+    pub thermocouples: &'a [Thermocouple],
+    pub filter_method: FilterMethod,
+    pub interp_method: InterpMethod,
+    pub iter_method: IterMethod,
+    pub physical_param: PhysicalParam,
+    /// Final result.
+    pub nu_nan_mean: f64,
+    /// Timestamp in milliseconds.
+    #[serde(with = "time::serde::rfc3339")]
+    pub saved_at: time::OffsetDateTime,
+}
 
 // Operation setting an input of some heavy computations will cause blocking.
 impl Database {
