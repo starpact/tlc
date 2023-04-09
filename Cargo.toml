@@ -1,6 +1,9 @@
 [workspace]
 members = ["src-tauri", "tlc-core"]
 
+[workspace.dependencies]
+ndarray = { version = "0.15", features = ["rayon", "serde"] }
+
 [profile.release]
 codegen-units = 1
 lto = true

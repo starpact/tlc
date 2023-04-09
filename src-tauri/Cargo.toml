@@ -12,10 +12,9 @@ edition = "2021"
 tauri-build = { version = "1.2", features = [] }
 
 [dependencies]
+ndarray = { version = "0.15", features = ["rayon", "serde"] }
 tauri = { version = "1.2", features = ["api-all"] }
-ndarray = "0.15"
 tlc-core = { path = "../tlc-core" }
-salsa = { git = "https://github.com/salsa-rs/salsa", package = "salsa-2022" }
 
 [features]
 default = ["custom-protocol"]

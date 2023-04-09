@@ -37,7 +37,6 @@ impl std::hash::Hash for FilterMethod {
 
 #[instrument(skip(green2))]
 pub fn filter_detect_peak(green2: ArcArray2<u8>, filter_method: FilterMethod) -> Vec<usize> {
-    assert!(green2.dim() > (0, 0));
     use FilterMethod::*;
     match filter_method {
         No => apply(green2, |green1| {
@@ -191,5 +190,47 @@ fn db8_wavelet() -> Wavelet<f64> {
         dec_hi: hi.clone(),
         rec_lo: lo,
         rec_hi: hi,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use crate::{
+        util::log,
+        video::{
+            read::read_video,
+            tests::{video_meta_real, VIDEO_PATH_REAL},
+            DecoderManager,
+        },
+    };
+
+    use super::*;
+
+    #[ignore]
+    #[test]
+    fn test_detect() {
+        log::init();
+        let (_, parameters, packets) = read_video(VIDEO_PATH_REAL).unwrap();
+        let decode_manager = DecoderManager::new(parameters, 10, 20);
+        let green2 = decode_manager
+            .decode_all(
+                Arc::new(packets),
+                10,
+                video_meta_real().nframes - 10,
+                (10, 10, 800, 1000),
+            )
+            .unwrap()
+            .into_shared();
+
+        filter_detect_peak(green2.clone(), FilterMethod::No);
+        filter_detect_peak(green2.clone(), FilterMethod::Median { window_size: 10 });
+        filter_detect_peak(
+            green2,
+            FilterMethod::Wavelet {
+                threshold_ratio: 0.8,
+            },
+        );
     }
 }

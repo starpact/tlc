@@ -10,7 +10,7 @@ use crate::{
         make_interpolator, read_daq, DaqDataId, DaqMeta, DaqPathId, InterpMethod, InterpMethodId,
         Thermocouple, ThermocouplesId,
     },
-    post_processing::{draw_nu_plot_and_save, nan_mean, save_nu_matrix, save_setting},
+    postproc::{draw_nu_plot_and_save, nan_mean, save_nu_matrix, save_setting},
     solve::{solve_nu, IterMethod, IterMethodId, Nu2Id, PhysicalParam, PhysicalParamId},
     video::{
         self, decode_all, filter_detect_peak, filter_point, read_video, AreaId, FilterMethod,

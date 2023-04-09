@@ -1,10 +1,10 @@
 #![feature(test)]
 #![feature(array_windows)]
-#![feature(assert_matches)]
+#![feature(portable_simd)]
 #![allow(clippy::too_many_arguments)]
 
 mod daq;
-mod post_processing;
+mod postproc;
 mod solve;
 mod state;
 #[cfg(test)]
@@ -17,6 +17,7 @@ use daq::{
     ThermocouplesId,
 };
 pub use daq::{InterpMethod, Thermocouple};
+pub use salsa::ParallelDatabase;
 pub use solve::{IterMethod, PhysicalParam};
 use solve::{IterMethodId, Nu2Id, PhysicalParamId};
 pub use state::{decode_frame_base64, Database, NuData};

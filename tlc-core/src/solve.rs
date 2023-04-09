@@ -170,8 +170,8 @@ impl PointData<'_> {
     }
 }
 
-// Fake SIMD version erfc.
-// I didn't find rust version SIMD erfc. Maybe use `sleef` binding in the future.
+// Scalar version erfc from libm is much faster than SIMD version from sleef.
+// See bench.
 fn erfc_simd(arr: Simd<[f64; 4]>) -> Simd<[f64; 4]> {
     unsafe {
         f64x4::new(
@@ -261,31 +261,26 @@ fn solve(
     let equation =
         move |point_data: PointData, h| point_data.heat_transfer_equation(h, dt, k, a, tw);
 
-    let nu1 = match iteration_method {
+    let h1 = match iteration_method {
         IterMethod::NewtonTangent { h0, max_iter_num } => solve_core(
             gmax_frame_indexes,
             interpolator,
             newtow_tangent(equation, h0, max_iter_num),
-            characteristic_length,
-            air_thermal_conductivity,
         ),
         IterMethod::NewtonDown { h0, max_iter_num } => solve_core(
             gmax_frame_indexes,
             interpolator,
             newtow_down(equation, h0, max_iter_num),
-            characteristic_length,
-            air_thermal_conductivity,
         ),
     };
-    Array2::from_shape_vec(shape, nu1).unwrap()
+    assert_eq!(shape.0 * shape.1, h1.len());
+    Array2::from_shape_vec(shape, h1).unwrap() * characteristic_length / air_thermal_conductivity
 }
 
 fn solve_core<F>(
     gmax_frame_indexes: &[usize],
     interpolator: Interpolator,
     solve_single_point: F,
-    characteristic_length: f64,
-    air_thermal_conductivity: f64,
 ) -> Vec<f64>
 where
     F: Fn(PointData) -> f64 + Send + Sync + 'static,
@@ -304,8 +299,7 @@ where
                 gmax_frame_index,
                 temperatures,
             };
-            let h = solve_single_point(point_data);
-            h * characteristic_length / air_thermal_conductivity
+            solve_single_point(point_data)
         })
         .collect()
 }

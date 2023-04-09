@@ -1,10 +1,10 @@
 use std::path::PathBuf;
 
 use ndarray::{ArcArray2, Array2};
-use salsa::ParallelDatabase;
 use tauri::async_runtime::{spawn_blocking, Mutex};
 use tlc_core::{
-    Database, FilterMethod, InterpMethod, IterMethod, NuData, PhysicalParam, Thermocouple,
+    Database, FilterMethod, InterpMethod, IterMethod, NuData, ParallelDatabase, PhysicalParam,
+    Thermocouple,
 };
 
 type TlcResult<T> = Result<T, String>;
