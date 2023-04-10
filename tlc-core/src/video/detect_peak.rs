@@ -139,11 +139,11 @@ fn wavelet_transform(
 
     let mut start = filter_len / (1 << max_level);
     for _ in 0..max_level {
-        let end = start << 1;
-        let m = green1f[start..end].iter().fold(0., |m, &v| f64::max(m, v));
+        let end = start * 2;
+        let m = green1f[start..end].iter().fold(0.0, |m, &v| f64::max(m, v));
         let threshold = m * threshold_ratio;
         for v in &mut green1f[start..end] {
-            *v = v.signum() * f64::max(v.abs() - threshold, 0.);
+            *v = v.signum() * f64::max(v.abs() - threshold, 0.0);
         }
         start = end;
     }
@@ -224,13 +224,14 @@ mod tests {
             .unwrap()
             .into_shared();
 
-        filter_detect_peak(green2.clone(), FilterMethod::No);
-        filter_detect_peak(green2.clone(), FilterMethod::Median { window_size: 10 });
-        filter_detect_peak(
+        // filter_detect_peak(green2.clone(), FilterMethod::No);
+        // filter_detect_peak(green2.clone(), FilterMethod::Median { window_size: 10 });
+        let x = filter_detect_peak(
             green2,
             FilterMethod::Wavelet {
                 threshold_ratio: 0.8,
             },
         );
+        println!("{}", x[..10000].iter().sum::<usize>());
     }
 }

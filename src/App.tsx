@@ -6,6 +6,11 @@ import * as dialog from '@tauri-apps/api/dialog';
 import { Stack } from '@mui/system';
 import { Button } from '@mui/material';
 
+interface Array2 {
+  dim: [number, number],
+  data: number[],
+}
+
 function App() {
   const [name, setName] = useState("");
   const [saveRootDir, setSaveRootDir] = useState("");
@@ -13,6 +18,8 @@ function App() {
   const [nframes, setNFrames] = useState<number | null>(null);
   const [videoFrameRate, setVideoFrameRate] = useState<number | null>(null);
   const [videoShape, setVideoShape] = useState<[number, number] | null>(null);
+  const [daqPath, setDaqPath] = useState<string>("");
+  const [daqData, setDaqData] = useState<Array2 | null>(null);
 
   async function apiGetName() {
     const name = await tauri.invoke<string>("get_name");
@@ -20,10 +27,8 @@ function App() {
     return name;
   }
   async function apiSetName() {
-    if (name == "") return;
-    try { tauri.invoke<void>("set_name", { name }); } catch (e) { eprint(e) }
+    await tauri.invoke<void>("set_name", { name });
   }
-
 
   async function apiGetSaveRootDir() {
     const saveRootDir = await tauri.invoke<string>("get_save_root_dir");
@@ -31,15 +36,15 @@ function App() {
     return saveRootDir;
   }
   async function apiSetSaveRootDir() {
-    if (saveRootDir == "") return;
-    try { await tauri.invoke<void>("set_save_root_dir", { saveRootDir }); } catch (e) { eprint(e) }
+    await tauri.invoke<void>("set_save_root_dir", { saveRootDir });
   }
-  function chooseSaveRootDir() {
-    dialog.open({
-      title: "选择保存结果的根目录",
+  async function chooseSaveRootDir() {
+    const dir = await dialog.open({
+      title: "Choose directory where all results are saved",
       defaultPath: saveRootDir,
       directory: true,
-    }).then(dir => { if (typeof dir == "string") setSaveRootDir(dir); })
+    });
+    if (typeof dir == "string") setSaveRootDir(dir);
   }
 
   async function apiGetVideoPath() {
@@ -48,23 +53,39 @@ function App() {
     return videoPath;
   }
   async function apiSetVideoPath() {
-    if (videoPath == "") return;
-    try {
-      await tauri.invoke<void>("set_video_path", { videoPath });
-      setNFrames(await tauri.invoke<number>("get_video_nframes"));
-      setVideoFrameRate(await tauri.invoke<number>("get_video_frame_rate"));
-      setVideoShape(await tauri.invoke<[number, number]>("get_video_shape"));
-    } catch (e) {
-      eprint(e);
-    }
+    if (videoPath === "") return;
+    await tauri.invoke<void>("set_video_path", { videoPath });
+    setNFrames(await tauri.invoke<number>("get_video_nframes"));
+    setVideoFrameRate(await tauri.invoke<number>("get_video_frame_rate"));
+    setVideoShape(await tauri.invoke<[number, number]>("get_video_shape"));
   }
-  function chooseVideoPath() {
-    dialog.open({
-      title: "选择视频",
+  async function chooseVideoPath() {
+    const path = await dialog.open({
+      title: "Choose video",
       defaultPath: videoPath,
       directory: false,
       filters: [{ name: "video filter", extensions: ["avi", "mp4"] }]
-    }).then(path => { if (typeof path == "string") setVideoPath(path); })
+    });
+    if (typeof path == "string") setVideoPath(path);
+  }
+
+  async function apiGetDaqPath() {
+    const daqPath = await tauri.invoke<string>("get_daq_path");
+    setDaqPath(daqPath);
+    return daqPath;
+  }
+  async function apiSetDaqPath() {
+    await tauri.invoke<void>("set_daq_path", { daqPath });
+    setDaqData(await tauri.invoke<Array2>("get_daq_data"));
+  }
+  async function chooseDaqPath() {
+    const path = await dialog.open({
+      title: "Choose DAQ",
+      defaultPath: daqPath,
+      directory: false,
+      filters: [{ name: "daq filter", extensions: ["lvm", "xls", "xlsx"] }]
+    });
+    if (typeof path == "string") setDaqPath(path);
   }
 
   let loaded = false;
@@ -75,40 +96,64 @@ function App() {
       apiGetName(),
       apiGetSaveRootDir(),
       apiGetVideoPath(),
-    ]).then(eprint);
+      apiGetDaqPath(),
+    ]).then(dbg);
   }, []);
 
-  useEffect(() => { apiSetSaveRootDir(); }, [saveRootDir]);
-  useEffect(() => { apiSetVideoPath(); }, [videoPath]);
+  useEffect(debounce("name", () => { apiSetName().catch(dbg); }), [name]);
+  useEffect(() => { apiSetSaveRootDir().catch(dbg); }, [saveRootDir]);
+  useEffect(() => { apiSetVideoPath().catch(dbg); }, [videoPath]);
+  useEffect(() => { apiSetDaqPath().catch(dbg); }, [daqPath]);
 
   return (
     <div className="App">
-      <TextField
-        label="Name"
-        value={name}
-        onChange={event => setName(event.target.value)}
-        onBlur={apiSetName}
-        onKeyDown={event => { if (event.key == "Enter") apiSetName(); }}
-      />
-      <Stack direction={"row"}>
-        <TextField label="Save Root Dir" value={saveRootDir} />
-        <Button variant="outlined" onClick={chooseSaveRootDir}>Choose</Button>
-      </Stack>
-      <Stack direction={"row"}>
-        <TextField label="Video Path" value={videoPath} />
-        <Button variant="outlined" onClick={chooseVideoPath}>Choose</Button>
-      </Stack>
-      <TextField value={`\
+      <Stack spacing={1}>
+        <TextField
+          label="Name"
+          value={name}
+          onChange={event => setName(event.target.value)}
+        />
+        <Stack direction={"row"}>
+          <TextField label="Save Root Dir" value={saveRootDir} />
+          <Button variant="outlined" onClick={chooseSaveRootDir}>Choose</Button>
+        </Stack>
+        <Stack direction={"row"}>
+          <TextField label="Video Path" value={videoPath} />
+          <Button variant="outlined" onClick={chooseVideoPath}>Choose</Button>
+        </Stack>
+        <Stack direction={"row"}>
+          <TextField label="DAQ Path" value={daqPath} />
+          <Button variant="outlined" onClick={chooseDaqPath}>Choose</Button>
+        </Stack>
+        <TextField value={`\
 nframes: ${nframes ?? "_"}
 frame_rate: ${videoFrameRate ?? "_"}
-video_shape: [${videoShape ?? "_, _"}]`
-      } multiline />
+video_shape: ${videoShape ?? "_"}`
+        } multiline />
+        <TextField value={`daq_data_dim: ${daqData?.dim ?? "_"}`} multiline />
+      </Stack>
     </div >
   );
 }
 
-function eprint(e: any) {
-  console.log(e);
+function dbg(e: any) {
+  console.log("[DEBUG]", e);
+}
+
+let versions = new Map<string, number>;
+function debounce(key: string, callback: () => void, delayMillis?: number) {
+  return () => {
+    let version = versions.get(key);
+    if (version !== undefined) {
+      version += 1;
+    } else {
+      version = 0;
+    }
+    versions.set(key, version);
+    setTimeout(() => {
+      if (version === versions.get(key)) callback();
+    }, delayMillis ?? 500)
+  }
 }
 
 export default App;
