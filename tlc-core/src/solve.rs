@@ -262,25 +262,22 @@ fn solve(
         move |point_data: PointData, h| point_data.heat_transfer_equation(h, dt, k, a, tw);
 
     let h1 = match iteration_method {
-        IterMethod::NewtonTangent { h0, max_iter_num } => solve_core(
-            gmax_frame_indexes,
-            interpolator,
-            newtow_tangent(equation, h0, max_iter_num),
-        ),
-        IterMethod::NewtonDown { h0, max_iter_num } => solve_core(
-            gmax_frame_indexes,
-            interpolator,
-            newtow_down(equation, h0, max_iter_num),
-        ),
+        IterMethod::NewtonTangent { h0, max_iter_num } => {
+            let f = newtow_tangent(equation, h0, max_iter_num);
+            solve_core(f, gmax_frame_indexes, interpolator)
+        }
+        IterMethod::NewtonDown { h0, max_iter_num } => {
+            let f = newtow_down(equation, h0, max_iter_num);
+            solve_core(f, gmax_frame_indexes, interpolator)
+        }
     };
-    assert_eq!(shape.0 * shape.1, h1.len());
     Array2::from_shape_vec(shape, h1).unwrap() * characteristic_length / air_thermal_conductivity
 }
 
 fn solve_core<F>(
+    solve_single_point: F,
     gmax_frame_indexes: &[usize],
     interpolator: Interpolator,
-    solve_single_point: F,
 ) -> Vec<f64>
 where
     F: Fn(PointData) -> f64 + Send + Sync + 'static,
