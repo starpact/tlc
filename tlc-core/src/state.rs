@@ -1,8 +1,10 @@
 use std::path::{Path, PathBuf};
 
+use anyhow::{anyhow, bail, Error};
 use ndarray::{ArcArray2, Array2};
 use salsa::{DebugWithDb, Snapshot};
 use serde::Serialize;
+use time::{OffsetDateTime, UtcOffset};
 use tracing::{instrument, trace};
 
 use crate::{
@@ -98,47 +100,52 @@ pub(crate) struct Setting<'a> {
     pub physical_param: PhysicalParam,
     /// Final result.
     pub nu_nan_mean: f64,
-    /// Timestamp in milliseconds.
     #[serde(with = "time::serde::rfc3339")]
-    pub saved_at: time::OffsetDateTime,
+    pub saved_at: OffsetDateTime,
 }
 
 // Operation setting an input of some heavy computations will cause blocking.
 impl Database {
-    pub fn get_name(&self) -> Result<&str, String> {
-        Ok(self.name.as_ref().ok_or("name unset")?)
+    pub fn get_name(&self) -> anyhow::Result<&str> {
+        Ok(self.name.as_ref().ok_or_else(|| anyhow!("name unset"))?)
     }
 
     #[instrument(level = "trace", skip(self), err)]
-    pub fn set_name(&mut self, name: String) -> Result<(), String> {
+    pub fn set_name(&mut self, name: String) -> anyhow::Result<()> {
         if name.is_empty() {
-            return Err("empty name".to_owned());
+            bail!("empty name");
         }
         self.name = Some(name);
         Ok(())
     }
 
-    pub fn get_save_root_dir(&self) -> Result<&Path, String> {
-        Ok(self.save_root_dir.as_ref().ok_or("save root dir unset")?)
+    pub fn get_save_root_dir(&self) -> anyhow::Result<&Path> {
+        Ok(self
+            .save_root_dir
+            .as_ref()
+            .ok_or_else(|| anyhow!("save root dir unset"))?)
     }
 
     #[instrument(level = "trace", skip(self), err)]
-    pub fn set_save_root_dir(&mut self, save_root_dir: PathBuf) -> Result<(), String> {
+    pub fn set_save_root_dir(&mut self, save_root_dir: PathBuf) -> anyhow::Result<()> {
         if !save_root_dir.exists() {
-            return Err(format!("{save_root_dir:?} not exists"));
+            bail!("{save_root_dir:?} not exists");
         }
         self.save_root_dir = Some(save_root_dir);
         Ok(())
     }
 
-    pub fn get_video_path(&self) -> Result<&Path, String> {
-        Ok(self.video_path_id.ok_or("video path unset")?.path(self))
+    pub fn get_video_path(&self) -> anyhow::Result<&Path> {
+        Ok(self
+            .video_path_id
+            .ok_or_else(|| anyhow!("video path unset"))?
+            .path(self))
     }
 
     #[instrument(level = "trace", skip(self), err)]
-    pub fn set_video_path(&mut self, video_path: PathBuf) -> Result<(), String> {
+    pub fn set_video_path(&mut self, video_path: PathBuf) -> anyhow::Result<()> {
         if !video_path.exists() {
-            return Err(format!("{video_path:?} not exists"));
+            bail!("{video_path:?} not exists");
         }
         self.start_index_id = None;
         match self.video_path_id {
@@ -150,26 +157,29 @@ impl Database {
         Ok(())
     }
 
-    pub fn get_video_nframes(&self) -> Result<usize, String> {
+    pub fn get_video_nframes(&self) -> anyhow::Result<usize> {
         Ok(self.video_data_id()?.packets(self).0.len())
     }
 
-    pub fn get_video_frame_rate(&self) -> Result<usize, String> {
+    pub fn get_video_frame_rate(&self) -> anyhow::Result<usize> {
         Ok(self.video_data_id()?.frame_rate(self))
     }
 
-    pub fn get_video_shape(&self) -> Result<(u32, u32), String> {
+    pub fn get_video_shape(&self) -> anyhow::Result<(u32, u32)> {
         Ok(self.video_data_id()?.shape(self))
     }
 
-    pub fn get_daq_path(&self) -> Result<&Path, String> {
-        Ok(self.daq_path_id.ok_or("daq path unset")?.path(self))
+    pub fn get_daq_path(&self) -> anyhow::Result<&Path> {
+        Ok(self
+            .daq_path_id
+            .ok_or_else(|| anyhow!("daq path unset"))?
+            .path(self))
     }
 
     #[instrument(level = "trace", skip(self), err)]
-    pub fn set_daq_path(&mut self, daq_path: PathBuf) -> Result<(), String> {
+    pub fn set_daq_path(&mut self, daq_path: PathBuf) -> anyhow::Result<()> {
         if !daq_path.exists() {
-            return Err(format!("{daq_path:?} not exists"));
+            bail!("{daq_path:?} not exists");
         }
         self.start_index_id = None;
         match self.daq_path_id {
@@ -181,8 +191,11 @@ impl Database {
         Ok(())
     }
 
-    pub fn get_daq_data(&self) -> Result<ArcArray2<f64>, String> {
-        Ok(read_daq(self, self.daq_path_id()?)?.data(self).0)
+    pub fn get_daq_data(&self) -> anyhow::Result<ArcArray2<f64>> {
+        Ok(read_daq(self, self.daq_path_id()?)
+            .map_err(Error::msg)?
+            .data(self)
+            .0)
     }
 
     #[instrument(level = "trace", skip(self), err)]
@@ -190,119 +203,110 @@ impl Database {
         &mut self,
         start_frame: usize,
         start_row: usize,
-    ) -> Result<(), String> {
+    ) -> anyhow::Result<()> {
         let nframes = self.get_video_nframes()?;
         if start_frame >= nframes {
-            return Err(format!(
-                "frame_index({start_frame}) out of range({nframes})"
-            ));
+            bail!("frame_index({start_frame}) out of range({nframes})");
         }
         let nrows = self.get_daq_data()?.nrows();
         if start_row >= nrows {
-            return Err(format!("row_index({start_row}) out of range({nrows})"));
+            bail!("row_index({start_row}) out of range({nrows})");
         }
         self.start_index_id = Some(StartIndexId::new(self, start_frame, start_row));
         Ok(())
     }
 
-    pub fn get_start_frame(&self) -> Result<usize, String> {
+    pub fn get_start_frame(&self) -> anyhow::Result<usize> {
         Ok(self.start_index_id()?.start_frame(self))
     }
 
     #[instrument(level = "trace", skip(self), err)]
-    pub fn set_start_frame(&mut self, start_frame: usize) -> Result<(), String> {
+    pub fn set_start_frame(&mut self, start_frame: usize) -> anyhow::Result<()> {
         let nframes = self.get_video_nframes()?;
         if start_frame >= nframes {
-            return Err(format!(
-                "frame_index({start_frame}) out of range({nframes})"
-            ));
+            bail!("frame_index({start_frame}) out of range({nframes})");
         }
         let nrows = self.get_daq_data()?.nrows();
         let old_start_frame = self.get_start_frame()?;
         let old_start_row = self.get_start_row()?;
         if old_start_row + start_frame < old_start_frame {
-            return Err("invalid start_frame".to_owned());
+            bail!("invalid start_frame");
         }
         let start_row = old_start_row + start_frame - old_start_frame;
         if start_row >= nrows {
-            return Err(format!("row_index({start_row}) out of range({nrows})"));
+            bail!("row_index({start_row}) out of range({nrows})");
         }
         self.start_index_id = Some(StartIndexId::new(self, start_frame, start_row));
         Ok(())
     }
 
-    pub fn get_start_row(&self) -> Result<usize, String> {
+    pub fn get_start_row(&self) -> anyhow::Result<usize> {
         Ok(self.start_index_id()?.start_row(self))
     }
 
     #[instrument(level = "trace", skip(self), err)]
-    pub fn set_start_row(&mut self, start_row: usize) -> Result<(), String> {
+    pub fn set_start_row(&mut self, start_row: usize) -> anyhow::Result<()> {
         let nrows = self.get_daq_data()?.nrows();
         if start_row >= nrows {
-            return Err(format!("row_index({start_row}) out of range({nrows})"));
+            bail!("row_index({start_row}) out of range({nrows})");
         }
         let nframes = self.get_video_nframes()?;
         let old_start_frame = self.get_start_frame()?;
         let old_start_row = self.get_start_row()?;
         if old_start_frame + start_row < old_start_row {
-            return Err("invalid start_frame".to_owned());
+            bail!("invalid start_frame");
         }
         let start_frame = old_start_frame + start_row - old_start_row;
         if start_frame >= nframes {
-            return Err(format!(
-                "frames_index({start_frame}) out of range({nframes})"
-            ));
+            bail!("frames_index({start_frame}) out of range({nframes})");
         }
         self.start_index_id = Some(StartIndexId::new(self, start_frame, start_row));
         Ok(())
     }
 
-    pub fn get_area(&self) -> Result<(u32, u32, u32, u32), String> {
-        Ok(self.area_id.ok_or("area unset")?.area(self))
+    pub fn get_area(&self) -> anyhow::Result<(u32, u32, u32, u32)> {
+        Ok(self
+            .area_id
+            .ok_or_else(|| anyhow!("area unset"))?
+            .area(self))
     }
 
     #[instrument(level = "trace", skip(self), err)]
-    pub fn set_area(&mut self, area: (u32, u32, u32, u32)) -> Result<(), String> {
+    pub fn set_area(&mut self, area: (u32, u32, u32, u32)) -> anyhow::Result<()> {
         let (h, w) = self.get_video_shape()?;
         let (tl_y, tl_x, cal_h, cal_w) = area;
         if tl_x + cal_w > w {
-            return Err(format!(
-                "area X out of range: top_left_x({tl_x}) + width({cal_w}) > video_width({w})"
-            ));
+            bail!("area X out of range: top_left_x({tl_x}) + width({cal_w}) > video_width({w})");
         }
         if tl_y + cal_h > h {
-            return Err(format!(
-                "area Y out of range: top_left_y({tl_y}) + height({cal_h}) > video_height({h})"
-            ));
+            bail!("area Y out of range: top_left_y({tl_y}) + height({cal_h}) > video_height({h})");
         }
         self.area_id = Some(AreaId::new(self, area));
         Ok(())
     }
 
-    pub fn get_filter_method(&self) -> Result<FilterMethod, String> {
+    pub fn get_filter_method(&self) -> anyhow::Result<FilterMethod> {
         Ok(self
             .filter_method_id
-            .ok_or("filter method unset")?
+            .ok_or_else(|| anyhow!("filter method unset"))?
             .filter_method(self))
     }
 
     #[instrument(level = "trace", skip(self), err)]
-    pub fn set_filter_method(&mut self, filter_method: FilterMethod) -> Result<(), String> {
+    pub fn set_filter_method(&mut self, filter_method: FilterMethod) -> anyhow::Result<()> {
         match filter_method {
             FilterMethod::No => {}
             FilterMethod::Median { window_size } => {
                 if window_size == 0 {
-                    return Err("window size can not be zero".to_owned());
+                    bail!("window size can not be zero");
                 }
                 if window_size > self.get_video_nframes()? / 10 {
-                    return Err(format!("window size too large: {window_size}"));
+                    bail!("window size too large: {window_size}");
                 }
             }
             FilterMethod::Wavelet { threshold_ratio } => {
                 if !(0.0..1.0).contains(&threshold_ratio) {
-                    return Err(format!(
-                        "thershold ratio must belong to (0, 1): {threshold_ratio}"
-                    ));
+                    bail!("thershold ratio must belong to (0, 1): {threshold_ratio}");
                 }
             }
         }
@@ -311,53 +315,52 @@ impl Database {
     }
 
     #[instrument(level = "trace", skip(self), err)]
-    pub fn filter_point(&self, point: (usize, usize)) -> Result<Vec<u8>, String> {
+    pub fn filter_point(&self, point: (usize, usize)) -> anyhow::Result<Vec<u8>> {
         let video_data_id = self.video_data_id()?;
         let daq_data_id = self.daq_data_id()?;
         let start_index_id = self.start_index_id()?;
         let cal_num_id = eval_cal_num(self, video_data_id, daq_data_id, start_index_id);
         let area_id = self.area_id()?;
-        let green2_id = decode_all(self, video_data_id, start_index_id, cal_num_id, area_id)?;
+        let green2_id = decode_all(self, video_data_id, start_index_id, cal_num_id, area_id)
+            .map_err(Error::msg)?;
         let filter_method_id = self.filter_method_id()?;
         let point_id = PointId::new(self, point);
-        filter_point(self, green2_id, filter_method_id, area_id, point_id)
+        filter_point(self, green2_id, filter_method_id, area_id, point_id).map_err(Error::msg)
     }
 
-    pub fn get_thermocouples(&self) -> Result<&[Thermocouple], String> {
+    pub fn get_thermocouples(&self) -> anyhow::Result<&[Thermocouple]> {
         Ok(self
             .thermocouples_id
-            .ok_or("thermocouples unset")?
+            .ok_or_else(|| anyhow!("thermocouples unset"))?
             .thermocouples(self))
     }
 
     #[instrument(level = "trace", skip(self), err)]
-    pub fn set_thermocouples(&mut self, thermocouples: Vec<Thermocouple>) -> Result<(), String> {
+    pub fn set_thermocouples(&mut self, thermocouples: Vec<Thermocouple>) -> anyhow::Result<()> {
         let daq_ncols = self.get_daq_data()?.ncols();
         for thermocouple in &thermocouples {
             let column_index = thermocouple.column_index;
             if thermocouple.column_index >= daq_ncols {
-                return Err(format!(
-                    "thermocouple column_index({column_index}) exceeds daq ncols({daq_ncols})"
-                ));
+                bail!("thermocouple column_index({column_index}) exceeds daq ncols({daq_ncols})");
             }
         }
         self.thermocouples_id = Some(ThermocouplesId::new(self, thermocouples));
         Ok(())
     }
 
-    pub fn get_interp_method(&self) -> Result<InterpMethod, String> {
+    pub fn get_interp_method(&self) -> anyhow::Result<InterpMethod> {
         Ok(self
             .interp_method_id
-            .ok_or("interp method unset")?
+            .ok_or_else(|| anyhow!("interp method unset"))?
             .interp_method(self))
     }
 
     #[instrument(level = "trace", skip(self), err)]
-    pub fn set_interp_method(&mut self, interp_method: InterpMethod) -> Result<(), String> {
+    pub fn set_interp_method(&mut self, interp_method: InterpMethod) -> anyhow::Result<()> {
         let thermocouples = self.get_thermocouples()?;
         if let InterpMethod::Bilinear(y, x) | InterpMethod::BilinearExtra(y, x) = interp_method {
             if (x * y) as usize != thermocouples.len() {
-                return Err("invalid interp method".to_owned());
+                bail!("invalid interp method");
             }
         }
         self.interp_method_id = Some(InterpMethodId::new(self, interp_method));
@@ -365,7 +368,7 @@ impl Database {
     }
 
     #[instrument(level = "trace", skip(self), err)]
-    pub fn interp_frame(&self, frame_index: usize) -> Result<Array2<f64>, String> {
+    pub fn interp_frame(&self, frame_index: usize) -> anyhow::Result<Array2<f64>> {
         let video_data_id = self.video_data_id()?;
         let daq_data_id = self.daq_data_id()?;
         let start_index_id = self.start_index_id()?;
@@ -386,20 +389,20 @@ impl Database {
         Ok(interpolator.interp_frame(frame_index))
     }
 
-    pub fn get_iter_method(&self) -> Result<IterMethod, String> {
+    pub fn get_iter_method(&self) -> anyhow::Result<IterMethod> {
         Ok(self
             .iter_method_id
-            .ok_or("iter method unset")?
+            .ok_or_else(|| anyhow!("iter method unset"))?
             .iter_method(self))
     }
 
     #[instrument(level = "trace", skip(self), err)]
-    pub fn set_iter_method(&mut self, iter_method: IterMethod) -> Result<(), String> {
+    pub fn set_iter_method(&mut self, iter_method: IterMethod) -> anyhow::Result<()> {
         match iter_method {
             IterMethod::NewtonTangent { h0, .. } | IterMethod::NewtonDown { h0, .. }
                 if h0.is_nan() =>
             {
-                return Err("invalid iter method: {iter_method:?}".to_owned())
+                bail!("invalid iter method: {iter_method:?}")
             }
             _ => {}
         }
@@ -407,35 +410,35 @@ impl Database {
         Ok(())
     }
 
-    pub fn get_physical_param(&self) -> Result<PhysicalParam, String> {
+    pub fn get_physical_param(&self) -> anyhow::Result<PhysicalParam> {
         Ok(self
             .physical_param_id
-            .ok_or("physical param unset")?
+            .ok_or_else(|| anyhow!("physical param unset"))?
             .physical_param(self))
     }
 
-    pub fn set_physical_param(&mut self, physical_param: PhysicalParam) -> Result<(), String> {
+    pub fn set_physical_param(&mut self, physical_param: PhysicalParam) -> anyhow::Result<()> {
         if physical_param.gmax_temperature.is_nan()
             || physical_param.characteristic_length.is_nan()
             || physical_param.air_thermal_conductivity.is_nan()
             || physical_param.solid_thermal_diffusivity.is_nan()
             || physical_param.solid_thermal_conductivity.is_nan()
         {
-            return Err(format!("invalid physical param: {physical_param:?}"));
+            bail!("invalid physical param: {physical_param:?}");
         }
         self.physical_param_id = Some(PhysicalParamId::new(self, physical_param));
         Ok(())
     }
 
     #[instrument(level = "trace", skip(self), err)]
-    pub fn get_nu_data(&self) -> Result<NuData, String> {
+    pub fn get_nu_data(&self) -> anyhow::Result<NuData> {
         let nu2 = self.nu2_id()?.nu2(self).0;
         let nu_nan_mean = nan_mean(nu2.view());
         Ok(NuData { nu2, nu_nan_mean })
     }
 
     #[instrument(level = "trace", skip(self), err)]
-    pub fn get_nu_plot(&self, trunc: Option<(f64, f64)>) -> Result<String, String> {
+    pub fn get_nu_plot(&self, trunc: Option<(f64, f64)>) -> anyhow::Result<String> {
         let name = self.get_name()?;
         let save_root_dir = self.get_save_root_dir()?;
         let nu2 = self.nu2_id()?.nu2(self).0;
@@ -444,13 +447,13 @@ impl Database {
     }
 
     #[instrument(level = "trace", skip(self), err)]
-    pub fn save_data(&self) -> Result<(), String> {
+    pub fn save_data(&self) -> anyhow::Result<()> {
         let name = self.get_name()?;
         let save_root_dir = self.get_save_root_dir()?;
 
         let nu2 = self.nu2_id()?.nu2(self).0;
         let nu_matrix_path = save_root_dir.join(format!("{name}_nu_matrix.csv"));
-        save_nu_matrix(nu2.view(), nu_matrix_path).map_err(|e| e.to_string())?;
+        save_nu_matrix(nu2.view(), nu_matrix_path)?;
 
         let video_data_id = self.video_data_id()?;
         let video_meta = VideoMeta {
@@ -478,70 +481,74 @@ impl Database {
             interp_method: self.get_interp_method()?,
             iter_method: self.get_iter_method()?,
             physical_param: self.get_physical_param()?,
-            saved_at: time::OffsetDateTime::now_local().unwrap(),
+            saved_at: OffsetDateTime::now_utc().to_offset(UtcOffset::from_hms(8, 0, 0).unwrap()),
             nu_nan_mean: nan_mean(nu2.view()),
         };
-        let setting_path = save_root_dir.join("{name}_setting.json");
+        let setting_path = save_root_dir.join(format!("{name}_setting.json"));
         save_setting(setting, setting_path)?;
 
         Ok(())
     }
 
-    fn video_path_id(&self) -> Result<VideoPathId, String> {
-        self.video_path_id.ok_or("video path unset".to_owned())
+    fn video_path_id(&self) -> anyhow::Result<VideoPathId> {
+        self.video_path_id
+            .ok_or_else(|| anyhow!("video path unset"))
     }
 
-    fn daq_path_id(&self) -> Result<DaqPathId, String> {
-        self.daq_path_id.ok_or("daq path unset".to_owned())
+    fn daq_path_id(&self) -> anyhow::Result<DaqPathId> {
+        self.daq_path_id.ok_or_else(|| anyhow!("daq path unset"))
     }
 
-    fn video_data_id(&self) -> Result<VideoDataId, String> {
-        read_video(self, self.video_path_id()?)
+    fn video_data_id(&self) -> anyhow::Result<VideoDataId> {
+        read_video(self, self.video_path_id()?).map_err(Error::msg)
     }
 
-    fn daq_data_id(&self) -> Result<DaqDataId, String> {
-        read_daq(self, self.daq_path_id()?)
+    fn daq_data_id(&self) -> anyhow::Result<DaqDataId> {
+        read_daq(self, self.daq_path_id()?).map_err(Error::msg)
     }
 
-    fn start_index_id(&self) -> Result<StartIndexId, String> {
+    fn start_index_id(&self) -> anyhow::Result<StartIndexId> {
         self.start_index_id
-            .ok_or("video and daq not synchronized yet".to_owned())
+            .ok_or_else(|| anyhow!("video and daq not synchronized yet"))
     }
 
-    fn area_id(&self) -> Result<AreaId, String> {
-        self.area_id.ok_or("area unset".to_owned())
+    fn area_id(&self) -> anyhow::Result<AreaId> {
+        self.area_id.ok_or_else(|| anyhow!("area unset"))
     }
 
-    fn filter_method_id(&self) -> Result<FilterMethodId, String> {
+    fn filter_method_id(&self) -> anyhow::Result<FilterMethodId> {
         self.filter_method_id
-            .ok_or("filter method unset".to_owned())
+            .ok_or_else(|| anyhow!("filter method unset"))
     }
 
-    fn thermocouples_id(&self) -> Result<ThermocouplesId, String> {
-        self.thermocouples_id.ok_or("thermocouple unset".to_owned())
+    fn thermocouples_id(&self) -> anyhow::Result<ThermocouplesId> {
+        self.thermocouples_id
+            .ok_or_else(|| anyhow!("thermocouple unset"))
     }
 
-    fn interp_method_id(&self) -> Result<InterpMethodId, String> {
+    fn interp_method_id(&self) -> anyhow::Result<InterpMethodId> {
         self.interp_method_id
-            .ok_or("interp method unset".to_owned())
+            .ok_or_else(|| anyhow!("interp method unset"))
     }
 
-    fn physical_param_id(&self) -> Result<PhysicalParamId, String> {
+    fn physical_param_id(&self) -> anyhow::Result<PhysicalParamId> {
         self.physical_param_id
-            .ok_or("physical param unset".to_owned())
+            .ok_or_else(|| anyhow!("physical param unset"))
     }
 
-    fn iter_method_id(&self) -> Result<IterMethodId, String> {
-        self.iter_method_id.ok_or("iter method unset".to_owned())
+    fn iter_method_id(&self) -> anyhow::Result<IterMethodId> {
+        self.iter_method_id
+            .ok_or_else(|| anyhow!("iter method unset"))
     }
 
-    fn nu2_id(&self) -> Result<Nu2Id, String> {
+    fn nu2_id(&self) -> anyhow::Result<Nu2Id> {
         let video_data_id = self.video_data_id()?;
         let daq_data_id = self.daq_data_id()?;
         let start_index_id = self.start_index_id()?;
         let cal_num_id = eval_cal_num(self, video_data_id, daq_data_id, start_index_id);
         let area_id = self.area_id()?;
-        let green2_id = decode_all(self, video_data_id, start_index_id, cal_num_id, area_id)?;
+        let green2_id = decode_all(self, video_data_id, start_index_id, cal_num_id, area_id)
+            .map_err(Error::msg)?;
         let filter_method_id = self.filter_method_id()?;
         let gmax_frame_indexes_id = filter_detect_peak(self, green2_id, filter_method_id);
         let thermocouples_id = self.thermocouples_id()?;
@@ -572,13 +579,11 @@ impl Database {
 pub async fn decode_frame_base64(
     db: Snapshot<Database>,
     frame_index: usize,
-) -> Result<String, String> {
+) -> anyhow::Result<String> {
     let video_data_id = db.video_data_id()?;
     let decoder_manager = video_data_id.decoder_manager(&*db);
     let packets = video_data_id.packets(&*db).0;
-    video::decode_frame_base64(decoder_manager, packets, frame_index)
-        .await
-        .map_err(|e| e.to_string())
+    video::decode_frame_base64(decoder_manager, packets, frame_index).await
 }
 
 #[salsa::interned]

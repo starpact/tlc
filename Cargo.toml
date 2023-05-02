@@ -1,5 +1,5 @@
 [workspace]
-members = ["src-tauri", "tlc-core"]
+members = ["tlc-core", "tlc-server"]
 
 [workspace.dependencies]
 ndarray = { version = "0.15", features = ["rayon", "serde"] }

@@ -1,38 +1,5 @@
 # Transient Liquid Crystal Experiment Data Processing
 
-Built with [Tauri](https://tauri.app).
-
-## Development
-### Linux
-- install rust nightly-x86_64-unknown-linux-gnu toolchain
-- install [Nix](https://nixos.org/) and enable [Flake](https://nixos.wiki/wiki/Flakes), this will manage all other dependencies.
-```sh
-# enter the environment
-nix develop # or use direnv
-
-# run
-cargo tauri dev
-
-# build
-cargo tauri build
-```
-Cross compile to Windows(TODO).
-
-### Windows(TODO)
-- install rust nightly-x86_64-pc-windows-msvc toolchain
-```sh
-# install tauri-cli
-cargo install tauri-cli
-
-# install `ffmpeg` via `vcpkg`, need to compile for about 20 mins
-
-# let vcpkg expose ffmpeg headers
-
-# install `llvm`
-
-# install `cargo-vcpkg`
-```
-
 ## Architecture
 Use [Salsa](https://github.com/salsa-rs/salsa) incremental recomputation framework, which will take care all the cache and invalidation.
 ```mermaid
@@ -68,10 +35,33 @@ flowchart
     area --> thermocouples
 ```
 
+## Development
+### Linux
+- install [Nix](https://nixos.org/) and enable [Flake](https://nixos.wiki/wiki/Flakes), this will manage all other dependencies.
+- install rust nightly-x86_64-unknown-linux-gnu toolchain
+```sh
+# enter the environment
+nix develop # or use direnv
+```
 
-### Misc
+### Windows(TODO)
+- install rust nightly-x86_64-pc-windows-msvc toolchain
+```sh
+# install `ffmpeg` via `vcpkg`, need to compile for about 20 mins
 
-#### Smooth Progress Bar
+# let vcpkg expose ffmpeg headers
+
+# install `llvm`
+
+# install `cargo-vcpkg`
+```
+
+## Misc
+
+### Why sometimes convert between `Result<_, String>` and `Result<_, anyhow::Error>` back and forth?
+Some functions need to be `tracked` by `salsa` which requires return value to impl `Eq`. Another option is `salsa::accumulator` but it is too tedious.
+
+### Smooth Progress Bar
 When user drags the progress bar quickly, the decoding can not keep up and there will be a significant lag. Actually, we do not have to decode every frames, and the key is how to give up decoding some frames properly. The naive solution to avoid too much backlog is maintaining the number of pending tasks and directly abort current decoding if it already exceeds the limit. But FIFO is not perfect for this use case because it's better to give
 priority to newer frames, e.g. we should at least guarantee decoding the frame where the progress bar **stops**.
 `ring_buffer` is used to automatically eliminate the oldest frame to limit the
@@ -82,10 +72,15 @@ ring_buffer: ArrayQueue<oneshot::Sender<T>>,
 sem: Semaphore,
 ```
 
+## TODOs
+- [ ] Github CI
+- [ ] Cross compile to x86_64-pc-windows-gnu
+- [ ] Frontend React + MUI
+
 ## References
+- [Salsa](https://salsa-rs.netlify.app/overview.html)
 - [Taking Advantage of Auto-Vectorization in Rust](https://www.nickwilcox.com/blog/autovec)
 - [Async: What is blocking?](https://ryhl.io/blog/async-what-is-blocking/)
 - [FFmpeg: Difference Between Frames and Packets](https://stackoverflow.com/questions/53574798/difference-between-frames-and-packets-in-ffmpeg)
 - [FFmpeg: multithread decoding](https://www.cnblogs.com/TaigaCon/p/10220356.html)
 - [Matklad's reply on reddit](https://www.reddit.com/r/rust/comments/uf7yoy/comment/i6s4b8x/)
-- [Salsa](https://salsa-rs.netlify.app/overview.html)

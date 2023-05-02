@@ -6,29 +6,13 @@
       system = "x86_64-linux";
       pkgs = import nixpkgs { inherit system; };
       stdenv = pkgs.llvmPackages_15.stdenv;
-      libraries = with pkgs;[
-        dbus.lib
-        cairo
-        ffmpeg-full
-        gdk-pixbuf
-        glib.out
-        gtk3
-        llvmPackages_15.libclang.lib
-        openssl.out
-        webkitgtk
-      ];
+      libraries = with pkgs;[ llvmPackages_15.libclang.lib ];
       packages = with pkgs; [
         cargo-nextest
         cargo-tauri
-        dbus
         ffmpeg-full
-        glib
-        gtk3
-        libsoup
         nodejs
-        openssl
         pkg-config
-        sqlite
         webkitgtk
       ];
     in

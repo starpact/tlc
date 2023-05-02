@@ -41,7 +41,7 @@ impl DecoderManager {
         parameters: Parameters,
         frame_backlog_capacity: usize,
         num_decode_frame_workers: usize,
-    ) -> DecoderManager {
+    ) -> Self {
         assert!(num_decode_frame_workers > 0);
 
         let ring_buffer = ArrayQueue::new(frame_backlog_capacity);
@@ -51,7 +51,7 @@ impl DecoderManager {
             .build()
             .unwrap();
 
-        DecoderManager {
+        Self {
             inner: Arc::new(DecoderManagerInner {
                 parameters: Mutex::new(parameters),
                 decoders: ThreadLocal::new(),

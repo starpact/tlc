@@ -10,7 +10,7 @@ calamine = "0.19"
 crossbeam = "0.8"
 csv = "1.2"
 dwt = "0.5"
-ffmpeg = { version = "5.1", package = "ffmpeg-next" }
+ffmpeg = { version = "6", package = "ffmpeg-next" }
 image = "0.24"
 libm = "0.2"
 median = "0.3"
@@ -22,13 +22,16 @@ salsa = { git = "https://github.com/salsa-rs/salsa", package = "salsa-2022" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 thread_local = "1.1"
-time = { version = "0.3", features = ["serde", "local-offset", "formatting"] }
-tokio = { version = "1.27", features = ["sync"] }
+time = { version = "0.3", features = ["serde"] }
+tokio = { version = "1.28", features = ["sync"] }
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["local-time"] }
+tracing-subscriber = { version = "0.3", features = [
+  "env-filter",
+  "local-time",
+] }
 
 [dev-dependencies]
 approx = "0.5"
 ndarray = { version = "0.15", features = ["approx-0_5"] }
 sleef = "0.3"
-tokio = { version = "1.27", features = ["macros", "time", "rt-multi-thread"] }
+tokio = { version = "1.28", features = ["macros", "time", "rt-multi-thread"] }

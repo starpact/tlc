@@ -33,7 +33,7 @@ impl Interpolator {
         interp_method: InterpMethod,
         thermocouples: &[Thermocouple],
         daq_data: ArrayView2<f64>,
-    ) -> Interpolator {
+    ) -> Self {
         assert!(thermocouples
             .iter()
             .all(|tc| tc.column_index < daq_data.ncols()));
@@ -57,7 +57,7 @@ impl Interpolator {
             _ => interp1(temp2, interp_method, area, thermocouples),
         };
 
-        Interpolator {
+        Self {
             interp_method,
             shape: (area.2, area.3),
             data: data.into_shared(),
