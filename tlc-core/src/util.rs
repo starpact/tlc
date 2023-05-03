@@ -15,17 +15,13 @@ macro_rules! impl_eq_always_false {
 pub(crate) use impl_eq_always_false;
 
 pub(crate) mod log {
-    use tracing::Level;
     use tracing_subscriber::{fmt::format::FmtSpan, EnvFilter};
 
     pub fn init() {
         let builder = tracing_subscriber::fmt()
             .with_span_events(FmtSpan::ENTER | FmtSpan::CLOSE)
             .with_env_filter(
-                EnvFilter::builder()
-                    .with_default_directive(Level::TRACE.into())
-                    .from_env()
-                    .unwrap(),
+                EnvFilter::try_from_default_env().unwrap_or_else(|_| "trace,hyper=info".into()),
             );
 
         // This has to be executed in single threaded environment.

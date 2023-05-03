@@ -4,27 +4,27 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-anyhow = "1.0"
+anyhow = { workspace = true }
 base64 = "0.21"
 calamine = "0.19"
 crossbeam = "0.8"
 csv = "1.2"
 dwt = "0.5"
-ffmpeg = { version = "6", package = "ffmpeg-next" }
+ffmpeg = { version = "6.0", package = "ffmpeg-next" }
 image = "0.24"
 libm = "0.2"
 median = "0.3"
-ndarray = { workspace = true }
+ndarray = { version = "0.15", features = ["rayon", "serde"] }
 packed_simd = { version = "0.3.8", package = "packed_simd_2" }
 plotters = "0.3"
 rayon = "1.7"
 salsa = { git = "https://github.com/salsa-rs/salsa", package = "salsa-2022" }
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+serde = { workspace = true }
+serde_json = { workspace = true }
 thread_local = "1.1"
 time = { version = "0.3", features = ["serde"] }
-tokio = { version = "1.28", features = ["sync"] }
-tracing = "0.1"
+tokio = { workspace = true }
+tracing = { workspace = true }
 tracing-subscriber = { version = "0.3", features = [
   "env-filter",
   "local-time",
