@@ -12,15 +12,14 @@ use crate::state::Setting;
 pub(crate) fn save_setting<P: AsRef<Path>>(
     setting: Setting,
     setting_path: P,
-) -> Result<(), String> {
+) -> anyhow::Result<()> {
     let mut file = std::fs::OpenOptions::new()
         .write(true)
         .create(true)
         .truncate(true)
-        .open(setting_path)
-        .map_err(|e| e.to_string())?;
-    let buf = serde_json::to_string_pretty(&setting).map_err(|e| e.to_string())?;
-    file.write_all(buf.as_bytes()).map_err(|e| e.to_string())?;
+        .open(setting_path)?;
+    let buf = serde_json::to_string_pretty(&setting)?;
+    file.write_all(buf.as_bytes())?;
     Ok(())
 }
 
@@ -57,12 +56,12 @@ pub(crate) fn draw_nu_plot_and_save<P: AsRef<Path>>(
     nu2: ArrayView2<f64>,
     trunc: Option<(f64, f64)>,
     nu_plot_path: P,
-) -> Result<String, String> {
+) -> anyhow::Result<String> {
     let nu_nan_mean = nan_mean(nu2.view());
     let trunc = trunc.unwrap_or((nu_nan_mean * 0.6, nu_nan_mean * 2.0));
-    let buf = draw_area(nu2.view(), trunc).map_err(|e| e.to_string())?;
+    let buf = draw_area(nu2.view(), trunc)?;
     let (h, w) = nu2.dim();
-    image::save_buffer(nu_plot_path, &buf, w as u32, h as u32, Rgb8).map_err(|e| e.to_string())?;
+    image::save_buffer(nu_plot_path, &buf, w as u32, h as u32, Rgb8)?;
     Ok(general_purpose::STANDARD.encode(buf))
 }
 

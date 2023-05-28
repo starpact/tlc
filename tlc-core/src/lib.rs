@@ -64,6 +64,6 @@ pub struct Jar(
 pub trait Db: salsa::DbWithJar<Jar> {}
 
 pub fn init() {
-    video::init();
     util::log::init();
+    video::init();
 }

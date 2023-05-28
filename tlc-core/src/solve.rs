@@ -121,7 +121,7 @@ impl PointData<'_> {
         let gmax_frame_index = self.gmax_frame_index;
         let temps = self.temperatures;
 
-        // We use the average of first 4 values to calculate the initial temperature.
+        // The average of first 4 values are used to calculate the initial temperature.
         const FIRST_FEW_TO_CAL_T0: usize = 4;
         let t0 = temps[..FIRST_FEW_TO_CAL_T0].iter().sum::<f64>() / FIRST_FEW_TO_CAL_T0 as f64;
         let (mut sum, mut diff_sum) = (f64x4::default(), f64x4::default());
@@ -149,7 +149,6 @@ impl PointData<'_> {
             sum += step;
             diff_sum += diff_step;
         }
-
         let (mut sum, mut diff_sum) = (sum.sum(), diff_sum.sum());
 
         while frame_index < gmax_frame_index {
@@ -170,8 +169,7 @@ impl PointData<'_> {
     }
 }
 
-// Scalar version erfc from libm is much faster than SIMD version from sleef.
-// See bench.
+// Scalar version erfc from libm is much faster than SIMD version from sleef, see bench.
 fn erfc_simd(arr: Simd<[f64; 4]>) -> Simd<[f64; 4]> {
     unsafe {
         f64x4::new(
@@ -262,25 +260,22 @@ fn solve(
         move |point_data: PointData, h| point_data.heat_transfer_equation(h, dt, k, a, tw);
 
     let h1 = match iteration_method {
-        IterMethod::NewtonTangent { h0, max_iter_num } => solve_core(
-            gmax_frame_indexes,
-            interpolator,
-            newtow_tangent(equation, h0, max_iter_num),
-        ),
-        IterMethod::NewtonDown { h0, max_iter_num } => solve_core(
-            gmax_frame_indexes,
-            interpolator,
-            newtow_down(equation, h0, max_iter_num),
-        ),
+        IterMethod::NewtonTangent { h0, max_iter_num } => {
+            let f = newtow_tangent(equation, h0, max_iter_num);
+            solve_core(f, gmax_frame_indexes, interpolator)
+        }
+        IterMethod::NewtonDown { h0, max_iter_num } => {
+            let f = newtow_down(equation, h0, max_iter_num);
+            solve_core(f, gmax_frame_indexes, interpolator)
+        }
     };
-    assert_eq!(shape.0 * shape.1, h1.len());
     Array2::from_shape_vec(shape, h1).unwrap() * characteristic_length / air_thermal_conductivity
 }
 
 fn solve_core<F>(
+    solve_single_point: F,
     gmax_frame_indexes: &[usize],
     interpolator: Interpolator,
-    solve_single_point: F,
 ) -> Vec<f64>
 where
     F: Fn(PointData) -> f64 + Send + Sync + 'static,

@@ -1,5 +1,5 @@
 [workspace]
-members = ["src-tauri", "tlc-core"]
+members = ["tlc-core", "tlc-server"]
 
 [profile.release]
 codegen-units = 1
