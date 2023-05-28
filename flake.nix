@@ -28,7 +28,6 @@
         nodejs
         openssl
         pkg-config
-        sqlite
         webkitgtk
       ];
     in

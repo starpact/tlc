@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use ndarray::{ArcArray2, Array2};
 use salsa::{DebugWithDb, Snapshot};
 use serde::Serialize;
+use time::{OffsetDateTime, UtcOffset};
 use tracing::{instrument, trace};
 
 use crate::{
@@ -478,7 +479,7 @@ impl Database {
             interp_method: self.get_interp_method()?,
             iter_method: self.get_iter_method()?,
             physical_param: self.get_physical_param()?,
-            saved_at: time::OffsetDateTime::now_local().unwrap(),
+            saved_at: OffsetDateTime::now_utc().to_offset(UtcOffset::from_hms(8, 0, 0).unwrap()),
             nu_nan_mean: nan_mean(nu2.view()),
         };
         let setting_path = save_root_dir.join("{name}_setting.json");
