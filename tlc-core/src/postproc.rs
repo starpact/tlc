@@ -98,7 +98,7 @@ fn draw_area(area: ArrayView2<f64>, edge_truncation: (f64, f64)) -> anyhow::Resu
     Ok(buf)
 }
 
-/// jet colormap from Matlab
+/// jet colormap from Matlab.
 const JET: [[f64; 3]; 256] = [
     [0., 0., 0.515625000000000],
     [0., 0., 0.531250000000000],
