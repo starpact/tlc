@@ -7,7 +7,6 @@ edition = "2021"
 anyhow = "1.0"
 base64 = "0.21"
 calamine = "0.20"
-crossbeam = "0.8"
 csv = "1.2"
 dwt = "0.5"
 ffmpeg = { version = "6.0", package = "ffmpeg-next" }

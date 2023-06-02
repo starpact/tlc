@@ -37,15 +37,15 @@ fn test_read_video_cancel() {
     let video_path = PathBuf::from("./testdata/almost_empty.avi");
     db.set_video_path(video_path.clone()).unwrap();
 
-    {
+    thread::spawn({
         let db = db.snapshot();
-        thread::spawn(move || {
+        move || {
             let _span = tracing::debug_span!("will_be_canceled").entered();
             thread::sleep(Duration::from_millis(10));
             db.get_video_nframes().unwrap(); // panic here by salsa
             unreachable!();
-        });
-    }
+        }
+    });
 
     tracing::debug_span!("set_input")
         .in_scope(|| db.set_video_path(video_path))

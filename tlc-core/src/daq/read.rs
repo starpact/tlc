@@ -1,12 +1,12 @@
 use std::path::Path;
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, bail};
 use calamine::{open_workbook, Reader, Xlsx};
 use ndarray::Array2;
 use tracing::instrument;
 
 #[instrument(fields(daq_path = ?daq_path.as_ref()), err)]
-pub(crate) fn read_daq<P: AsRef<Path>>(daq_path: P) -> Result<Array2<f64>> {
+pub(crate) fn read_daq<P: AsRef<Path>>(daq_path: P) -> anyhow::Result<Array2<f64>> {
     let daq_path = daq_path.as_ref();
     let daq_data = match daq_path
         .extension()
@@ -20,7 +20,7 @@ pub(crate) fn read_daq<P: AsRef<Path>>(daq_path: P) -> Result<Array2<f64>> {
     Ok(daq_data)
 }
 
-fn read_daq_lvm(daq_path: &Path) -> Result<Array2<f64>> {
+fn read_daq_lvm(daq_path: &Path) -> anyhow::Result<Array2<f64>> {
     let mut rdr = csv::ReaderBuilder::new()
         .has_headers(false)
         .delimiter(b'\t')
@@ -46,7 +46,7 @@ fn read_daq_lvm(daq_path: &Path) -> Result<Array2<f64>> {
     Ok(daq)
 }
 
-fn read_daq_excel(daq_path: &Path) -> Result<Array2<f64>> {
+fn read_daq_excel(daq_path: &Path) -> anyhow::Result<Array2<f64>> {
     let mut excel: Xlsx<_> = open_workbook(daq_path)?;
     let sheet = excel
         .worksheet_range_at(0)

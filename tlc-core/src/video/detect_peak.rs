@@ -1,4 +1,4 @@
-use anyhow::{bail, Result};
+use anyhow::bail;
 use dwt::{transform, wavelet::Wavelet, Operation};
 use median::Filter;
 use ndarray::{parallel::prelude::*, prelude::*, ArcArray2};
@@ -76,7 +76,7 @@ pub fn filter_point(
     filter_method: FilterMethod,
     area: (u32, u32, u32, u32),
     (y, x): (usize, usize),
-) -> Result<Vec<u8>> {
+) -> anyhow::Result<Vec<u8>> {
     let (h, w) = (area.2 as usize, area.3 as usize);
     if y >= h {
         bail!("y({y}) out of range({h})");
@@ -213,7 +213,7 @@ mod tests {
     fn test_detect() {
         log::init();
         let (_, parameters, packets) = read_video(VIDEO_PATH_REAL).unwrap();
-        let decode_manager = DecoderManager::new(parameters, 10, 20);
+        let decode_manager = DecoderManager::new(parameters, 20);
         let green2 = decode_manager
             .decode_all(
                 Arc::new(packets),
@@ -224,14 +224,13 @@ mod tests {
             .unwrap()
             .into_shared();
 
-        // filter_detect_peak(green2.clone(), FilterMethod::No);
-        // filter_detect_peak(green2.clone(), FilterMethod::Median { window_size: 10 });
-        let x = filter_detect_peak(
+        filter_detect_peak(green2.clone(), FilterMethod::No);
+        filter_detect_peak(green2.clone(), FilterMethod::Median { window_size: 10 });
+        filter_detect_peak(
             green2,
             FilterMethod::Wavelet {
                 threshold_ratio: 0.8,
             },
         );
-        println!("{}", x[..10000].iter().sum::<usize>());
     }
 }

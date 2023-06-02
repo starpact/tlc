@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use anyhow::{anyhow, Result};
+use anyhow::anyhow;
 use ffmpeg::codec;
 pub use ffmpeg::codec::{packet::Packet, Parameters};
 use tracing::instrument;
@@ -14,7 +14,7 @@ use super::VideoMeta;
 #[instrument(fields(video_path), err)]
 pub(crate) fn read_video<P: AsRef<Path>>(
     video_path: P,
-) -> Result<(VideoMeta, Parameters, Vec<Packet>)> {
+) -> anyhow::Result<(VideoMeta, Parameters, Vec<Packet>)> {
     let video_path = video_path.as_ref().to_owned();
     let mut input = ffmpeg::format::input(&video_path)?;
     let video_stream = input

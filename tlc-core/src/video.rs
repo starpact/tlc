@@ -107,7 +107,7 @@ pub(crate) fn read_video(
         frame_rate, shape, ..
     } = video_meta;
     let packets = Packets(Arc::new(packets));
-    let decoder_manager = DecoderManager::new(parameters, 2, 4);
+    let decoder_manager = DecoderManager::new(parameters, 4);
     let video_data_id = VideoDataId::new(db, frame_rate, shape, packets, decoder_manager);
     Ok(video_data_id)
 }

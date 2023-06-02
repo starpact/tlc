@@ -4,9 +4,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use anyhow::Result;
 use base64::{engine::general_purpose, Engine};
-use crossbeam::queue::ArrayQueue;
 use ffmpeg::{
     codec,
     codec::{packet::Packet, Parameters},
@@ -37,15 +35,10 @@ impl std::fmt::Debug for DecoderManager {
 impl_eq_always_false!(DecoderManager);
 
 impl DecoderManager {
-    pub(crate) fn new(
-        parameters: Parameters,
-        frame_backlog_capacity: usize,
-        num_decode_frame_workers: usize,
-    ) -> DecoderManager {
+    pub(crate) fn new(parameters: Parameters, num_decode_frame_workers: usize) -> DecoderManager {
         assert!(num_decode_frame_workers > 0);
-
-        let ring_buffer = ArrayQueue::new(frame_backlog_capacity);
-        let sem = Semaphore::new(frame_backlog_capacity);
+        let backlog = Mutex::new(None);
+        let sem = Semaphore::new(num_decode_frame_workers);
         let thread_pool = ThreadPoolBuilder::new()
             .num_threads(num_decode_frame_workers)
             .build()
@@ -55,7 +48,7 @@ impl DecoderManager {
             inner: Arc::new(DecoderManagerInner {
                 parameters: Mutex::new(parameters),
                 decoders: ThreadLocal::new(),
-                ring_buffer,
+                backlog,
                 sem,
                 thread_pool,
             }),
@@ -66,18 +59,18 @@ impl DecoderManager {
         &self,
         packets: Arc<Vec<Packet>>,
         frame_index: usize,
-    ) -> Result<String> {
+    ) -> anyhow::Result<String> {
         let (tx, rx) = oneshot::channel();
         if let Ok(_permit) = self.inner.sem.try_acquire() {
             self.spawn_decode_frame_base64(packets, frame_index, tx);
             return rx.await?;
         }
-        // When the returned value which contains a `Sender` is dropped, its corresponding
-        // `Receiver` which is waiting on another thread will be disconnected.
-        self.inner.ring_buffer.force_push(tx);
+        // When the old value which contains a `Sender` is dropped, its corresponding
+        // `Receiver`(which is awaiting) will be disconnected.
+        *self.inner.backlog.lock().unwrap() = Some(tx);
         let _permit = self.inner.sem.acquire().await.unwrap();
-        if let Some(tx) = self.inner.ring_buffer.pop() {
-            // `tx` here may be from other task.
+        if let Some(tx) = self.inner.backlog.lock().unwrap().take() {
+            // `tx` here may be from another more recent task.
             self.spawn_decode_frame_base64(packets, frame_index, tx);
         }
         rx.await?
@@ -89,7 +82,7 @@ impl DecoderManager {
         start_frame: usize,
         cal_num: usize,
         area: (u32, u32, u32, u32),
-    ) -> Result<Array2<u8>> {
+    ) -> anyhow::Result<Array2<u8>> {
         self.inner.decode_all(packets, start_frame, cal_num, area)
     }
 
@@ -97,9 +90,10 @@ impl DecoderManager {
         &self,
         packets: Arc<Vec<Packet>>,
         frame_index: usize,
-        tx: oneshot::Sender<Result<String>>,
+        tx: oneshot::Sender<anyhow::Result<String>>,
     ) {
         let inner = self.inner.clone();
+        // Semaphore with same number of permits guarantees it will never block here.
         self.inner.thread_pool.spawn(move || {
             tx.send(inner.decode_frame_base64(&packets[frame_index]))
                 .unwrap();
@@ -114,32 +108,34 @@ struct DecoderManagerInner {
     parameters: Mutex<Parameters>,
     decoders: ThreadLocal<RefCell<Decoder>>,
 
-    /// When user drags the progress bar quickly, the decoding can not keep up
-    /// and there will be a significant lag. Actually, we do not have to decode
+    /// When user drags the progress bar quickly, the decoding can not keep up and
+    /// there will be a significant lag. However, we actually do not have to decode
     /// every frames, and the key is how to give up decoding some frames properly.
     /// The naive solution to avoid too much backlog is maintaining the number of
     /// pending tasks and directly abort current decoding if it already exceeds the
     /// limit. But FIFO is not perfect for this use case because it's better to give
     /// priority to newer frames, e.g. we should at least guarantee decoding the frame
     /// where the progress bar **stops**.
-    /// `ring_buffer` is used to automatically eliminate the oldest frame to limit the
-    /// number of backlog frames.
-    ring_buffer: ArrayQueue<oneshot::Sender<Result<String>>>,
+    /// `backlog` only stores the most recent required frame, as a simplified version of
+    /// ringbuffer.
+    backlog: Mutex<Option<oneshot::Sender<anyhow::Result<String>>>>,
     sem: Semaphore,
     thread_pool: ThreadPool,
 }
 
 impl DecoderManagerInner {
-    fn decoder(&self) -> Result<RefMut<Decoder>> {
-        let decoder = self.decoders.get_or_try(|| -> Result<RefCell<Decoder>> {
-            let decoder = Decoder::new(self.parameters.lock().unwrap().clone())?;
-            Ok(RefCell::new(decoder))
-        })?;
+    fn decoder(&self) -> anyhow::Result<RefMut<Decoder>> {
+        let decoder = self
+            .decoders
+            .get_or_try(|| -> anyhow::Result<RefCell<Decoder>> {
+                let decoder = Decoder::new(self.parameters.lock().unwrap().clone())?;
+                Ok(RefCell::new(decoder))
+            })?;
         Ok(decoder.borrow_mut())
     }
 
     #[instrument(skip(self, packet))]
-    fn decode_frame_base64(&self, packet: &Packet) -> Result<String> {
+    fn decode_frame_base64(&self, packet: &Packet) -> anyhow::Result<String> {
         let mut decoder = self.decoder()?;
         let (w, h) = decoder.shape();
         let mut buf = Vec::new();
@@ -157,7 +153,7 @@ impl DecoderManagerInner {
         start_frame: usize,
         cal_num: usize,
         area: (u32, u32, u32, u32),
-    ) -> Result<Array2<u8>> {
+    ) -> anyhow::Result<Array2<u8>> {
         let byte_w = self.decoder()?.shape().1 as usize * 3;
         let (tl_y, tl_x, cal_h, cal_w) = area;
         let (tl_y, tl_x, cal_h, cal_w) =
@@ -167,7 +163,7 @@ impl DecoderManagerInner {
             .par_iter()
             .skip(start_frame)
             .zip(green2.axis_iter_mut(Axis(0)))
-            .try_for_each(|(packet, mut row)| -> Result<()> {
+            .try_for_each(|(packet, mut row)| -> anyhow::Result<()> {
                 let mut decoder = self.decoder()?;
                 let dst_frame = decoder.decode(packet)?;
 
@@ -202,7 +198,7 @@ struct Decoder {
 }
 
 impl Decoder {
-    fn new(parameters: Parameters) -> Result<Self> {
+    fn new(parameters: Parameters) -> anyhow::Result<Self> {
         let codec_ctx = codec::Context::from_parameters(parameters)?
             .decoder()
             .video()?;
@@ -217,7 +213,7 @@ impl Decoder {
         })
     }
 
-    fn decode(&mut self, packet: &Packet) -> Result<&Video> {
+    fn decode(&mut self, packet: &Packet) -> anyhow::Result<&Video> {
         self.codec_ctx.send_packet(packet)?;
         self.codec_ctx.receive_frame(&mut self.src_frame)?;
         self.sws_ctx.run(&self.src_frame, &mut self.dst_frame)?;
@@ -289,7 +285,7 @@ mod tests {
 
     async fn _decode_frame(video_path: &str) {
         let (_, parameters, packets) = read_video(video_path).unwrap();
-        let decode_manager = DecoderManager::new(parameters, 10, 20);
+        let decode_manager = DecoderManager::new(parameters, 20);
 
         let mut handles = Vec::new();
         let ok_cnt = Arc::new(AtomicU32::new(0));
@@ -319,7 +315,7 @@ mod tests {
 
     fn _decode_all(video_path: &str, start_frame: usize, cal_num: usize) {
         let (_, parameters, packets) = read_video(video_path).unwrap();
-        let decode_manager = DecoderManager::new(parameters, 10, 20);
+        let decode_manager = DecoderManager::new(parameters, 20);
         decode_manager
             .decode_all(Arc::new(packets), start_frame, cal_num, (10, 10, 600, 800))
             .unwrap();
