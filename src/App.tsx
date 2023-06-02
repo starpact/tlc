@@ -26,6 +26,7 @@ function App() {
     setName(name);
     return name;
   }
+
   async function apiSetName() {
     await tauri.invoke<void>("set_name", { name });
   }
@@ -35,9 +36,11 @@ function App() {
     setSaveRootDir(saveRootDir);
     return saveRootDir;
   }
+
   async function apiSetSaveRootDir() {
     await tauri.invoke<void>("set_save_root_dir", { saveRootDir });
   }
+
   async function chooseSaveRootDir() {
     const dir = await dialog.open({
       title: "Choose directory where all results are saved",
@@ -52,6 +55,7 @@ function App() {
     setVideoPath(videoPath);
     return videoPath;
   }
+
   async function apiSetVideoPath() {
     if (videoPath === "") return;
     await tauri.invoke<void>("set_video_path", { videoPath });
@@ -59,6 +63,7 @@ function App() {
     setVideoFrameRate(await tauri.invoke<number>("get_video_frame_rate"));
     setVideoShape(await tauri.invoke<[number, number]>("get_video_shape"));
   }
+
   async function chooseVideoPath() {
     const path = await dialog.open({
       title: "Choose video",
@@ -74,10 +79,12 @@ function App() {
     setDaqPath(daqPath);
     return daqPath;
   }
+
   async function apiSetDaqPath() {
     await tauri.invoke<void>("set_daq_path", { daqPath });
     setDaqData(await tauri.invoke<Array2>("get_daq_data"));
   }
+
   async function chooseDaqPath() {
     const path = await dialog.open({
       title: "Choose DAQ",

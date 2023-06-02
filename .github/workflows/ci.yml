@@ -4,9 +4,6 @@ on:
   push:
   pull_request:
 
-env:
-  CARGO_TERM_COLOR: always
-
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -16,8 +13,8 @@ jobs:
         with:
           github_access_token: ${{ secrets.GITHUB_TOKEN }}
       - name: Build
-        run: nix develop --impure --command cargo build
+        run: nix develop --command cargo build
       - name: Lint
-        run: nix develop --impure --command cargo clippy
+        run: nix develop --command cargo clippy
       - name: Test
-        run: nix develop --impure --command cargo test --verbose
+        run: nix develop --command cargo test --verbose

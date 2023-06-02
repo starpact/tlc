@@ -52,6 +52,7 @@
             ''
               export LD_LIBRARY_PATH=${libs}:$LD_LIBRARY_PATH
               export RUST_BACKTRACE=1
+              export CARGO_TERM_COLOR=always
             '';
         };
       };
