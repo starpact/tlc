@@ -1,10 +1,15 @@
 {
-  inputs.nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
+  inputs = {
+    nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
+    rust-overlay.url = "github:oxalica/rust-overlay";
+  };
 
-  outputs = { self, nixpkgs }:
+  outputs = { self, nixpkgs, rust-overlay }:
     let
-      system = "x86_64-linux";
-      pkgs = import nixpkgs { inherit system; };
+      pkgs = import nixpkgs {
+        system = "x86_64-linux";
+        overlays = [ (import rust-overlay) ];
+      };
       stdenv = pkgs.llvmPackages_16.stdenv;
       libraries = with pkgs;[
         dbus.lib
@@ -18,6 +23,10 @@
         webkitgtk
       ];
       packages = with pkgs; [
+        (rust-bin.selectLatestNightlyWith (toolchain: toolchain.default.override {
+          extensions = [ "rust-src" "rust-analyzer" ];
+          targets = [ "x86_64-unknown-linux-gnu" "x86_64-pc-windows-gnu" ];
+        }))
         cargo-nextest
         cargo-tauri
         dbus
