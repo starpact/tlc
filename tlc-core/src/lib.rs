@@ -1,6 +1,4 @@
-#![feature(test)]
-#![feature(array_windows)]
-#![feature(portable_simd)]
+#![cfg_attr(test, feature(test, array_windows, portable_simd))]
 #![allow(clippy::too_many_arguments)]
 
 mod daq;
@@ -12,52 +10,43 @@ mod tests;
 mod util;
 mod video;
 
-use daq::{
-    make_interpolator, read_daq, DaqDataId, DaqPathId, InterpMethodId, InterpolatorId,
-    ThermocouplesId,
-};
 pub use daq::{InterpMethod, Thermocouple};
 pub use salsa::ParallelDatabase;
 pub use solve::{IterMethod, PhysicalParam};
-use solve::{IterMethodId, Nu2Id, PhysicalParamId};
+use state::CalNumId;
 pub use state::{decode_frame_base64, Database, NuData};
-use state::{eval_cal_num, CalNumId, StartIndexId};
 pub use video::FilterMethod;
-use video::{
-    decode_all, filter_detect_peak, filter_point, read_video, AreaId, FilterMethodId,
-    GmaxFrameIndexesId, Green2Id, PointId, VideoDataId, VideoPathId,
-};
 
 #[salsa::jar(db = Db)]
 pub struct Jar(
     // input
-    VideoPathId,
-    DaqPathId,
-    ThermocouplesId,
+    video::VideoPathId,
+    daq::DaqPathId,
+    daq::ThermocouplesId,
     // interned
-    AreaId,
-    FilterMethodId,
-    InterpMethodId,
-    PhysicalParamId,
-    IterMethodId,
-    StartIndexId,
+    video::AreaId,
+    video::FilterMethodId,
+    daq::InterpMethodId,
+    solve::PhysicalParamId,
+    solve::IterMethodId,
+    state::StartIndexId,
     // tracked
-    VideoDataId,
-    Green2Id,
-    PointId,
-    GmaxFrameIndexesId,
-    DaqDataId,
-    InterpolatorId,
-    CalNumId,
-    Nu2Id,
+    video::VideoDataId,
+    video::Green2Id,
+    video::PointId,
+    video::GmaxFrameIndexesId,
+    daq::DaqDataId,
+    daq::InterpolatorId,
+    state::CalNumId,
+    solve::Nu2Id,
     // tracked function
-    read_video,
-    decode_all,
-    filter_detect_peak,
-    filter_point,
-    read_daq,
-    make_interpolator,
-    eval_cal_num,
+    video::read_video,
+    video::decode_all,
+    video::filter_detect_peak,
+    video::filter_point,
+    daq::read_daq,
+    daq::make_interpolator,
+    state::eval_cal_num,
     solve::solve_nu,
 );
 

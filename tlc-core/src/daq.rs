@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use ndarray::ArcArray2;
 use serde::{Deserialize, Serialize};
 
-use crate::{util::impl_eq_always_false, video::AreaId, CalNumId, StartIndexId};
+use crate::{state::StartIndexId, util::impl_eq_always_false, video::AreaId, CalNumId};
 pub use interp::{InterpMethod, Interpolator};
 
 #[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq)]

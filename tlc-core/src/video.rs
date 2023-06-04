@@ -11,7 +11,7 @@ pub use ffmpeg::codec::{packet::Packet, Parameters};
 use ndarray::ArcArray2;
 use serde::{Deserialize, Serialize};
 
-use crate::{util::impl_eq_always_false, CalNumId, StartIndexId};
+use crate::{state::StartIndexId, util::impl_eq_always_false, CalNumId};
 pub use decode::DecoderManager;
 pub use detect_peak::FilterMethod;
 

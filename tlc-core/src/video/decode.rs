@@ -116,7 +116,7 @@ struct DecoderManagerInner {
     /// limit. But FIFO is not perfect for this use case because it's better to give
     /// priority to newer frames, e.g. we should at least guarantee decoding the frame
     /// where the progress bar **stops**.
-    /// `backlog` only stores the most recent required frame, as a simplified version of
+    /// `backlog` only stores sender of the most recent frame, as a simplified version of
     /// ringbuffer.
     backlog: Mutex<Option<oneshot::Sender<anyhow::Result<String>>>>,
     sem: Semaphore,

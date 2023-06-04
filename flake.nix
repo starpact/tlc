@@ -10,47 +10,27 @@
         system = "x86_64-linux";
         overlays = [ (import rust-overlay) ];
       };
-      stdenv = pkgs.llvmPackages_16.stdenv;
-      libraries = with pkgs;[
-        dbus.lib
-        cairo
-        ffmpeg-full
-        gdk-pixbuf
-        glib.out
-        gtk3
-        llvmPackages_16.libclang.lib
-        openssl.out
-        webkitgtk
-      ];
-      packages = with pkgs; [
-        (rust-bin.selectLatestNightlyWith (toolchain: toolchain.default.override {
-          extensions = [ "rust-src" "rust-analyzer" ];
-          targets = [ "x86_64-unknown-linux-gnu" "x86_64-pc-windows-gnu" ];
-        }))
-        cargo-nextest
-        cargo-tauri
-        dbus
-        ffmpeg-full
-        glib
-        gtk3
-        libsoup
-        nodejs
-        openssl
-        pkg-config
-        webkitgtk
-      ];
+      llvmPackages = pkgs.llvmPackages_16;
     in
     {
       devShells = {
-        x86_64-linux.default = pkgs.mkShell.override { inherit stdenv; } {
-          buildInputs = packages;
+        x86_64-linux.default = pkgs.mkShell.override { stdenv = llvmPackages.stdenv; } {
+          buildInputs = with pkgs; [
+            (rust-bin.selectLatestNightlyWith (toolchain: toolchain.default.override {
+              extensions = [ "rust-src" "rust-analyzer" ];
+              targets = [ "x86_64-unknown-linux-gnu" "x86_64-pc-windows-gnu" ];
+            }))
+            cargo-nextest
+            cargo-tauri
+            ffmpeg-full
+            nodejs
+            openssl
+            pkg-config
+            webkitgtk
+          ];
           shellHook =
-            let
-              joinLibs = libs: builtins.concatStringsSep ":" (builtins.map (x: "${x}/lib") libs);
-              libs = joinLibs libraries;
-            in
             ''
-              export LD_LIBRARY_PATH=${libs}:$LD_LIBRARY_PATH
+              export LIBCLANG_PATH=${llvmPackages.libclang.lib}/lib
               export RUST_BACKTRACE=1
               export CARGO_TERM_COLOR=always
             '';
