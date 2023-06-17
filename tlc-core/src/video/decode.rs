@@ -65,8 +65,8 @@ impl DecoderManager {
             self.spawn_decode_frame_base64(packets, frame_index, tx);
             return rx.await?;
         }
-        // When the old value which contains a `Sender` is dropped, its corresponding
-        // `Receiver`(which is awaiting) will be disconnected.
+        // When the old value which contains a tx is dropped, its corresponding
+        // rx(which is awaiting) will be disconnected.
         *self.inner.backlog.lock().unwrap() = Some(tx);
         let _permit = self.inner.sem.acquire().await.unwrap();
         if let Some(tx) = self.inner.backlog.lock().unwrap().take() {

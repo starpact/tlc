@@ -9,11 +9,11 @@ default-run = "tlc"
 edition = "2021"
 
 [build-dependencies]
-tauri-build = { version = "1.3", features = [] }
+tauri-build = { version = "1.4", features = [] }
 
 [dependencies]
 ndarray = { version = "0.15", features = ["serde"] }
-tauri = { version = "1.3", features = ["api-all"] }
+tauri = { version = "1.4", features = ["api-all"] }
 tlc-core = { path = "../tlc-core" }
 
 [features]
