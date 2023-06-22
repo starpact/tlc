@@ -116,8 +116,8 @@ struct DecoderManagerInner {
     /// limit. But FIFO is not perfect for this use case because it's better to give
     /// priority to newer frames, e.g. we should at least guarantee decoding the frame
     /// where the progress bar **stops**.
-    /// `backlog` only stores sender of the most recent frame, as a simplified version of
-    /// ringbuffer.
+    /// `backlog` only stores result sender of the most recent frame, as a simplified
+    /// version of ring buffer.
     backlog: Mutex<Option<oneshot::Sender<anyhow::Result<String>>>>,
     sem: Semaphore,
     thread_pool: ThreadPool,
@@ -228,7 +228,6 @@ impl Decoder {
 /// Wrap `Context` to pass between threads(because of the raw pointer).
 struct SendableSwsCtx(scaling::Context);
 
-#[allow(clippy::non_send_fields_in_send_ty)]
 unsafe impl Send for SendableSwsCtx {}
 
 impl Deref for SendableSwsCtx {

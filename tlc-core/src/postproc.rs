@@ -1,4 +1,4 @@
-use std::{io::Write, path::Path, sync::OnceLock};
+use std::{io::Write, path::Path};
 
 use base64::engine::{general_purpose, Engine};
 use image::ColorType::Rgb8;
@@ -67,18 +67,14 @@ pub(crate) fn draw_nu_plot_and_save<P: AsRef<Path>>(
 }
 
 #[instrument(skip(area), err)]
-fn draw_area(area: ArrayView2<f64>, edge_truncation: (f64, f64)) -> anyhow::Result<Vec<u8>> {
-    static CELL: OnceLock<[[f64; 3]; 256]> = OnceLock::new();
-
+fn draw_area(area: ArrayView2<f64>, trunc: (f64, f64)) -> anyhow::Result<Vec<u8>> {
     let (h, w) = area.dim();
     let mut buf = vec![0; h * w * 3];
     {
         let root = BitMapBackend::with_buffer(&mut buf, (w as u32, h as u32)).into_drawing_area();
         let chart = ChartBuilder::on(&root).build_cartesian_2d(0..w, 0..h)?;
         let pix_plotter = chart.plotting_area();
-
-        let (min, max) = edge_truncation;
-        let jet = CELL.get_or_init(|| JET.map(|[r, g, b]| [r * 255.0, g * 255.0, b * 255.0]));
+        let (min, max) = trunc;
 
         let mut iter = area.into_iter();
         for y in 0..h {
@@ -89,7 +85,7 @@ fn draw_area(area: ArrayView2<f64>, edge_truncation: (f64, f64)) -> anyhow::Resu
                         continue;
                     }
                     let color_index = ((nu.clamp(min, max) - min) / (max - min) * 255.0) as usize;
-                    let [r, g, b] = jet[color_index];
+                    let [r, g, b] = JET[color_index].map(|x| x * 255.0);
                     pix_plotter.draw_pixel((x, y), &RGBColor(r as u8, g as u8, b as u8))?;
                 }
             }
