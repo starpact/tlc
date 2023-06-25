@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::{path::Path, sync::Arc};
 
 use anyhow::anyhow;
 use ffmpeg::codec;
@@ -14,7 +14,7 @@ use super::VideoMeta;
 #[instrument(fields(video_path), err)]
 pub(crate) fn read_video<P: AsRef<Path>>(
     video_path: P,
-) -> anyhow::Result<(VideoMeta, Parameters, Vec<Packet>)> {
+) -> anyhow::Result<(VideoMeta, Parameters, Arc<[Packet]>)> {
     let video_path = video_path.as_ref().to_owned();
     let mut input = ffmpeg::format::input(&video_path)?;
     let video_stream = input
@@ -34,7 +34,7 @@ pub(crate) fn read_video<P: AsRef<Path>>(
         nframes,
         shape,
     };
-    let packets: Vec<_> = input
+    let packets: Arc<[_]> = input
         .packets()
         .filter_map(|(stream, packet)| (stream.index() == video_stream_index).then_some(packet))
         .collect();
@@ -67,7 +67,7 @@ mod tests {
         assert_eq!(video_meta.shape, expected_video_meta.shape);
         assert_eq!(video_meta.nframes, expected_video_meta.nframes);
         let mut cnt = 0;
-        for packet in packets {
+        for packet in &*packets {
             assert_eq!(packet.dts(), Some(cnt as i64));
             cnt += 1;
         }

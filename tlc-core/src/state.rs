@@ -14,7 +14,7 @@ use crate::{
     postproc::{draw_nu_plot_and_save, nan_mean, save_nu_matrix, save_setting},
     solve::{solve_nu, IterMethod, IterMethodId, Nu2Id, PhysicalParam, PhysicalParamId},
     video::{
-        self, decode_all, filter_detect_peak, filter_point, read_video, AreaId, FilterMethod,
+        decode_all, filter_detect_peak, filter_point, read_video, AreaId, FilterMethod,
         FilterMethodId, PointId, VideoDataId, VideoMeta, VideoPathId,
     },
     Jar,
@@ -152,7 +152,7 @@ impl Database {
     }
 
     pub fn get_video_nframes(&self) -> Result<usize, String> {
-        Ok(self.video_data_id()?.packets(self).0.len())
+        Ok(self.video_data_id()?.nframes(self))
     }
 
     pub fn get_video_frame_rate(&self) -> Result<usize, String> {
@@ -456,7 +456,7 @@ impl Database {
         let video_data_id = self.video_data_id()?;
         let video_meta = VideoMeta {
             frame_rate: video_data_id.frame_rate(self),
-            nframes: video_data_id.packets(self).0.len(),
+            nframes: video_data_id.nframes(self),
             shape: video_data_id.shape(self),
         };
         let daq_data_id = self.daq_data_id()?;
@@ -482,7 +482,7 @@ impl Database {
             saved_at: OffsetDateTime::now_utc().to_offset(UtcOffset::from_hms(8, 0, 0).unwrap()),
             nu_nan_mean: nan_mean(nu2.view()),
         };
-        let setting_path = save_root_dir.join("{name}_setting.json");
+        let setting_path = save_root_dir.join(format!("{name}_setting.json"));
         save_setting(setting, setting_path)?;
 
         Ok(())
@@ -575,9 +575,15 @@ pub async fn decode_frame_base64(
     frame_index: usize,
 ) -> Result<String, String> {
     let video_data_id = db.video_data_id()?;
-    let decoder_manager = video_data_id.decoder_manager(&*db);
-    let packets = video_data_id.packets(&*db).0;
-    video::decode_frame_base64(decoder_manager, packets, frame_index)
+    let nframes = video_data_id.nframes(&*db);
+    if frame_index >= nframes {
+        return Err(format!(
+            "frame_index({frame_index}) exceeds nframes({nframes})"
+        ));
+    }
+    let decoder = video_data_id.decoder(&*db);
+    decoder
+        .decode_frame_base64(frame_index)
         .await
         .map_err(|e| e.to_string())
 }
@@ -600,7 +606,7 @@ pub(crate) fn eval_cal_num(
     daq_data_id: DaqDataId,
     start_index_id: StartIndexId,
 ) -> CalNumId {
-    let nframes = video_data_id.packets(db).0.len();
+    let nframes = video_data_id.nframes(db);
     let nrows = daq_data_id.data(db).0.nrows();
     let start_frame = start_index_id.start_frame(db);
     let start_row = start_index_id.start_row(db);

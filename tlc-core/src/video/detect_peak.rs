@@ -195,14 +195,12 @@ fn db8_wavelet() -> Wavelet<f64> {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use crate::{
         util::log,
         video::{
             read::read_video,
             tests::{video_meta_real, VIDEO_PATH_REAL},
-            DecoderManager,
+            Decoder,
         },
     };
 
@@ -213,14 +211,9 @@ mod tests {
     fn test_detect() {
         log::init();
         let (_, parameters, packets) = read_video(VIDEO_PATH_REAL).unwrap();
-        let decode_manager = DecoderManager::new(parameters, 20);
+        let decode_manager = Decoder::new(parameters, packets, 20);
         let green2 = decode_manager
-            .decode_all(
-                Arc::new(packets),
-                10,
-                video_meta_real().nframes - 10,
-                (10, 10, 800, 1000),
-            )
+            .decode_all(10, video_meta_real().nframes - 10, (10, 10, 800, 1000))
             .unwrap()
             .into_shared();
 

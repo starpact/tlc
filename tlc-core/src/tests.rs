@@ -38,7 +38,7 @@ async fn test_whole_process_step_by_step() {
     assert_eq!(db.get_start_frame().unwrap(), 81);
     assert_eq!(db.get_start_row().unwrap(), 150);
 
-    let _ = tokio::join!(
+    _ = tokio::join!(
         decode_frame_base64(db.snapshot(), 1),
         decode_frame_base64(db.snapshot(), 100),
         decode_frame_base64(db.snapshot(), 200),

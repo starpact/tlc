@@ -38,9 +38,9 @@ Use [Salsa](https://github.com/salsa-rs/salsa) incremental recomputation framewo
 ```mermaid
 flowchart
     video_path[Video Path] --> packets((Packets))
-    video_path --> decoder_manager((Decoder Manager))
+    video_path --> decoder((Decoder))
     packets --> green2((Green2))
-    decoder_manager --> green2
+    decoder --> green2
     start_frame[Start Frame] --> green2
     area[Area] --> green2
     area --> interpolator
