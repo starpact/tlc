@@ -124,6 +124,7 @@ fn decode_frame_base64_worker(
                 &mut buf,
                 &packets[frame_index],
             ));
+            buf.clear();
         }
     }
 }
