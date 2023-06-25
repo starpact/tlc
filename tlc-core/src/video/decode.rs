@@ -1,6 +1,9 @@
-use std::sync::{
-    atomic::{AtomicUsize, Ordering},
-    Arc, Mutex,
+use std::{
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc, Mutex,
+    },
+    thread::JoinHandle,
 };
 
 use base64::{engine::general_purpose, Engine};
@@ -33,9 +36,10 @@ pub struct Decoder {
     /// limit. But FIFO is not perfect for this use case because it's better to give
     /// priority to newer frames, e.g. we should at least guarantee decoding the frame
     /// where the progress bar **stops**.
-    /// `task_backlog` is a ring buffer that only stores the most recent tasks.
-    task_backlog: Arc<ArrayQueue<DecodeFrameTask>>,
-    task_notifier: Sender<()>,
+    /// `task_ring_buffer` is a ring buffer that only stores the most recent tasks.
+    task_ring_buffer: Arc<ArrayQueue<DecodeFrameTask>>,
+    task_waker: Sender<()>,
+    worker_handles: Box<[JoinHandle<()>]>,
 }
 
 struct DecodeFrameTask {
@@ -58,23 +62,27 @@ impl Decoder {
         num_decode_frame_workers: usize,
     ) -> Decoder {
         assert!(num_decode_frame_workers > 0);
-        let backlog = Arc::new(ArrayQueue::new(num_decode_frame_workers));
-        let (task_notifier, receiver) = crossbeam::channel::unbounded();
-        for _ in 0..num_decode_frame_workers {
-            let parameters = parameters.clone();
-            let packets = packets.clone();
-            let receiver = receiver.clone();
-            let backlog = backlog.clone();
-            std::thread::spawn(move || {
-                decode_frame_base64_worker(parameters, &packets, receiver, &backlog);
-            });
-        }
+
+        let tasks = Arc::new(ArrayQueue::new(num_decode_frame_workers));
+        let (task_waker, task_listener) = crossbeam::channel::unbounded();
+        let worker_handles: Box<[_]> = (0..num_decode_frame_workers)
+            .map(|_| {
+                let parameters = parameters.clone();
+                let packets = packets.clone();
+                let listener = task_listener.clone();
+                let backlog = tasks.clone();
+                std::thread::spawn(move || {
+                    decode_frame_base64_worker(parameters, &packets, listener, &backlog);
+                })
+            })
+            .collect();
 
         Decoder {
             parameters: Mutex::new(parameters),
             packets,
-            task_backlog: backlog,
-            task_notifier,
+            task_ring_buffer: tasks,
+            task_waker,
+            worker_handles,
         }
     }
 
@@ -84,12 +92,13 @@ impl Decoder {
     /// Meanwhile, `decode_frame_base64` is not part of the overall computation but just for display.
     /// It can already yield the final output, there is no benefit to put it into salsa database.
     pub async fn decode_frame_base64(&self, frame_index: usize) -> anyhow::Result<String> {
+        assert!(!self.worker_handles.iter().any(|h| h.is_finished()));
         let (tx, rx) = oneshot::channel();
         // When the old value which contains a tx is dropped, its corresponding
         // rx(which is awaiting) will be disconnected.
-        self.task_backlog
+        self.task_ring_buffer
             .force_push(DecodeFrameTask { frame_index, tx });
-        _ = self.task_notifier.send(());
+        _ = self.task_waker.send(());
         rx.await?
     }
 
@@ -99,25 +108,19 @@ impl Decoder {
         cal_num: usize,
         area: (u32, u32, u32, u32),
     ) -> anyhow::Result<Array2<u8>> {
-        decode_all(
-            self.parameters.lock().unwrap().clone(),
-            &self.packets,
-            start_frame,
-            cal_num,
-            area,
-        )
+        decode_all(&self.parameters, &self.packets, start_frame, cal_num, area)
     }
 }
 
 fn decode_frame_base64_worker(
     parameters: Parameters,
     packets: &[Packet],
-    receiver: Receiver<()>,
+    listener: Receiver<()>,
     backlog: &ArrayQueue<DecodeFrameTask>,
 ) {
     let mut decode_converter = DecodeConverter::new(parameters).unwrap();
     let mut buf = Vec::new();
-    for _ in receiver {
+    for _ in listener {
         if let Some(DecodeFrameTask { frame_index, tx }) = backlog.pop() {
             _ = tx.send(decode_frame_base64(
                 &mut decode_converter,
@@ -147,7 +150,7 @@ fn decode_frame_base64(
 
 #[instrument(skip(parameters, packets), err)]
 fn decode_all(
-    parameters: Parameters,
+    parameters: &Mutex<Parameters>,
     packets: &[Packet],
     start_frame: usize,
     cal_num: usize,
@@ -159,8 +162,8 @@ fn decode_all(
     let cal_index = AtomicUsize::new(0);
     std::thread::scope(|s| {
         for _ in 0..std::thread::available_parallelism().unwrap().get() {
-            let parameters = parameters.clone();
             s.spawn(|| {
+                let parameters = parameters.lock().unwrap().clone();
                 let mut decode_converter = DecodeConverter::new(parameters).unwrap();
                 let byte_w = decode_converter.decoder.width() as usize * 3;
                 loop {
@@ -220,8 +223,10 @@ impl DecodeConverter {
         self.decoder.receive_frame(&mut self.decoded_frame)?;
         self.converter
             .run(&self.decoded_frame, &mut self.rgb_frame)?;
-        // One packet, one frame.
-        assert!(self.decoder.receive_frame(&mut self.decoded_frame).is_err());
+        assert!(
+            self.decoder.receive_frame(&mut self.decoded_frame).is_err(),
+            "one packet should be decoded to one frame",
+        );
         Ok(&self.rgb_frame)
     }
 }
