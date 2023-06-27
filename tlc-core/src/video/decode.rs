@@ -25,8 +25,10 @@ use tracing::instrument;
 
 use crate::util::impl_eq_always_false;
 
-pub struct Decoder {
+pub struct VideoData {
     parameters: Mutex<Parameters>,
+    frame_rate: usize,
+    shape: (u32, u32),
     packets: Arc<[Packet]>,
     /// When user drags the progress bar quickly, the decoding can not keep up and
     /// there will be a significant lag. However, we actually do not have to decode
@@ -47,43 +49,65 @@ struct DecodeFrameTask {
     tx: oneshot::Sender<anyhow::Result<String>>,
 }
 
-impl std::fmt::Debug for Decoder {
+impl std::fmt::Debug for VideoData {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Decoder").finish()
     }
 }
 
-impl_eq_always_false!(Decoder);
+impl_eq_always_false!(VideoData);
 
-impl Decoder {
+impl VideoData {
     pub fn new(
         parameters: Parameters,
+        frame_rate: usize,
         packets: Arc<[Packet]>,
         num_decode_frame_workers: usize,
-    ) -> Decoder {
+    ) -> anyhow::Result<VideoData> {
         assert!(num_decode_frame_workers > 0);
 
-        let tasks = Arc::new(ArrayQueue::new(num_decode_frame_workers));
+        let task_ring_buffer = Arc::new(ArrayQueue::new(num_decode_frame_workers));
         let (task_waker, task_listener) = crossbeam::channel::unbounded();
         let worker_handles: Box<[_]> = (0..num_decode_frame_workers)
             .map(|_| {
                 let parameters = parameters.clone();
                 let packets = packets.clone();
                 let listener = task_listener.clone();
-                let backlog = tasks.clone();
+                let backlog = task_ring_buffer.clone();
                 std::thread::spawn(move || {
                     decode_frame_base64_worker(parameters, &packets, listener, &backlog);
                 })
             })
             .collect();
 
-        Decoder {
+        let shape = {
+            let decoder = codec::Context::from_parameters(parameters.clone())?
+                .decoder()
+                .video()?;
+            (decoder.height(), decoder.width())
+        };
+
+        Ok(VideoData {
             parameters: Mutex::new(parameters),
+            frame_rate,
+            shape,
             packets,
-            task_ring_buffer: tasks,
+            task_ring_buffer,
             task_waker,
             worker_handles,
-        }
+        })
+    }
+
+    pub fn frame_rate(&self) -> usize {
+        self.frame_rate
+    }
+
+    pub fn nframes(&self) -> usize {
+        self.packets.len()
+    }
+
+    pub fn shape(&self) -> (u32, u32) {
+        self.shape
     }
 
     /// `decode_frame_base64` is excluded from salsa database.
@@ -242,9 +266,9 @@ mod tests {
     };
 
     use crate::video::{
-        read::read_video,
+        io::read_video,
         tests::{video_meta_real, video_meta_sample, VIDEO_PATH_REAL, VIDEO_PATH_SAMPLE},
-        Decoder,
+        VideoData,
     };
 
     #[tokio::test]
@@ -270,14 +294,15 @@ mod tests {
     }
 
     async fn _decode_frame(video_path: &str) {
-        let (_, parameters, packets) = read_video(video_path).unwrap();
-        let decode_manager = Arc::new(Decoder::new(parameters, packets.clone(), 20));
+        let (parameters, frame_rate, packets) = read_video(video_path).unwrap();
+        let video_data =
+            Arc::new(VideoData::new(parameters, frame_rate, packets.clone(), 20).unwrap());
 
         let mut handles = Vec::new();
         let ok_cnt = Arc::new(AtomicU32::new(0));
         let abort_cnt = Arc::new(AtomicU32::new(0));
         for i in 0..packets.len() {
-            let decode_manager = decode_manager.clone();
+            let decode_manager = video_data.clone();
             let ok_cnt = ok_cnt.clone();
             let abort_cnt = abort_cnt.clone();
             let handle = tokio::spawn(async move {
@@ -298,9 +323,9 @@ mod tests {
     }
 
     fn _decode_all(video_path: &str, start_frame: usize, cal_num: usize) {
-        let (_, parameters, packets) = read_video(video_path).unwrap();
-        let decode_manager = Decoder::new(parameters, packets, 20);
-        decode_manager
+        let (parameters, frame_rate, packets) = read_video(video_path).unwrap();
+        let video_data = VideoData::new(parameters, frame_rate, packets, 20).unwrap();
+        video_data
             .decode_all(start_frame, cal_num, (10, 10, 600, 800))
             .unwrap();
     }

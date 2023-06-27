@@ -5,13 +5,12 @@ on:
   pull_request:
 
 jobs:
-  build:
+  test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      - uses: cachix/install-nix-action@v22
-        with:
-          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: DeterminateSystems/nix-installer-action@v4
+      - uses: DeterminateSystems/magic-nix-cache-action@v1
       - name: Build
         run: nix develop --command cargo build
       - name: Lint

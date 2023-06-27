@@ -37,36 +37,25 @@ impl std::hash::Hash for FilterMethod {
 
 #[instrument(skip(green2))]
 pub fn filter_detect_peak(green2: ArcArray2<u8>, filter_method: FilterMethod) -> Vec<usize> {
+    fn index_of_max<I, F>(into_iter: I, f: F) -> usize
+    where
+        I: IntoIterator,
+        F: FnMut(&(usize, I::Item)) -> u8,
+    {
+        into_iter.into_iter().enumerate().max_by_key(f).unwrap().0
+    }
+
     use FilterMethod::*;
     match filter_method {
-        No => apply(green2, |green1| {
-            green1
-                .into_iter()
-                .enumerate()
-                .max_by_key(|(_, &g)| g)
-                .unwrap()
-                .0
-        }),
+        No => apply(green2, |green1| index_of_max(green1, |(_, &g)| g)),
         Median { window_size } => apply(green2, move |green1| {
             let mut filter = Filter::new(window_size);
-            green1
-                .into_iter()
-                .enumerate()
-                .max_by_key(|(_, &g)| filter.consume(g))
-                .unwrap()
-                .0
+            index_of_max(green1, |(_, &g)| filter.consume(g))
         }),
-        Wavelet { threshold_ratio } => {
-            let wavelet = db8_wavelet();
-            apply(green2, move |green1| {
-                wavelet_transform(green1, &wavelet, threshold_ratio)
-                    .into_iter()
-                    .enumerate()
-                    .max_by_key(|&(_, g)| g as u8)
-                    .unwrap()
-                    .0
-            })
-        }
+        Wavelet { threshold_ratio } => apply(green2, move |green1| {
+            let green1 = wavelet_transform(green1, &db8_wavelet(), threshold_ratio);
+            index_of_max(green1, |&(_, g)| g as u8)
+        }),
     }
 }
 
@@ -195,24 +184,23 @@ fn db8_wavelet() -> Wavelet<f64> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::{
         util::log,
         video::{
-            read::read_video,
+            io::read_video,
             tests::{video_meta_real, VIDEO_PATH_REAL},
-            Decoder,
+            VideoData,
         },
     };
-
-    use super::*;
 
     #[ignore]
     #[test]
     fn test_detect() {
         log::init();
-        let (_, parameters, packets) = read_video(VIDEO_PATH_REAL).unwrap();
-        let decode_manager = Decoder::new(parameters, packets, 20);
-        let green2 = decode_manager
+        let (parameters, frame_rate, packets) = read_video(VIDEO_PATH_REAL).unwrap();
+        let video_data = VideoData::new(parameters, frame_rate, packets, 20).unwrap();
+        let green2 = video_data
             .decode_all(10, video_meta_real().nframes - 10, (10, 10, 800, 1000))
             .unwrap()
             .into_shared();

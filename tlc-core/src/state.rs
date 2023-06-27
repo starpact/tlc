@@ -152,15 +152,15 @@ impl Database {
     }
 
     pub fn get_video_nframes(&self) -> Result<usize, String> {
-        Ok(self.video_data_id()?.nframes(self))
+        Ok(self.video_data_id()?.video_data(self).nframes())
     }
 
     pub fn get_video_frame_rate(&self) -> Result<usize, String> {
-        Ok(self.video_data_id()?.frame_rate(self))
+        Ok(self.video_data_id()?.video_data(self).frame_rate())
     }
 
     pub fn get_video_shape(&self) -> Result<(u32, u32), String> {
-        Ok(self.video_data_id()?.shape(self))
+        Ok(self.video_data_id()?.video_data(self).shape())
     }
 
     pub fn get_daq_path(&self) -> Result<&Path, String> {
@@ -455,9 +455,9 @@ impl Database {
 
         let video_data_id = self.video_data_id()?;
         let video_meta = VideoMeta {
-            frame_rate: video_data_id.frame_rate(self),
-            nframes: video_data_id.nframes(self),
-            shape: video_data_id.shape(self),
+            frame_rate: video_data_id.video_data(self).frame_rate(),
+            nframes: video_data_id.video_data(self).nframes(),
+            shape: video_data_id.video_data(self).shape(),
         };
         let daq_data_id = self.daq_data_id()?;
         let daq_meta = DaqMeta {
@@ -575,14 +575,14 @@ pub async fn decode_frame_base64(
     frame_index: usize,
 ) -> Result<String, String> {
     let video_data_id = db.video_data_id()?;
-    let nframes = video_data_id.nframes(&*db);
+    let nframes = video_data_id.video_data(&*db).nframes();
     if frame_index >= nframes {
         return Err(format!(
             "frame_index({frame_index}) exceeds nframes({nframes})"
         ));
     }
-    let decoder = video_data_id.decoder(&*db);
-    decoder
+    let video_data = video_data_id.video_data(&*db);
+    video_data
         .decode_frame_base64(frame_index)
         .await
         .map_err(|e| e.to_string())
@@ -606,7 +606,7 @@ pub(crate) fn eval_cal_num(
     daq_data_id: DaqDataId,
     start_index_id: StartIndexId,
 ) -> CalNumId {
-    let nframes = video_data_id.nframes(db);
+    let nframes = video_data_id.video_data(db).nframes();
     let nrows = daq_data_id.data(db).0.nrows();
     let start_frame = start_index_id.start_frame(db);
     let start_row = start_index_id.start_row(db);

@@ -1,6 +1,6 @@
 mod decode;
 mod detect_peak;
-mod read;
+mod io;
 #[cfg(test)]
 pub mod tests;
 
@@ -11,7 +11,7 @@ use ndarray::ArcArray2;
 use serde::{Deserialize, Serialize};
 
 use crate::{state::StartIndexId, CalNumId};
-use decode::Decoder;
+use decode::VideoData;
 pub use detect_peak::FilterMethod;
 
 #[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq)]
@@ -30,10 +30,7 @@ pub(crate) struct VideoPathId {
 
 #[salsa::tracked]
 pub(crate) struct VideoDataId {
-    pub frame_rate: usize,
-    pub nframes: usize,
-    pub shape: (u32, u32),
-    pub decoder: Arc<Decoder>,
+    pub video_data: Arc<VideoData>,
 }
 
 #[salsa::interned]
@@ -75,15 +72,9 @@ pub(crate) fn read_video(
     video_path_id: VideoPathId,
 ) -> Result<VideoDataId, String> {
     let path = video_path_id.path(db);
-    let (video_meta, parameters, packets) = read::read_video(path).map_err(|e| e.to_string())?;
-    let VideoMeta {
-        frame_rate,
-        nframes,
-        shape,
-        ..
-    } = video_meta;
-    let decoder = Decoder::new(parameters, packets, 4);
-    let video_data_id = VideoDataId::new(db, frame_rate, nframes, shape, Arc::new(decoder));
+    let (parameters, frame_rate, packets) = io::read_video(path).map_err(|e| e.to_string())?;
+    let decoder = VideoData::new(parameters, frame_rate, packets, 4).map_err(|e| e.to_string())?;
+    let video_data_id = VideoDataId::new(db, Arc::new(decoder));
     Ok(video_data_id)
 }
 
@@ -95,11 +86,11 @@ pub(crate) fn decode_all(
     cal_num_id: CalNumId,
     area_id: AreaId,
 ) -> Result<Green2Id, String> {
-    let decoder = video_data_id.decoder(db);
+    let video_data = video_data_id.video_data(db);
     let start_frame = start_index_id.start_frame(db);
     let cal_num = cal_num_id.cal_num(db);
     let area = area_id.area(db);
-    let green2 = decoder
+    let green2 = video_data
         .decode_all(start_frame, cal_num, area)
         .map_err(|e| e.to_string())?;
     Ok(Green2Id::new(db, green2.into_shared()))

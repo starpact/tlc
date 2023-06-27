@@ -93,7 +93,7 @@ pub(crate) fn solve_nu(
     physical_param_id: PhysicalParamId,
     iteration_method_id: IterMethodId,
 ) -> Nu2Id {
-    let frame_rate = video_data_id.frame_rate(db);
+    let frame_rate = video_data_id.video_data(db).frame_rate();
     let gmax_frame_indexes = gmax_frame_indexes_id.gmax_frame_indexes(db);
     let interpolator = interpolator_id.interpolater(db);
     let physical_param = physical_param_id.physical_param(db);

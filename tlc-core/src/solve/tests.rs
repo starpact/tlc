@@ -161,7 +161,7 @@ impl PointData<'_> {
 }
 
 fn new_temps() -> Vec<f64> {
-    let daq_data = daq::read::read_daq("./testdata/imp_20000_1.lvm").unwrap();
+    let daq_data = daq::io::read_daq("./testdata/imp_20000_1.lvm").unwrap();
     daq_data.column(3).to_vec()
 }
 

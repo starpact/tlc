@@ -1,5 +1,5 @@
 mod interp;
-pub(crate) mod read;
+pub(crate) mod io;
 
 use std::path::PathBuf;
 
@@ -60,7 +60,7 @@ pub(crate) struct InterpMethodId {
 #[salsa::tracked]
 pub(crate) fn read_daq(db: &dyn crate::Db, daq_path_id: DaqPathId) -> Result<DaqDataId, String> {
     let daq_path = daq_path_id.path(db);
-    let daq_data = read::read_daq(daq_path).map_err(|e| e.to_string())?;
+    let daq_data = io::read_daq(daq_path).map_err(|e| e.to_string())?;
     Ok(DaqDataId::new(db, DaqData(daq_data.into_shared())))
 }
 
