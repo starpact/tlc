@@ -206,7 +206,7 @@ fn decode_all(
                     for i in (0..).step_by(byte_w).skip(tl_y).take(cal_h) {
                         for j in (i..).skip(1).step_by(3).skip(tl_x).take(cal_w) {
                             unsafe {
-                                *ptr = rgb[j];
+                                *ptr = rgb.get_unchecked(j);
                                 ptr = ptr.add(1);
                             };
                         }

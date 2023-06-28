@@ -85,8 +85,8 @@ fn draw_area(area: ArrayView2<f64>, trunc: (f64, f64)) -> anyhow::Result<Vec<u8>
                         continue;
                     }
                     let color_index = ((nu.clamp(min, max) - min) / (max - min) * 255.0) as usize;
-                    let [r, g, b] = JET[color_index].map(|x| x * 255.0);
-                    pix_plotter.draw_pixel((x, y), &RGBColor(r as u8, g as u8, b as u8))?;
+                    let [r, g, b] = JET[color_index].map(|x| (x * 255.0) as u8);
+                    pix_plotter.draw_pixel((x, y), &RGBColor(r, g, b))?;
                 }
             }
         }
