@@ -10,7 +10,6 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       - uses: DeterminateSystems/nix-installer-action@v4
-      - uses: DeterminateSystems/magic-nix-cache-action@v1
       - name: Build
         run: nix develop --command cargo build
       - name: Lint
