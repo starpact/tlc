@@ -283,7 +283,7 @@ fn solve_core<F>(
     solve_single_point: F,
 ) -> Vec<f64>
 where
-    F: Fn(PointData) -> f64 + Send + Sync + 'static,
+    F: Fn(PointData) -> f64 + Send + Sync,
 {
     const FIRST_FEW_TO_CAL_T0: usize = 4;
     gmax_frame_indexes

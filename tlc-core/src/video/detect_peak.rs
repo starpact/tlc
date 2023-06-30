@@ -37,12 +37,12 @@ impl std::hash::Hash for FilterMethod {
 
 #[instrument(skip(green2))]
 pub fn filter_detect_peak(green2: ArcArray2<u8>, filter_method: FilterMethod) -> Vec<usize> {
-    fn index_of_max<I, F>(into_iter: I, f: F) -> usize
+    fn index_of_max<I, F>(v: I, f: F) -> usize
     where
         I: IntoIterator,
         F: FnMut(&(usize, I::Item)) -> u8,
     {
-        into_iter.into_iter().enumerate().max_by_key(f).unwrap().0
+        v.into_iter().enumerate().max_by_key(f).unwrap().0
     }
 
     use FilterMethod::*;
@@ -54,7 +54,7 @@ pub fn filter_detect_peak(green2: ArcArray2<u8>, filter_method: FilterMethod) ->
         }),
         Wavelet { threshold_ratio } => apply(green2, move |green1| {
             let green1 = wavelet_transform(green1, &db8_wavelet(), threshold_ratio);
-            index_of_max(green1, |&(_, g)| g as u8)
+            index_of_max(&green1, |(_, &g)| g as u8)
         }),
     }
 }
