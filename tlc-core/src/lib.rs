@@ -1,4 +1,4 @@
-#![cfg_attr(test, feature(test, array_windows, portable_simd))]
+#![cfg_attr(test, feature(test, array_windows))]
 #![allow(clippy::too_many_arguments)]
 
 mod daq;

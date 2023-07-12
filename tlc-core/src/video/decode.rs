@@ -67,7 +67,7 @@ impl VideoData {
         assert!(num_decode_frame_workers > 0);
 
         let task_ring_buffer = Arc::new(ArrayQueue::new(num_decode_frame_workers));
-        let (task_waker, task_listener) = crossbeam::channel::unbounded();
+        let (task_waker, task_listener) = crossbeam::channel::bounded(num_decode_frame_workers);
         let worker_handles: Box<[_]> = (0..num_decode_frame_workers)
             .map(|_| {
                 let parameters = parameters.clone();

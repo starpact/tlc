@@ -171,7 +171,6 @@ impl PointData<'_> {
 }
 
 // Scalar version erfc from libm is much faster than SIMD version from sleef.
-// See bench.
 fn erfc_simd(arr: Simd<[f64; 4]>) -> Simd<[f64; 4]> {
     unsafe {
         f64x4::new(
