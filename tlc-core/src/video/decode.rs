@@ -122,7 +122,7 @@ impl VideoData {
         // rx(which is awaiting) will be disconnected.
         self.task_ring_buffer
             .force_push(DecodeFrameTask { frame_index, tx });
-        _ = self.task_waker.send(());
+        _ = self.task_waker.try_send(());
         rx.await?
     }
 
