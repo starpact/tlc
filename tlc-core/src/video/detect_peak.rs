@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use anyhow::bail;
 use dwt::{transform, wavelet::Wavelet, Operation};
 use median::Filter;
@@ -17,26 +19,8 @@ pub enum FilterMethod {
     },
 }
 
-impl Eq for FilterMethod {}
-
-impl std::hash::Hash for FilterMethod {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        match self {
-            FilterMethod::No => state.write_u8(0),
-            FilterMethod::Median { window_size } => {
-                state.write_u8(1);
-                window_size.hash(state)
-            }
-            FilterMethod::Wavelet { threshold_ratio } => {
-                state.write_u8(2);
-                threshold_ratio.to_bits().hash(state);
-            }
-        }
-    }
-}
-
 #[instrument(skip(green2))]
-pub fn filter_detect_peak(green2: ArcArray2<u8>, filter_method: FilterMethod) -> Vec<usize> {
+pub fn filter_detect_peak(green2: ArcArray2<u8>, filter_method: FilterMethod) -> Arc<[usize]> {
     fn index_of_max<I, F>(v: I, f: F) -> usize
     where
         I: IntoIterator,
@@ -46,7 +30,7 @@ pub fn filter_detect_peak(green2: ArcArray2<u8>, filter_method: FilterMethod) ->
     }
 
     use FilterMethod::*;
-    match filter_method {
+    (match filter_method {
         No => apply(green2, |green1| index_of_max(green1, |(_, &g)| g)),
         Median { window_size } => apply(green2, move |green1| {
             let mut filter = Filter::new(window_size);
@@ -56,7 +40,8 @@ pub fn filter_detect_peak(green2: ArcArray2<u8>, filter_method: FilterMethod) ->
             let green1 = wavelet_transform(green1, &db8_wavelet(), threshold_ratio);
             index_of_max(&green1, |(_, &g)| g as u8)
         }),
-    }
+    })
+    .into()
 }
 
 #[instrument(skip(green2), err)]
@@ -188,9 +173,8 @@ mod tests {
     use crate::{
         util::log,
         video::{
-            io::read_video,
+            read_video,
             tests::{video_meta_real, VIDEO_PATH_REAL},
-            VideoData,
         },
     };
 
@@ -198,8 +182,7 @@ mod tests {
     #[test]
     fn test_detect() {
         log::init();
-        let (parameters, frame_rate, packets) = read_video(VIDEO_PATH_REAL).unwrap();
-        let video_data = VideoData::new(parameters, frame_rate, packets, 20).unwrap();
+        let video_data = read_video(VIDEO_PATH_REAL).unwrap();
         let green2 = video_data
             .decode_all(10, video_meta_real().nframes - 10, (10, 10, 800, 1000))
             .unwrap()

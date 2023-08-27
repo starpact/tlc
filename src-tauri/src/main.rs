@@ -11,7 +11,7 @@ use command::*;
 
 fn main() {
     tlc_core::init();
-    let db = Mutex::new(tlc_core::Database::default());
+    let db = Mutex::new(tlc_core::State::default());
 
     tauri::Builder::default()
         .manage(db)

@@ -1,45 +1,19 @@
 mod interp;
-pub(crate) mod io;
 
-use std::path::PathBuf;
+use std::path::Path;
 
-use ndarray::ArcArray2;
+use anyhow::{anyhow, bail};
+use calamine::{open_workbook, Reader, Xlsx};
+use ndarray::{ArcArray2, Array2};
 use serde::{Deserialize, Serialize};
+use tracing::instrument;
 
-use crate::{state::StartIndexId, util::impl_eq_always_false, video::AreaId, CalNumId};
 pub use interp::{InterpMethod, Interpolator};
 
-#[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq)]
+#[derive(Debug, Serialize, Clone, Copy)]
 pub struct DaqMeta {
     pub nrows: usize,
     pub ncols: usize,
-}
-
-#[salsa::input]
-pub(crate) struct DaqPathId {
-    #[return_ref]
-    pub path: PathBuf,
-}
-
-#[salsa::tracked]
-pub(crate) struct DaqDataId {
-    pub data: DaqData,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct DaqData(pub ArcArray2<f64>);
-
-#[salsa::tracked]
-pub(crate) struct InterpolatorId {
-    pub interpolater: Interpolator,
-}
-
-impl_eq_always_false!(DaqData, Interpolator);
-
-#[salsa::input]
-pub(crate) struct ThermocouplesId {
-    #[return_ref]
-    pub thermocouples: Vec<Thermocouple>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq)]
@@ -51,42 +25,85 @@ pub struct Thermocouple {
     pub position: (i32, i32),
 }
 
-#[salsa::interned]
-pub(crate) struct InterpMethodId {
-    pub interp_method: InterpMethod,
+#[instrument(fields(daq_path = ?daq_path.as_ref()), err)]
+pub fn read_daq<P: AsRef<Path>>(daq_path: P) -> anyhow::Result<ArcArray2<f64>> {
+    let daq_path = daq_path.as_ref();
+    let daq_data = match daq_path
+        .extension()
+        .ok_or_else(|| anyhow!("invalid daq path: {daq_path:?}"))?
+        .to_str()
+    {
+        Some("lvm") => read_daq_lvm(daq_path),
+        Some("xlsx") => read_daq_excel(daq_path),
+        _ => bail!("only .lvm and .xlsx are supported"),
+    }?;
+    Ok(daq_data.into_shared())
 }
 
-/// See `read_video`.
-#[salsa::tracked]
-pub(crate) fn read_daq(db: &dyn crate::Db, daq_path_id: DaqPathId) -> Result<DaqDataId, String> {
-    let daq_path = daq_path_id.path(db);
-    let daq_data = io::read_daq(daq_path).map_err(|e| e.to_string())?;
-    Ok(DaqDataId::new(db, DaqData(daq_data.into_shared())))
+fn read_daq_lvm(daq_path: &Path) -> anyhow::Result<Array2<f64>> {
+    let mut rdr = csv::ReaderBuilder::new()
+        .has_headers(false)
+        .delimiter(b'\t')
+        .from_path(daq_path)
+        .map_err(|e| anyhow!("failed to read daq from {daq_path:?}: {e}"))?;
+
+    let mut h = 0;
+    let mut daq = Vec::new();
+    for row in rdr.records() {
+        h += 1;
+        for v in &row? {
+            daq.push(
+                v.parse()
+                    .map_err(|e| anyhow!("failed to read daq from {daq_path:?}: {e}"))?,
+            );
+        }
+    }
+    let w = daq.len() / h;
+    if h * w != daq.len() {
+        bail!("failed to read daq from {daq_path:?}: not all rows are equal in length");
+    }
+    let daq = Array2::from_shape_vec((h, w), daq)?;
+    Ok(daq)
 }
 
-#[salsa::tracked]
-pub(crate) fn make_interpolator(
-    db: &dyn crate::Db,
-    daq_data_id: DaqDataId,
-    start_index_id: StartIndexId,
-    cal_num_id: CalNumId,
-    area_id: AreaId,
-    thermocouples_id: ThermocouplesId,
-    interp_method_id: InterpMethodId,
-) -> InterpolatorId {
-    let daq_data = daq_data_id.data(db).0;
-    let start_row = start_index_id.start_row(db);
-    let cal_num = cal_num_id.cal_num(db);
-    let area = area_id.area(db);
-    let interp_method = interp_method_id.interp_method(db);
-    let thermocouples = thermocouples_id.thermocouples(db);
-    let interpolator = Interpolator::new(
-        start_row,
-        cal_num,
-        area,
-        interp_method,
-        thermocouples,
-        daq_data.view(),
-    );
-    InterpolatorId::new(db, interpolator)
+fn read_daq_excel(daq_path: &Path) -> anyhow::Result<Array2<f64>> {
+    let mut excel: Xlsx<_> = open_workbook(daq_path)?;
+    let sheet = excel
+        .worksheet_range_at(0)
+        .ok_or_else(|| anyhow!("no worksheet"))??;
+
+    let mut daq = Array2::zeros(sheet.get_size());
+    let mut daq_it = daq.iter_mut();
+    for row in sheet.rows() {
+        for v in row {
+            if let Some(daq_v) = daq_it.next() {
+                *daq_v = v
+                    .get_float()
+                    .ok_or_else(|| anyhow!("invalid daq: {daq_path:?}"))?;
+            }
+        }
+    }
+    Ok(daq)
+}
+
+#[cfg(test)]
+mod tests {
+    use approx::assert_relative_eq;
+
+    use super::*;
+    use crate::util::log;
+
+    #[test]
+    fn test_read_daq_lvm_and_xlsx() {
+        log::init();
+        assert_relative_eq!(
+            read_daq("./testdata/imp_20000_1.lvm").unwrap(),
+            read_daq("./testdata/imp_20000_1.xlsx").unwrap()
+        );
+    }
+
+    #[test]
+    fn test_read_daq_unsupported_extension() {
+        assert!(read_daq("./testdata/imp_20000_1.csv").is_err());
+    }
 }

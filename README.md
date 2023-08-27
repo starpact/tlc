@@ -34,7 +34,6 @@ cargo install tauri-cli
 ```
 
 ## Architecture
-Use [Salsa](https://github.com/salsa-rs/salsa) incremental recomputation framework, which will take care all the cache and invalidation.
 ```mermaid
 flowchart
     video_path[Video Path] --> packets((Packets))
@@ -88,4 +87,3 @@ sem: Semaphore,
 - [FFmpeg: Difference Between Frames and Packets](https://stackoverflow.com/questions/53574798/difference-between-frames-and-packets-in-ffmpeg)
 - [FFmpeg: multithread decoding](https://www.cnblogs.com/TaigaCon/p/10220356.html)
 - [Matklad's reply on reddit](https://www.reddit.com/r/rust/comments/uf7yoy/comment/i6s4b8x/)
-- [Salsa](https://salsa-rs.netlify.app/overview.html)

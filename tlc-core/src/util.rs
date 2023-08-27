@@ -1,20 +1,4 @@
-macro_rules! impl_eq_always_false {
-    ($($T:ty),+$(,)?) => {
-        $(
-            impl PartialEq for $T {
-                fn eq(&self, _: &Self) -> bool {
-                    false
-                }
-            }
-
-            impl Eq for $T {}
-        )+
-    };
-}
-
-pub(crate) use impl_eq_always_false;
-
-pub(crate) mod log {
+pub mod log {
     use std::sync::Once;
 
     use tracing_subscriber::{fmt::format::FmtSpan, EnvFilter};

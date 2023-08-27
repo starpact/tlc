@@ -1,209 +1,192 @@
 use std::path::PathBuf;
 
 use ndarray::{ArcArray2, Array2};
-use tauri::async_runtime::{spawn_blocking, Mutex};
-use tlc_core::{
-    Database, FilterMethod, InterpMethod, IterMethod, NuData, ParallelDatabase, PhysicalParam,
-    Thermocouple,
-};
+use tlc_core::{FilterMethod, InterpMethod, IterMethod, NuData, PhysicalParam, Thermocouple};
 
 type TlcResult<T> = Result<T, String>;
 
-type Db<'a> = tauri::State<'a, Mutex<Database>>;
+type State<'a> = tauri::State<'a, tlc_core::State>;
 
 #[tauri::command]
-pub async fn get_name(db: Db<'_>) -> TlcResult<String> {
-    Ok(db.lock().await.get_name()?.to_owned())
+pub async fn get_name(state: State<'_>) -> TlcResult<String> {
+    state.get_name().to()
 }
 
 #[tauri::command]
-pub async fn set_name(name: String, db: Db<'_>) -> TlcResult<()> {
-    db.lock().await.set_name(name)
+pub async fn set_name(name: String, state: State<'_>) -> TlcResult<()> {
+    state.set_name(name).to()
 }
 
 #[tauri::command]
-pub async fn get_save_root_dir(db: Db<'_>) -> TlcResult<PathBuf> {
-    Ok(db.lock().await.get_save_root_dir()?.to_owned())
+pub async fn get_save_root_dir(state: State<'_>) -> TlcResult<PathBuf> {
+    Ok(state.get_save_root_dir().to()?.to_owned())
 }
 
 #[tauri::command]
-pub async fn set_save_root_dir(save_root_dir: PathBuf, db: Db<'_>) -> TlcResult<()> {
-    db.lock().await.set_save_root_dir(save_root_dir)
+pub async fn set_save_root_dir(save_root_dir: PathBuf, state: State<'_>) -> TlcResult<()> {
+    state.set_save_root_dir(save_root_dir).to()
 }
 
 #[tauri::command]
-pub async fn get_video_path(db: Db<'_>) -> TlcResult<PathBuf> {
-    Ok(db.lock().await.get_video_path()?.to_owned())
+pub async fn get_video_path(state: State<'_>) -> TlcResult<PathBuf> {
+    Ok(state.get_video_path().to()?.to_owned())
 }
 
 #[tauri::command]
-pub async fn set_video_path(video_path: PathBuf, db: Db<'_>) -> TlcResult<()> {
-    db.lock().await.set_video_path(video_path)
+pub async fn set_video_path(video_path: PathBuf, state: State<'_>) -> TlcResult<()> {
+    state.set_video_path(video_path).to()
 }
 
 #[tauri::command]
-pub async fn get_video_nframes(db: Db<'_>) -> TlcResult<usize> {
-    let db = db.lock().await.snapshot();
-    spawn_blocking(move || db.get_video_nframes()).await.to()?
+pub async fn get_video_nframes(state: State<'_>) -> TlcResult<usize> {
+    state.get_video_nframes().to()
 }
 
 #[tauri::command]
-pub async fn get_video_frame_rate(db: Db<'_>) -> TlcResult<usize> {
-    let db = db.lock().await.snapshot();
-    spawn_blocking(move || db.get_video_frame_rate())
-        .await
-        .to()?
+pub async fn get_video_frame_rate(state: State<'_>) -> TlcResult<usize> {
+    state.get_video_frame_rate().to()
 }
 
 #[tauri::command]
-pub async fn get_video_shape(db: Db<'_>) -> TlcResult<(u32, u32)> {
-    let db = db.lock().await.snapshot();
-    spawn_blocking(move || db.get_video_shape()).await.to()?
+pub async fn get_video_shape(state: State<'_>) -> TlcResult<(u32, u32)> {
+    state.get_video_shape().to()
 }
 
 #[tauri::command]
-pub async fn decode_frame_base64(frame_index: usize, db: Db<'_>) -> TlcResult<String> {
-    let db = db.lock().await.snapshot();
-    tlc_core::decode_frame_base64(db, frame_index).await
+pub async fn decode_frame_base64(frame_index: usize, state: State<'_>) -> TlcResult<String> {
+    state.decode_frame_base64(frame_index).await.to()
 }
 
 #[tauri::command]
-pub async fn get_daq_path(db: Db<'_>) -> TlcResult<PathBuf> {
-    Ok(db.lock().await.get_daq_path()?.to_owned())
+pub async fn get_daq_path(state: State<'_>) -> TlcResult<PathBuf> {
+    state.get_daq_path().to()
 }
 
 #[tauri::command]
-pub async fn set_daq_path(daq_path: PathBuf, db: Db<'_>) -> TlcResult<()> {
-    db.lock().await.set_daq_path(daq_path)
+pub async fn set_daq_path(daq_path: PathBuf, state: State<'_>) -> TlcResult<()> {
+    state.set_daq_path(daq_path).to()
 }
 
 #[tauri::command]
-pub async fn get_daq_data(db: Db<'_>) -> TlcResult<ArcArray2<f64>> {
-    let db = db.lock().await.snapshot();
-    spawn_blocking(move || db.get_daq_data()).await.to()?
+pub async fn get_daq_data(state: State<'_>) -> TlcResult<ArcArray2<f64>> {
+    state.get_daq_data().to()
 }
 
 #[tauri::command]
 pub async fn synchronize_video_and_daq(
     start_frame: usize,
     start_row: usize,
-    db: Db<'_>,
+    state: State<'_>,
 ) -> TlcResult<()> {
-    db.lock()
-        .await
-        .synchronize_video_and_daq(start_frame, start_row)
+    state.synchronize_video_and_daq(start_frame, start_row).to()
 }
 
 #[tauri::command]
-pub async fn get_start_frame(db: Db<'_>) -> TlcResult<usize> {
-    db.lock().await.get_start_frame()
+pub async fn get_start_frame(state: State<'_>) -> TlcResult<usize> {
+    state.get_start_frame().to()
 }
 
 #[tauri::command]
-pub async fn set_start_frame(start_frame: usize, db: Db<'_>) -> TlcResult<()> {
-    db.lock().await.set_start_frame(start_frame)
+pub async fn set_start_frame(start_frame: usize, state: State<'_>) -> TlcResult<()> {
+    state.set_start_frame(start_frame).to()
 }
 
 #[tauri::command]
-pub async fn get_start_row(db: Db<'_>) -> TlcResult<usize> {
-    db.lock().await.get_start_row()
+pub async fn get_start_row(state: State<'_>) -> TlcResult<usize> {
+    state.get_start_row().to()
 }
 
 #[tauri::command]
-pub async fn set_start_row(start_row: usize, db: Db<'_>) -> TlcResult<()> {
-    db.lock().await.set_start_row(start_row)
+pub async fn set_start_row(start_row: usize, state: State<'_>) -> TlcResult<()> {
+    state.set_start_row(start_row).to()
 }
 
 #[tauri::command]
-pub async fn get_area(db: Db<'_>) -> TlcResult<(u32, u32, u32, u32)> {
-    db.lock().await.get_area()
+pub async fn get_area(state: State<'_>) -> TlcResult<(u32, u32, u32, u32)> {
+    state.get_area().to()
 }
 
 #[tauri::command]
-pub async fn set_area(area: (u32, u32, u32, u32), db: Db<'_>) -> TlcResult<()> {
-    db.lock().await.set_area(area)
+pub async fn set_area(area: (u32, u32, u32, u32), state: State<'_>) -> TlcResult<()> {
+    state.set_area(area).to()
 }
 
 #[tauri::command]
-pub async fn get_filter_method(db: Db<'_>) -> TlcResult<FilterMethod> {
-    db.lock().await.get_filter_method()
+pub async fn get_filter_method(state: State<'_>) -> TlcResult<FilterMethod> {
+    state.get_filter_method().to()
 }
 
 #[tauri::command]
-pub async fn set_filter_method(filter_method: FilterMethod, db: Db<'_>) -> TlcResult<()> {
-    db.lock().await.set_filter_method(filter_method)
+pub async fn set_filter_method(filter_method: FilterMethod, state: State<'_>) -> TlcResult<()> {
+    state.set_filter_method(filter_method).to()
 }
 
 #[tauri::command]
-pub async fn filter_point(point: (usize, usize), db: Db<'_>) -> TlcResult<Vec<u8>> {
-    let db = db.lock().await.snapshot();
-    spawn_blocking(move || db.filter_point(point)).await.to()?
+pub async fn filter_point(point: (usize, usize), state: State<'_>) -> TlcResult<Vec<u8>> {
+    state.filter_point(point).to()
 }
 
 #[tauri::command]
-pub async fn get_thermocouples(db: Db<'_>) -> TlcResult<Vec<Thermocouple>> {
-    Ok(db.lock().await.get_thermocouples()?.to_vec())
+pub async fn get_thermocouples(state: State<'_>) -> TlcResult<Vec<Thermocouple>> {
+    Ok(state.get_thermocouples().to()?.to_vec())
 }
 
 #[tauri::command]
-pub async fn set_thermocouples(thermocouples: Vec<Thermocouple>, db: Db<'_>) -> TlcResult<()> {
-    db.lock().await.set_thermocouples(thermocouples)
+pub async fn set_thermocouples(
+    thermocouples: Box<[Thermocouple]>,
+    state: State<'_>,
+) -> TlcResult<()> {
+    state.set_thermocouples(thermocouples).to()
 }
 
 #[tauri::command]
-pub async fn get_interp_method(db: Db<'_>) -> TlcResult<InterpMethod> {
-    db.lock().await.get_interp_method()
+pub async fn get_interp_method(state: State<'_>) -> TlcResult<InterpMethod> {
+    state.get_interp_method().to()
 }
 
 #[tauri::command]
-pub async fn set_interp_method(interp_method: InterpMethod, db: Db<'_>) -> TlcResult<()> {
-    db.lock().await.set_interp_method(interp_method)
+pub async fn set_interp_method(interp_method: InterpMethod, state: State<'_>) -> TlcResult<()> {
+    state.set_interp_method(interp_method).to()
 }
 
 #[tauri::command]
-pub async fn interp_frame(frame_index: usize, db: Db<'_>) -> TlcResult<Array2<f64>> {
-    let db = db.lock().await.snapshot();
-    spawn_blocking(move || db.interp_frame(frame_index))
-        .await
-        .to()?
+pub async fn interp_frame(frame_index: usize, state: State<'_>) -> TlcResult<Array2<f64>> {
+    state.interp_frame(frame_index).to()
 }
 
 #[tauri::command]
-pub async fn get_iter_method(db: Db<'_>) -> TlcResult<IterMethod> {
-    db.lock().await.get_iter_method()
+pub async fn get_iter_method(state: State<'_>) -> TlcResult<IterMethod> {
+    state.get_iter_method().to()
 }
 
 #[tauri::command]
-pub async fn set_iter_method(iter_method: IterMethod, db: Db<'_>) -> TlcResult<()> {
-    db.lock().await.set_iter_method(iter_method)
+pub async fn set_iter_method(iter_method: IterMethod, state: State<'_>) -> TlcResult<()> {
+    state.set_iter_method(iter_method).to()
 }
 
 #[tauri::command]
-pub async fn get_physical_param(db: Db<'_>) -> TlcResult<PhysicalParam> {
-    db.lock().await.get_physical_param()
+pub async fn get_physical_param(state: State<'_>) -> TlcResult<PhysicalParam> {
+    state.get_physical_param().to()
 }
 
 #[tauri::command]
-pub async fn set_physical_param(physical_param: PhysicalParam, db: Db<'_>) -> TlcResult<()> {
-    db.lock().await.set_physical_param(physical_param)
+pub async fn set_physical_param(physical_param: PhysicalParam, state: State<'_>) -> TlcResult<()> {
+    state.set_physical_param(physical_param).to()
 }
 
 #[tauri::command]
-pub async fn get_nu_data(db: Db<'_>) -> TlcResult<NuData> {
-    let db = db.lock().await.snapshot();
-    spawn_blocking(move || db.get_nu_data()).await.to()?
+pub async fn get_nu_data(state: State<'_>) -> TlcResult<NuData> {
+    state.get_nu_data().to()
 }
 
 #[tauri::command]
-pub async fn get_nu_plot(trunc: Option<(f64, f64)>, db: Db<'_>) -> TlcResult<String> {
-    let db = db.lock().await.snapshot();
-    spawn_blocking(move || db.get_nu_plot(trunc)).await.to()?
+pub async fn get_nu_plot(trunc: Option<(f64, f64)>, state: State<'_>) -> TlcResult<String> {
+    state.get_nu_plot(trunc).to()
 }
 
 #[tauri::command]
-pub async fn save_data(db: Db<'_>) -> TlcResult<()> {
-    let db = db.lock().await.snapshot();
-    spawn_blocking(move || db.save_data()).await.to()?
+pub async fn save_data(state: State<'_>) -> TlcResult<()> {
+    state.save_data().to()
 }
 
 trait IntoTlcResult<T> {

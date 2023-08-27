@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::daq::Thermocouple;
 use InterpMethod::*;
 
-#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq)]
 pub enum InterpMethod {
     Horizontal,
     HorizontalExtra,

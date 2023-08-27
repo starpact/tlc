@@ -1,8 +1,8 @@
-use salsa::ParallelDatabase;
 use std::path::PathBuf;
 
-use super::*;
-use crate::video::tests::*;
+use crate::{
+    db::*, video::tests::*, FilterMethod, InterpMethod, IterMethod, PhysicalParam, Thermocouple,
+};
 
 #[ignore]
 #[tokio::test]
@@ -16,57 +16,49 @@ async fn test_whole_process_step_by_step() {
 
     let video_path = PathBuf::from(VIDEO_PATH_REAL);
     db.set_video_path(video_path.clone()).unwrap();
-    assert_eq!(db.get_video_path().unwrap(), &video_path);
-    assert_eq!(db.get_video_shape().unwrap(), (1024, 1280));
-    assert_eq!(db.get_video_frame_rate().unwrap(), 25);
-    assert_eq!(db.get_video_nframes().unwrap(), 2444);
+    assert_eq!(db.video_path().unwrap(), &video_path);
+    assert_eq!(db.video_shape().unwrap(), (1024, 1280));
+    assert_eq!(db.video_frame_rate().unwrap(), 25);
+    assert_eq!(db.video_nframes().unwrap(), 2444);
 
     let daq_path = PathBuf::from("/home/yhj/Downloads/EXP/imp/daq/imp_20000_1.lvm");
     db.set_daq_path(daq_path.clone()).unwrap();
-    assert_eq!(db.get_daq_path().unwrap(), daq_path);
-    assert_eq!(db.get_daq_data().unwrap().dim(), (2589, 10));
+    assert_eq!(db.daq_path().unwrap(), daq_path);
+    assert_eq!(db.daq_data().unwrap().dim(), (2589, 10));
 
     db.set_start_frame(81).unwrap_err();
     db.set_start_row(151).unwrap_err();
     db.synchronize_video_and_daq(81, 150).unwrap();
-    assert_eq!(db.get_start_frame().unwrap(), 81);
-    assert_eq!(db.get_start_row().unwrap(), 150);
+    assert_eq!(db.start_frame().unwrap(), 81);
+    assert_eq!(db.start_row().unwrap(), 150);
     db.set_start_frame(80).unwrap();
-    assert_eq!(db.get_start_frame().unwrap(), 80);
-    assert_eq!(db.get_start_row().unwrap(), 149);
+    assert_eq!(db.start_frame().unwrap(), 80);
+    assert_eq!(db.start_row().unwrap(), 149);
     db.set_start_row(150).unwrap();
-    assert_eq!(db.get_start_frame().unwrap(), 81);
-    assert_eq!(db.get_start_row().unwrap(), 150);
-
-    _ = tokio::join!(
-        decode_frame_base64(db.snapshot(), 1),
-        decode_frame_base64(db.snapshot(), 100),
-        decode_frame_base64(db.snapshot(), 200),
-        decode_frame_base64(db.snapshot(), 300),
-        decode_frame_base64(db.snapshot(), 1380),
-    );
+    assert_eq!(db.start_frame().unwrap(), 81);
+    assert_eq!(db.start_row().unwrap(), 150);
 
     db.set_area((660, 20, 340, 1248)).unwrap();
-    assert_eq!(db.get_area().unwrap(), (660, 20, 340, 1248));
+    assert_eq!(db.area().unwrap(), (660, 20, 340, 1248));
 
     db.set_filter_method(_filter_method()).unwrap();
-    assert_eq!(db.get_filter_method().unwrap(), _filter_method());
+    assert_eq!(db.filter_method().unwrap(), _filter_method());
     db.filter_point((100, 100)).unwrap();
     db.filter_point((300, 500)).unwrap();
 
     db.set_thermocouples(_thermocouples()).unwrap();
-    assert_eq!(db.get_thermocouples().unwrap(), _thermocouples());
+    assert_eq!(db.thermocouples().unwrap(), &*_thermocouples());
 
     db.set_interp_method(InterpMethod::Horizontal).unwrap();
-    assert_eq!(db.get_interp_method().unwrap(), InterpMethod::Horizontal);
+    assert_eq!(db.interp_method().unwrap(), InterpMethod::Horizontal);
 
     db.set_physical_param(_physical_param()).unwrap();
-    assert_eq!(db.get_physical_param().unwrap(), _physical_param());
+    assert_eq!(db.physical_param().unwrap(), _physical_param());
 
     db.set_iter_method(_iteration_method()).unwrap();
-    assert_eq!(db.get_iter_method().unwrap(), _iteration_method());
+    assert_eq!(db.iter_method().unwrap(), _iteration_method());
 
-    db.get_nu_data().unwrap();
+    db.nu2().unwrap();
 }
 
 #[ignore]
@@ -93,9 +85,9 @@ fn test_all_onetime_auto() {
     db.set_interp_method(InterpMethod::Horizontal).unwrap();
     db.set_physical_param(_physical_param()).unwrap();
     db.set_iter_method(_iteration_method()).unwrap();
-    db.get_nu_data().unwrap();
-    db.get_nu_data().unwrap();
-    db.get_nu_plot(None).unwrap();
+    db.nu2().unwrap();
+    db.nu2().unwrap();
+    db.nu_plot(None).unwrap();
     db.save_data().unwrap();
 }
 
@@ -105,7 +97,7 @@ fn _filter_method() -> FilterMethod {
     }
 }
 
-fn _thermocouples() -> Vec<Thermocouple> {
+fn _thermocouples() -> Box<[Thermocouple]> {
     vec![
         Thermocouple {
             column_index: 1,
@@ -132,6 +124,7 @@ fn _thermocouples() -> Vec<Thermocouple> {
             position: (0, 1116),
         },
     ]
+    .into_boxed_slice()
 }
 
 fn _physical_param() -> PhysicalParam {
