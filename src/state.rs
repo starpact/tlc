@@ -160,7 +160,7 @@ impl<I: PartialEq + Clone, O> TaskState<I, O> {
 }
 
 #[derive(Debug, Clone, Copy)]
-struct StartIndex {
+pub struct StartIndex {
     pub start_frame: usize,
     pub start_row: usize,
 }
@@ -551,7 +551,7 @@ impl Database {
     }
 }
 
-fn eval_cal_num(nframes: usize, nrows: usize, start_index: StartIndex) -> usize {
+pub fn eval_cal_num(nframes: usize, nrows: usize, start_index: StartIndex) -> usize {
     let start_frame = start_index.start_frame;
     let start_row = start_index.start_row;
     (nframes - start_frame).min(nrows - start_row)
