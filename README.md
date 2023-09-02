@@ -1,7 +1,5 @@
 # Transient Liquid Crystal Experiment Data Processing
 
-Built with [Tauri](https://tauri.app).
-
 ## Development
 ### Linux
 - install rust nightly-x86_64-unknown-linux-gnu toolchain
@@ -9,21 +7,12 @@ Built with [Tauri](https://tauri.app).
 ```sh
 # enter the environment
 nix develop # or use direnv
-
-# run
-cargo tauri dev
-
-# build
-cargo tauri build
 ```
 Cross compile to Windows(TODO).
 
 ### Windows(TODO)
 - install rust nightly-x86_64-pc-windows-msvc toolchain
 ```sh
-# install tauri-cli
-cargo install tauri-cli
-
 # install `ffmpeg` via `vcpkg`, need to compile for about 20 mins
 
 # let vcpkg expose ffmpeg headers
@@ -34,7 +23,6 @@ cargo install tauri-cli
 ```
 
 ## Architecture
-Use [Salsa](https://github.com/salsa-rs/salsa) incremental recomputation framework, which will take care all the cache and invalidation.
 ```mermaid
 flowchart
     video_path[Video Path] --> packets((Packets))
@@ -88,4 +76,3 @@ sem: Semaphore,
 - [FFmpeg: Difference Between Frames and Packets](https://stackoverflow.com/questions/53574798/difference-between-frames-and-packets-in-ffmpeg)
 - [FFmpeg: multithread decoding](https://www.cnblogs.com/TaigaCon/p/10220356.html)
 - [Matklad's reply on reddit](https://www.reddit.com/r/rust/comments/uf7yoy/comment/i6s4b8x/)
-- [Salsa](https://salsa-rs.netlify.app/overview.html)

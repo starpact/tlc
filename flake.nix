@@ -21,13 +21,9 @@
               extensions = [ "rust-src" "rust-analyzer" ];
               targets = [ "x86_64-unknown-linux-gnu" ];
             }))
-            cargo-nextest
-            cargo-tauri
             ffmpeg-full
-            nodejs
-            openssl
-            pkg-config
             webkitgtk
+            pkg-config
           ];
           shellHook =
             ''
