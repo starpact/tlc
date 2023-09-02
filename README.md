@@ -1,7 +1,5 @@
 # Transient Liquid Crystal Experiment Data Processing
 
-Built with [Tauri](https://tauri.app).
-
 ## Development
 ### Linux
 - install rust nightly-x86_64-unknown-linux-gnu toolchain
@@ -9,21 +7,12 @@ Built with [Tauri](https://tauri.app).
 ```sh
 # enter the environment
 nix develop # or use direnv
-
-# run
-cargo tauri dev
-
-# build
-cargo tauri build
 ```
 Cross compile to Windows(TODO).
 
 ### Windows(TODO)
 - install rust nightly-x86_64-pc-windows-msvc toolchain
 ```sh
-# install tauri-cli
-cargo install tauri-cli
-
 # install `ffmpeg` via `vcpkg`, need to compile for about 20 mins
 
 # let vcpkg expose ffmpeg headers
