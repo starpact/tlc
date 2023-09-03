@@ -1,6 +1,5 @@
 use std::{io::Write, path::Path};
 
-use base64::engine::{general_purpose, Engine};
 use image::ColorType::Rgb8;
 use ndarray::prelude::*;
 use plotters::prelude::*;
@@ -82,13 +81,13 @@ pub fn draw_nu_plot_and_save<P: AsRef<Path>>(
     nu2: ArrayView2<f64>,
     trunc: Option<(f64, f64)>,
     nu_plot_path: P,
-) -> anyhow::Result<String> {
+) -> anyhow::Result<Vec<u8>> {
     let nu_nan_mean = nan_mean(nu2.view());
     let trunc = trunc.unwrap_or((nu_nan_mean * 0.6, nu_nan_mean * 2.0));
     let buf = draw_area(nu2.view(), trunc)?;
     let (h, w) = nu2.dim();
     image::save_buffer(nu_plot_path, &buf, w as u32, h as u32, Rgb8)?;
-    Ok(general_purpose::STANDARD.encode(buf))
+    Ok(buf)
 }
 
 #[instrument(skip(area), err)]

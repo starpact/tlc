@@ -4,23 +4,18 @@ use std::{
     path::Path,
     sync::{
         atomic::{AtomicUsize, Ordering},
-        Arc, Mutex,
+        Arc, Mutex, MutexGuard,
     },
     thread::JoinHandle,
 };
 
 use anyhow::anyhow;
-use base64::{engine::general_purpose, Engine};
-use crossbeam::{
-    channel::{Receiver, Sender},
-    queue::ArrayQueue,
-};
+use crossbeam::{atomic::AtomicCell, channel::Sender, queue::ArrayQueue};
 pub use ffmpeg::codec::{packet::Packet, Parameters};
 use ffmpeg::{codec, format::Pixel::RGB24, software::scaling, util::frame::video::Video};
 use image::{codecs::jpeg::JpegEncoder, ColorType::Rgb8};
 use ndarray::ArcArray2;
 use serde::Serialize;
-use tokio::sync::oneshot;
 use tracing::instrument;
 
 pub use detect_peak::{filter_detect_peak, filter_point, FilterMethod};
@@ -75,14 +70,10 @@ pub struct VideoData {
     /// priority to newer frames, e.g. we should at least guarantee decoding the frame
     /// where the progress bar **stops**.
     /// `task_ring_buffer` is a ring buffer that only stores the most recent tasks.
-    task_ring_buffer: Arc<ArrayQueue<DecodeFrameTask>>,
-    task_waker: Sender<()>,
+    task_ring_buffer: Arc<ArrayQueue<(usize, usize)>>,
+    task_dispatcher: Sender<()>,
+    decoded_frame_slot: Arc<Mutex<Option<(Vec<u8>, usize)>>>,
     worker_handles: Box<[JoinHandle<()>]>,
-}
-
-struct DecodeFrameTask {
-    frame_index: usize,
-    tx: oneshot::Sender<anyhow::Result<String>>,
 }
 
 impl std::fmt::Debug for VideoData {
@@ -142,15 +133,28 @@ impl VideoData {
         assert!(num_decode_frame_workers > 0);
 
         let task_ring_buffer = Arc::new(ArrayQueue::new(num_decode_frame_workers));
-        let (task_waker, task_listener) = crossbeam::channel::bounded(num_decode_frame_workers);
+        let (task_dispatcher, task_listener) =
+            crossbeam::channel::bounded(num_decode_frame_workers);
+        let decoded_frame_slot = Arc::new(Mutex::new(None));
         let worker_handles: Box<[_]> = (0..num_decode_frame_workers)
             .map(|_| {
                 let parameters = parameters.clone();
                 let packets = packets.clone();
-                let listener = task_listener.clone();
-                let backlog = task_ring_buffer.clone();
+                let task_ring_buffer = task_ring_buffer.clone();
+                let task_listener = task_listener.clone();
+                let decoded_frame_slot = decoded_frame_slot.clone();
                 std::thread::spawn(move || {
-                    decode_frame_base64_worker(parameters, &packets, listener, &backlog);
+                    let mut decode_converter = DecodeConverter::new(parameters).unwrap();
+                    for _ in task_listener {
+                        if let Some((frame_index, serial_num)) = task_ring_buffer.pop() {
+                            if let Ok(decoded_frame) =
+                                decode_frame(&mut decode_converter, &packets[frame_index])
+                            {
+                                *decoded_frame_slot.lock().unwrap() =
+                                    Some((decoded_frame, serial_num));
+                            }
+                        }
+                    }
                 })
             })
             .collect();
@@ -168,7 +172,8 @@ impl VideoData {
             shape,
             packets,
             task_ring_buffer,
-            task_waker,
+            task_dispatcher,
+            decoded_frame_slot,
             worker_handles,
         })
     }
@@ -185,19 +190,18 @@ impl VideoData {
         self.shape
     }
 
-    pub async fn decode_frame_base64(&self, frame_index: usize) -> anyhow::Result<String> {
+    pub fn decode_one_frame(&self, frame_index: usize, serial_num: usize) {
         assert!(!self.worker_handles.iter().any(|h| h.is_finished()));
-        let (tx, rx) = oneshot::channel();
-        // When the old value which contains a tx is dropped, its corresponding
-        // rx(which is awaiting) will be disconnected.
-        self.task_ring_buffer
-            .force_push(DecodeFrameTask { frame_index, tx });
-        _ = self.task_waker.try_send(());
-        rx.await?
+        self.task_ring_buffer.force_push((frame_index, serial_num));
+        _ = self.task_dispatcher.try_send(());
+    }
+
+    pub fn decoded_frame(&self) -> MutexGuard<Option<(Vec<u8>, usize)>> {
+        self.decoded_frame_slot.lock().unwrap()
     }
 
     #[instrument(skip(self), err)]
-    pub fn decode_all(
+    pub fn decode_range_frames(
         &self,
         start_frame: usize,
         cal_num: usize,
@@ -243,52 +247,25 @@ impl VideoData {
     }
 }
 
-fn decode_frame_base64_worker(
-    parameters: Parameters,
-    packets: &[Packet],
-    listener: Receiver<()>,
-    backlog: &ArrayQueue<DecodeFrameTask>,
-) {
-    let mut decode_converter = DecodeConverter::new(parameters).unwrap();
-    let mut buf = Vec::new();
-    for _ in listener {
-        if let Some(DecodeFrameTask { frame_index, tx }) = backlog.pop() {
-            _ = tx.send(decode_frame_base64(
-                &mut decode_converter,
-                &mut buf,
-                &packets[frame_index],
-            ));
-            buf.clear();
-        }
-    }
-}
-
 #[instrument(skip_all, err)]
-fn decode_frame_base64(
+fn decode_frame(
     decode_converter: &mut DecodeConverter,
-    mut buf: &mut Vec<u8>,
     packet: &Packet,
-) -> anyhow::Result<String> {
+) -> anyhow::Result<Vec<u8>> {
     let (w, h) = (
         decode_converter.decoder.width(),
         decode_converter.decoder.height(),
     );
+
+    let mut buf = Vec::new();
     let mut jpeg_encoder = JpegEncoder::new_with_quality(&mut buf, 100);
     let img = decode_converter.decode_convert(packet)?.data(0);
     jpeg_encoder.encode(img, w, h, Rgb8)?; // slowest
-    Ok(general_purpose::STANDARD.encode(buf))
+    Ok(buf)
 }
 
 #[cfg(test)]
 pub mod tests {
-    use std::{
-        sync::{
-            atomic::{AtomicU32, Ordering::Relaxed},
-            Arc,
-        },
-        time::Duration,
-    };
-
     use super::*;
 
     #[test]
@@ -313,17 +290,6 @@ pub mod tests {
         assert_eq!(cnt, expected_video_meta.nframes);
     }
 
-    #[tokio::test]
-    async fn test_decode_frame_sample() {
-        _decode_frame(VIDEO_PATH_SAMPLE).await;
-    }
-
-    #[ignore]
-    #[tokio::test]
-    async fn test_decode_frame_real() {
-        _decode_frame(VIDEO_PATH_REAL).await;
-    }
-
     #[test]
     fn test_decode_all_sample() {
         _decode_all(VIDEO_PATH_SAMPLE, 0, video_meta_sample().nframes);
@@ -335,37 +301,10 @@ pub mod tests {
         _decode_all(VIDEO_PATH_REAL, 10, video_meta_real().nframes - 10);
     }
 
-    async fn _decode_frame(video_path: &str) {
-        let video_data = read_video(video_path).unwrap();
-
-        let mut handles = Vec::new();
-        let ok_cnt = Arc::new(AtomicU32::new(0));
-        let abort_cnt = Arc::new(AtomicU32::new(0));
-        for i in 0..video_data.packets.len() {
-            let decode_manager = video_data.clone();
-            let ok_cnt = ok_cnt.clone();
-            let abort_cnt = abort_cnt.clone();
-            let handle = tokio::spawn(async move {
-                match decode_manager.decode_frame_base64(i).await {
-                    Ok(_) => ok_cnt.fetch_add(1, Relaxed),
-                    Err(_) => abort_cnt.fetch_add(1, Relaxed),
-                }
-            });
-            handles.push(handle);
-            tokio::time::sleep(Duration::from_millis(1)).await;
-        }
-
-        for handle in handles {
-            _ = handle.await;
-        }
-
-        dbg!(ok_cnt, abort_cnt);
-    }
-
     fn _decode_all(video_path: &str, start_frame: usize, cal_num: usize) {
         let video_data = read_video(video_path).unwrap();
         video_data
-            .decode_all(start_frame, cal_num, (10, 10, 600, 800))
+            .decode_range_frames(start_frame, cal_num, (10, 10, 600, 800))
             .unwrap();
     }
 

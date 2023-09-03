@@ -3,14 +3,14 @@ mod tests;
 
 use std::{
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::Arc,
 };
 
 use anyhow::{anyhow, bail};
 use ndarray::{ArcArray2, Array2};
 use serde::Serialize;
 use time::{OffsetDateTime, UtcOffset};
-use tracing::{info_span, instrument};
+use tracing::instrument;
 
 use crate::{
     daq::{read_daq, DaqMeta, InterpMethod, Interpolator, Thermocouple},
@@ -23,75 +23,6 @@ use crate::{
 pub struct NuData {
     pub nu2: ArcArray2<f64>,
     pub nu_nan_mean: f64,
-}
-
-#[instrument(skip_all)]
-pub fn reconcile(db_mut: &mut Database, db: &Arc<Mutex<Database>>) {
-    if let Some(video_path) = &db_mut.video_path {
-        if let Some(tx) = db_mut.video_data.need_execute(video_path) {
-            spawn_read_video(db.clone(), video_path.clone(), tx);
-        }
-    }
-
-    if let Some(daq_path) = &db_mut.daq_path {
-        if let Some(tx) = db_mut.daq_data.need_execute(daq_path) {
-            spawn_read_daq(db.clone(), daq_path.clone(), tx);
-        }
-    }
-}
-
-fn spawn_read_video(db: Arc<Mutex<Database>>, video_path: PathBuf, tx: async_channel::Sender<()>) {
-    std::thread::spawn(move || {
-        let _span = info_span!("spawn_read_video").entered();
-        _ = tx;
-
-        let video_data = match read_video(&video_path) {
-            Ok(video_data) => video_data,
-            Err(e) => {
-                info_span!("write_db", %e).in_scope(|| {
-                    db.lock().unwrap().video_data = TaskState::Failed(e);
-                });
-                return;
-            }
-        };
-
-        info_span!("write_db", ?video_path, ?video_data).in_scope(|| {
-            db.lock().unwrap().video_data = TaskState::Done {
-                input: video_path,
-                output: video_data,
-            };
-        });
-    });
-}
-
-fn spawn_read_daq(db: Arc<Mutex<Database>>, daq_path: PathBuf, tx: async_channel::Sender<()>) {
-    std::thread::spawn(move || {
-        let _span = info_span!("spawn_daq_video").entered();
-        _ = tx;
-
-        let daq_data = match read_daq(&daq_path) {
-            Ok(daq_data) => daq_data,
-            Err(e) => {
-                info_span!("write_db", %e).in_scope(|| {
-                    db.lock().unwrap().daq_data = TaskState::Failed(e);
-                });
-                return;
-            }
-        };
-
-        info_span!(
-            "write_db",
-            ?daq_path,
-            nrows = daq_data.nrows(),
-            ncols = daq_data.ncols()
-        )
-        .in_scope(|| {
-            db.lock().unwrap().daq_data = TaskState::Done {
-                input: daq_path,
-                output: daq_data,
-            };
-        });
-    });
 }
 
 #[derive(Default)]
@@ -120,43 +51,6 @@ pub struct Database {
     iter_method: Option<IterMethod>,
     /// All physical parameters used when solving heat transfer equation.
     physical_param: Option<PhysicalParam>,
-
-    video_data: TaskState<PathBuf, Arc<VideoData>>,
-    daq_data: TaskState<PathBuf, ArcArray2<f64>>,
-}
-
-#[derive(Debug, Default)]
-pub enum TaskState<I: PartialEq + Clone, O> {
-    #[default]
-    NotStarted,
-    InProcess {
-        input: I,
-        waker: async_channel::Receiver<()>,
-    },
-    Failed(anyhow::Error),
-    Done {
-        input: I,
-        output: O,
-    },
-}
-
-impl<I: PartialEq + Clone, O> TaskState<I, O> {
-    fn need_execute(&mut self, new_input: &I) -> Option<async_channel::Sender<()>> {
-        match self {
-            TaskState::Done { input, .. } if input == new_input => return None,
-            TaskState::InProcess { input, .. } if input == new_input => return None,
-            TaskState::InProcess { waker, .. } => _ = waker.close(),
-            _ => {}
-        }
-
-        let (tx, rx) = async_channel::bounded(1);
-        *self = TaskState::InProcess {
-            input: new_input.clone(),
-            waker: rx,
-        };
-
-        Some(tx)
-    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -358,7 +252,7 @@ impl Database {
         let start_index = self.start_index()?;
         let cal_num = eval_cal_num(video_data.nframes(), daq_data.nrows(), start_index);
         let area = self.area()?;
-        let green2 = video_data.decode_all(start_index.start_frame, cal_num, area)?;
+        let green2 = video_data.decode_range_frames(start_index.start_frame, cal_num, area)?;
         let filter_method = self.filter_method()?;
         filter_point(green2, filter_method, area, point)
     }
@@ -457,7 +351,7 @@ impl Database {
     }
 
     #[instrument(level = "trace", skip(self), err)]
-    fn nu_plot(&self, trunc: Option<(f64, f64)>) -> anyhow::Result<String> {
+    fn nu_plot(&self, trunc: Option<(f64, f64)>) -> anyhow::Result<Vec<u8>> {
         let name = &self.name;
         let save_root_dir = self.save_root_dir()?;
         let nu2 = self.nu2()?;
@@ -519,7 +413,7 @@ impl Database {
         let start_index = self.start_index()?;
         let cal_num = eval_cal_num(video_data.nframes(), daq_data.nrows(), start_index);
         let area = self.area()?;
-        let green2 = video_data.decode_all(start_index.start_frame, cal_num, area)?;
+        let green2 = video_data.decode_range_frames(start_index.start_frame, cal_num, area)?;
         let filter_method = self.filter_method()?;
         let gmax_frame_indexes = filter_detect_peak(green2, filter_method);
         let thermocouples = self.thermocouples()?;

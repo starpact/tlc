@@ -1,6 +1,11 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-#![cfg_attr(test, feature(test, array_windows))]
-#![allow(clippy::too_many_arguments)]
+
+mod daq;
+mod postproc;
+mod solve;
+mod state;
+mod util;
+mod video;
 
 use std::{collections::BTreeMap, path::PathBuf, sync::Arc};
 
@@ -10,16 +15,10 @@ use eframe::{
     epaint::{Color32, FontFamily},
     CreationContext,
 };
+use egui_extras::RetainedImage;
 use ndarray::ArcArray2;
 use state::StartIndex;
 use video::VideoData;
-
-mod daq;
-mod postproc;
-mod solve;
-mod state;
-mod util;
-mod video;
 
 fn main() -> Result<(), eframe::Error> {
     video::init();
@@ -40,11 +39,12 @@ fn main() -> Result<(), eframe::Error> {
 
 #[derive(Default)]
 struct Tlc {
+    /// User defined unique name of this experiment setting.
     name: String,
     video: Task<PathBuf, Arc<VideoData>>,
     daq: Task<PathBuf, ArcArray2<f64>>,
     _start_index: Option<StartIndex>,
-    _green2: Task<(), ArcArray2<u8>>,
+    green2: Task<(), ArcArray2<u8>>,
 }
 
 #[derive(Default)]
@@ -63,16 +63,15 @@ impl<I, O> Task<I, O> {
         render_in_progress: impl FnOnce(&mut Ui, &I),
         render_done: impl FnOnce(&mut Ui, &I, &O),
         render_failed: impl FnOnce(&mut Ui, &I, &anyhow::Error),
-    ) -> bool {
-        let mut changed_to_done = false;
-
+        on_done: impl FnOnce(&I, &O),
+    ) {
         *self = match std::mem::take(self) {
             Task::Empty => Task::Empty,
             Task::InProcess(input, output) => match output.take() {
                 Some(ret) => match ret {
                     Ok(output) => {
-                        changed_to_done = true;
                         render_done(ui, &input, &output);
+                        on_done(&input, &output);
                         Task::Done(input, output)
                     }
                     Err(e) => {
@@ -94,8 +93,6 @@ impl<I, O> Task<I, O> {
                 Task::Failed(input, e)
             }
         };
-
-        changed_to_done
     }
 }
 
@@ -127,9 +124,7 @@ impl Tlc {
         Self::default()
     }
 
-    fn render_video(&mut self, ui: &mut Ui) -> bool {
-        let mut changed_to_done = false;
-
+    fn render_video(&mut self, ui: &mut Ui) {
         ui.horizontal(|ui| {
             if ui.button("选择视频文件").clicked() {
                 if let Some(video_path) = rfd::FileDialog::new()
@@ -141,7 +136,7 @@ impl Tlc {
                     std::thread::spawn(move || output.store(Some(video::read_video(video_path))));
                 }
             }
-            changed_to_done = self.video.poll(
+            self.video.poll(
                 ui,
                 |ui, video_path| {
                     ui.horizontal(|ui| {
@@ -153,8 +148,6 @@ impl Tlc {
                     ui.horizontal(|ui| {
                         ui.label(video_path.display().to_string());
                         ui.colored_label(Color32::GREEN, "✔︎");
-                    });
-                    ui.horizontal(|ui| {
                         ui.label(format!("帧数: {}", video_data.nframes()));
                         ui.label(format!("帧率: {}", video_data.frame_rate()));
                         let (h, w) = video_data.shape();
@@ -168,15 +161,24 @@ impl Tlc {
                         ui.label(e.to_string());
                     });
                 },
+                |_, video_data| {
+                    video_data.decode_one_frame(0, 0); // Trigger render first frame.
+                    let green2 = Arc::new(AtomicCell::new(None));
+                    self.green2 = Task::InProcess((), green2.clone());
+                    let video_data = video_data.clone();
+                    std::thread::spawn(move || {
+                        green2.store(Some(video_data.decode_range_frames(
+                            0,
+                            2000,
+                            (0, 0, 800, 600),
+                        )));
+                    });
+                },
             );
         });
-
-        changed_to_done
     }
 
-    fn render_daq(&mut self, ui: &mut Ui) -> bool {
-        let mut changed_to_done = false;
-
+    fn render_daq(&mut self, ui: &mut Ui) {
         ui.horizontal(|ui| {
             if ui.button("选择数采文件").clicked() {
                 if let Some(daq_path) = rfd::FileDialog::new()
@@ -188,7 +190,7 @@ impl Tlc {
                     std::thread::spawn(move || output.store(Some(daq::read_daq(daq_path))));
                 }
             }
-            changed_to_done = self.daq.poll(
+            self.daq.poll(
                 ui,
                 |ui, daq_path| {
                     ui.horizontal(|ui| {
@@ -200,8 +202,6 @@ impl Tlc {
                     ui.horizontal(|ui| {
                         ui.label(daq_path.display().to_string());
                         ui.colored_label(Color32::GREEN, "✔︎");
-                    });
-                    ui.horizontal(|ui| {
                         ui.label(format!("行数: {}", daq_data.nrows()));
                         ui.label(format!("列数: {}", daq_data.ncols()));
                     });
@@ -212,18 +212,35 @@ impl Tlc {
                         ui.label(e.to_string());
                     });
                 },
+                |_, _| {},
             );
         });
+    }
 
-        changed_to_done
+    fn render_green2(&mut self, ui: &mut Ui) {
+        self.green2.poll(
+            ui,
+            |ui, _| _ = ui.spinner(),
+            |ui, _, green2| {
+                ui.horizontal(|ui| {
+                    ui.colored_label(Color32::GREEN, "✔︎");
+                    ui.label(format!("行数: {}", green2.nrows()));
+                    ui.label(format!("列数: {}", green2.ncols()));
+                });
+            },
+            |ui, _, e| {
+                ui.horizontal(|ui| {
+                    ui.label(e.to_string());
+                });
+            },
+            |_, _| {},
+        );
     }
 }
 
 impl eframe::App for Tlc {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         egui::CentralPanel::default().show(ctx, |ui| {
-            let mut need_reconcile = false;
-
             ui.horizontal(|ui| {
                 let label = ui.label("实验组名称");
                 TextEdit::singleline(&mut self.name)
@@ -233,12 +250,18 @@ impl eframe::App for Tlc {
                     .labelled_by(label.id);
             });
 
-            need_reconcile |= self.render_video(ui);
-            need_reconcile |= self.render_daq(ui);
+            self.render_video(ui);
+            self.render_daq(ui);
 
-            if need_reconcile {
-                println!("try reconcile");
+            if let Task::Done(_, video_data) = &self.video {
+                if let Some((decoded_frame, _)) = &*video_data.decoded_frame() {
+                    let image = RetainedImage::from_image_bytes("", decoded_frame).unwrap();
+                    let (h, w) = video_data.shape();
+                    image.show_size(ui, egui::vec2((w / 4) as f32, (h / 4) as f32));
+                }
             }
+
+            self.render_green2(ui);
         });
     }
 }

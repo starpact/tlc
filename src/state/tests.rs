@@ -9,8 +9,7 @@ use crate::{
 };
 
 #[ignore]
-#[tokio::test]
-async fn test_whole_process_step_by_step() {
+fn test_whole_process_step_by_step() {
     util::log::init();
     let mut db = Database::default();
 

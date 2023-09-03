@@ -11,12 +11,12 @@ edition = "2021"
 [dependencies]
 anyhow = "1.0"
 async-channel = "1.9"
-base64 = "0.21"
 calamine = "0.21"
 crossbeam = "0.8"
 csv = "1.2"
 dwt = "0.5"
-eframe = { version = "0.22", default-features = false, features = ["glow"] }
+eframe = { version = "0.22", default-features = false, features = ["wgpu"] }
+egui_extras = { version = "0.22", features = ["image"] }
 ffmpeg = { version = "6.0", package = "ffmpeg-next" }
 image = "0.24"
 libm = "0.2"
@@ -29,7 +29,6 @@ rfd = "0.11"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 time = { version = "0.3", features = ["serde-well-known"] }
-tokio = { version = "1.32", features = ["sync"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = [
   "env-filter",
@@ -39,7 +38,6 @@ tracing-subscriber = { version = "0.3", features = [
 [dev-dependencies]
 approx = "0.5"
 ndarray = { version = "0.15", features = ["approx-0_5"] }
-tokio = { version = "1.32", features = ["macros", "time", "rt-multi-thread"] }
 
 [profile.release]
 codegen-units = 1
