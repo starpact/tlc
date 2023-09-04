@@ -41,58 +41,28 @@ fn main() -> Result<(), eframe::Error> {
 struct Tlc {
     /// User defined unique name of this experiment setting.
     name: String,
-    video: Task<PathBuf, Arc<VideoData>>,
-    daq: Task<PathBuf, ArcArray2<f64>>,
+    video: Option<(PathBuf, Promise<anyhow::Result<Arc<VideoData>>>)>,
+    daq: Option<(PathBuf, Promise<anyhow::Result<ArcArray2<f64>>>)>,
     _start_index: Option<StartIndex>,
-    green2: Task<(), ArcArray2<u8>>,
+    green2: Option<Promise<anyhow::Result<ArcArray2<u8>>>>,
 }
 
-#[derive(Default)]
-enum Task<I, O> {
-    #[default]
-    Empty,
-    InProcess(I, Arc<AtomicCell<Option<anyhow::Result<O>>>>),
-    Done(I, O),
-    Failed(I, anyhow::Error),
+enum Promise<O> {
+    Pending(Arc<AtomicCell<Option<O>>>),
+    Ready(O),
 }
 
-impl<I, O> Task<I, O> {
-    fn poll(
-        &mut self,
-        ui: &mut Ui,
-        render_in_progress: impl FnOnce(&mut Ui, &I),
-        render_done: impl FnOnce(&mut Ui, &I, &O),
-        render_failed: impl FnOnce(&mut Ui, &I, &anyhow::Error),
-        on_done: impl FnOnce(&I, &O),
-    ) {
-        *self = match std::mem::take(self) {
-            Task::Empty => Task::Empty,
-            Task::InProcess(input, output) => match output.take() {
-                Some(ret) => match ret {
-                    Ok(output) => {
-                        render_done(ui, &input, &output);
-                        on_done(&input, &output);
-                        Task::Done(input, output)
-                    }
-                    Err(e) => {
-                        render_failed(ui, &input, &e);
-                        Task::Failed(input, e)
-                    }
-                },
-                None => {
-                    render_in_progress(ui, &input);
-                    Task::InProcess(input, output)
-                }
-            },
-            Task::Done(input, output) => {
-                render_done(ui, &input, &output);
-                Task::Done(input, output)
-            }
-            Task::Failed(input, e) => {
-                render_failed(ui, &input, &e);
-                Task::Failed(input, e)
-            }
-        };
+impl<O: Send + 'static> Promise<O> {
+    fn spawn<F>(f: F) -> Self
+    where
+        F: FnOnce(Arc<AtomicCell<Option<O>>>) + Send + 'static,
+    {
+        let output = Arc::new(AtomicCell::new(None));
+        std::thread::spawn({
+            let output = output.clone();
+            move || f(output)
+        });
+        Promise::Pending(output)
     }
 }
 
@@ -131,50 +101,49 @@ impl Tlc {
                     .add_filter("video", &["avi", "mp4"])
                     .pick_file()
                 {
-                    let output = Arc::new(AtomicCell::default());
-                    self.video = Task::InProcess(video_path.clone(), output.clone());
-                    std::thread::spawn(move || output.store(Some(video::read_video(video_path))));
+                    self.video = Some((
+                        video_path.clone(),
+                        Promise::spawn(move |output| {
+                            output.store(Some(video::read_video(video_path)))
+                        }),
+                    ));
                 }
             }
-            self.video.poll(
-                ui,
-                |ui, video_path| {
-                    ui.horizontal(|ui| {
-                        ui.label(video_path.display().to_string());
-                        ui.spinner();
-                    });
+
+            let Some((video_path, promise)) = &mut self.video else { return };
+            ui.label(video_path.display().to_string());
+            match promise {
+                Promise::Pending(output) => match output.take() {
+                    Some(ret) => {
+                        if let Ok(video_data) = &ret {
+                            video_data.decode_one(0, 0); // Trigger decoding first frame.
+                            let green2 = Arc::new(AtomicCell::new(None));
+                            self.green2 = Some(Promise::Pending(green2.clone()));
+                            let video_data = video_data.clone();
+                            std::thread::spawn(move || {
+                                green2.store(Some(video_data.decode_range(
+                                    0,
+                                    2000,
+                                    (0, 0, 800, 600),
+                                )));
+                            });
+                        }
+                        *promise = Promise::Ready(ret);
+                    }
+                    None => _ = ui.spinner(),
                 },
-                |ui, video_path, video_data| {
-                    ui.horizontal(|ui| {
-                        ui.label(video_path.display().to_string());
+                Promise::Ready(ret) => match ret {
+                    Ok(video_data) => {
                         ui.colored_label(Color32::GREEN, "✔︎");
                         ui.label(format!("帧数: {}", video_data.nframes()));
                         ui.label(format!("帧率: {}", video_data.frame_rate()));
                         let (h, w) = video_data.shape();
                         ui.label(format!("高: {h}"));
                         ui.label(format!("宽: {w}"));
-                    });
+                    }
+                    Err(e) => _ = ui.label(e.to_string()),
                 },
-                |ui, video_path, e| {
-                    ui.horizontal(|ui| {
-                        ui.label(video_path.display().to_string());
-                        ui.label(e.to_string());
-                    });
-                },
-                |_, video_data| {
-                    video_data.decode_one_frame(0, 0); // Trigger render first frame.
-                    let green2 = Arc::new(AtomicCell::new(None));
-                    self.green2 = Task::InProcess((), green2.clone());
-                    let video_data = video_data.clone();
-                    std::thread::spawn(move || {
-                        green2.store(Some(video_data.decode_range_frames(
-                            0,
-                            2000,
-                            (0, 0, 800, 600),
-                        )));
-                    });
-                },
-            );
+            }
         });
     }
 
@@ -185,56 +154,49 @@ impl Tlc {
                     .add_filter("daq", &["lvm", "xlsx"])
                     .pick_file()
                 {
-                    let output = Arc::new(AtomicCell::default());
-                    self.daq = Task::InProcess(daq_path.clone(), output.clone());
-                    std::thread::spawn(move || output.store(Some(daq::read_daq(daq_path))));
+                    self.daq = Some((
+                        daq_path.clone(),
+                        Promise::spawn(move |output| output.store(Some(daq::read_daq(daq_path)))),
+                    ));
                 }
             }
-            self.daq.poll(
-                ui,
-                |ui, daq_path| {
-                    ui.horizontal(|ui| {
-                        ui.label(daq_path.display().to_string());
-                        ui.spinner();
-                    });
+            let Some((daq_path, promise)) = &mut self.daq else { return };
+            ui.label(daq_path.display().to_string());
+            match promise {
+                Promise::Pending(output) => match output.take() {
+                    Some(ret) => *promise = Promise::Ready(ret),
+                    None => _ = ui.spinner(),
                 },
-                |ui, daq_path, daq_data| {
-                    ui.horizontal(|ui| {
-                        ui.label(daq_path.display().to_string());
+                Promise::Ready(ret) => match ret {
+                    Ok(daq_data) => {
                         ui.colored_label(Color32::GREEN, "✔︎");
                         ui.label(format!("行数: {}", daq_data.nrows()));
                         ui.label(format!("列数: {}", daq_data.ncols()));
-                    });
+                    }
+                    Err(e) => _ = ui.label(e.to_string()),
                 },
-                |ui, daq_path, e| {
-                    ui.horizontal(|ui| {
-                        ui.label(daq_path.display().to_string());
-                        ui.label(e.to_string());
-                    });
-                },
-                |_, _| {},
-            );
+            }
         });
     }
 
     fn render_green2(&mut self, ui: &mut Ui) {
-        self.green2.poll(
-            ui,
-            |ui, _| _ = ui.spinner(),
-            |ui, _, green2| {
-                ui.horizontal(|ui| {
-                    ui.colored_label(Color32::GREEN, "✔︎");
-                    ui.label(format!("行数: {}", green2.nrows()));
-                    ui.label(format!("列数: {}", green2.ncols()));
-                });
+        let Some(promise) = &mut self.green2 else { return };
+        match promise {
+            Promise::Pending(output) => match output.take() {
+                Some(ret) => *promise = Promise::Ready(ret),
+                None => _ = ui.spinner(),
             },
-            |ui, _, e| {
-                ui.horizontal(|ui| {
-                    ui.label(e.to_string());
-                });
+            Promise::Ready(ret) => match ret {
+                Ok(green2) => {
+                    ui.horizontal(|ui| {
+                        ui.colored_label(Color32::GREEN, "✔︎");
+                        ui.label(format!("行数: {}", green2.nrows()));
+                        ui.label(format!("列数: {}", green2.ncols()));
+                    });
+                }
+                Err(e) => _ = ui.label(e.to_string()),
             },
-            |_, _| {},
-        );
+        }
     }
 }
 
@@ -253,7 +215,7 @@ impl eframe::App for Tlc {
             self.render_video(ui);
             self.render_daq(ui);
 
-            if let Task::Done(_, video_data) = &self.video {
+            if let Some((_, Promise::Ready(Ok(video_data)))) = &self.video {
                 if let Some((decoded_frame, _)) = &*video_data.decoded_frame() {
                     let image = RetainedImage::from_image_bytes("", decoded_frame).unwrap();
                     let (h, w) = video_data.shape();

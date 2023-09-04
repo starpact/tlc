@@ -252,7 +252,7 @@ impl Database {
         let start_index = self.start_index()?;
         let cal_num = eval_cal_num(video_data.nframes(), daq_data.nrows(), start_index);
         let area = self.area()?;
-        let green2 = video_data.decode_range_frames(start_index.start_frame, cal_num, area)?;
+        let green2 = video_data.decode_range(start_index.start_frame, cal_num, area)?;
         let filter_method = self.filter_method()?;
         filter_point(green2, filter_method, area, point)
     }
@@ -413,7 +413,7 @@ impl Database {
         let start_index = self.start_index()?;
         let cal_num = eval_cal_num(video_data.nframes(), daq_data.nrows(), start_index);
         let area = self.area()?;
-        let green2 = video_data.decode_range_frames(start_index.start_frame, cal_num, area)?;
+        let green2 = video_data.decode_range(start_index.start_frame, cal_num, area)?;
         let filter_method = self.filter_method()?;
         let gmax_frame_indexes = filter_detect_peak(green2, filter_method);
         let thermocouples = self.thermocouples()?;

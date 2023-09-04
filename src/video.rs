@@ -10,7 +10,7 @@ use std::{
 };
 
 use anyhow::anyhow;
-use crossbeam::{atomic::AtomicCell, channel::Sender, queue::ArrayQueue};
+use crossbeam::{channel::Sender, queue::ArrayQueue};
 pub use ffmpeg::codec::{packet::Packet, Parameters};
 use ffmpeg::{codec, format::Pixel::RGB24, software::scaling, util::frame::video::Video};
 use image::{codecs::jpeg::JpegEncoder, ColorType::Rgb8};
@@ -190,7 +190,7 @@ impl VideoData {
         self.shape
     }
 
-    pub fn decode_one_frame(&self, frame_index: usize, serial_num: usize) {
+    pub fn decode_one(&self, frame_index: usize, serial_num: usize) {
         assert!(!self.worker_handles.iter().any(|h| h.is_finished()));
         self.task_ring_buffer.force_push((frame_index, serial_num));
         _ = self.task_dispatcher.try_send(());
@@ -201,7 +201,7 @@ impl VideoData {
     }
 
     #[instrument(skip(self), err)]
-    pub fn decode_range_frames(
+    pub fn decode_range(
         &self,
         start_frame: usize,
         cal_num: usize,
@@ -291,20 +291,20 @@ pub mod tests {
     }
 
     #[test]
-    fn test_decode_all_sample() {
-        _decode_all(VIDEO_PATH_SAMPLE, 0, video_meta_sample().nframes);
+    fn test_decode_range_sample() {
+        _decode_range(VIDEO_PATH_SAMPLE, 0, video_meta_sample().nframes);
     }
 
     #[ignore]
     #[test]
-    fn test_decode_all_real() {
-        _decode_all(VIDEO_PATH_REAL, 10, video_meta_real().nframes - 10);
+    fn test_decode_range_real() {
+        _decode_range(VIDEO_PATH_REAL, 10, video_meta_real().nframes - 10);
     }
 
-    fn _decode_all(video_path: &str, start_frame: usize, cal_num: usize) {
+    fn _decode_range(video_path: &str, start_frame: usize, cal_num: usize) {
         let video_data = read_video(video_path).unwrap();
         video_data
-            .decode_range_frames(start_frame, cal_num, (10, 10, 600, 800))
+            .decode_range(start_frame, cal_num, (10, 10, 600, 800))
             .unwrap();
     }
 
