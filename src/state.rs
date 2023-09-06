@@ -352,11 +352,7 @@ impl Database {
 
     #[instrument(level = "trace", skip(self), err)]
     fn nu_plot(&self, trunc: Option<(f64, f64)>) -> anyhow::Result<Vec<u8>> {
-        let name = &self.name;
-        let save_root_dir = self.save_root_dir()?;
-        let nu2 = self.nu2()?;
-        let nu_plot_path = save_root_dir.join(format!("{name}_nu_plot.png"));
-        draw_nu_plot_and_save(nu2.view(), trunc, nu_plot_path)
+        draw_nu_plot_and_save(self.nu2()?.view(), trunc)
     }
 
     fn video_data(&self) -> anyhow::Result<Arc<VideoData>> {

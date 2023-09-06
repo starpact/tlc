@@ -1,6 +1,5 @@
 use std::{io::Write, path::Path};
 
-use image::ColorType::Rgb8;
 use ndarray::prelude::*;
 use plotters::prelude::*;
 use serde::Serialize;
@@ -77,16 +76,14 @@ pub fn nan_mean(data: ArrayView2<f64>) -> f64 {
 }
 
 #[instrument(skip_all, err)]
-pub fn draw_nu_plot_and_save<P: AsRef<Path>>(
+pub fn draw_nu_plot_and_save(
     nu2: ArrayView2<f64>,
     trunc: Option<(f64, f64)>,
-    nu_plot_path: P,
 ) -> anyhow::Result<Vec<u8>> {
     let nu_nan_mean = nan_mean(nu2.view());
     let trunc = trunc.unwrap_or((nu_nan_mean * 0.6, nu_nan_mean * 2.0));
     let buf = draw_area(nu2.view(), trunc)?;
     let (h, w) = nu2.dim();
-    image::save_buffer(nu_plot_path, &buf, w as u32, h as u32, Rgb8)?;
     Ok(buf)
 }
 

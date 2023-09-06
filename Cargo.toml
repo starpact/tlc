@@ -15,9 +15,8 @@ crossbeam = "0.8"
 csv = "1.2"
 dwt = "0.5"
 eframe = { version = "0.22", default-features = false, features = ["wgpu"] }
-egui_extras = { version = "0.22", features = ["image"] }
+egui_extras = "0.22"
 ffmpeg = { version = "6.0", package = "ffmpeg-next" }
-image = "0.24"
 libm = "0.2"
 median = "0.3"
 ndarray = { version = "0.15", features = ["rayon", "serde"] }

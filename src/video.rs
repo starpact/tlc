@@ -4,16 +4,18 @@ use std::{
     path::Path,
     sync::{
         atomic::{AtomicUsize, Ordering},
-        Arc, Mutex, MutexGuard,
+        Arc, Mutex,
     },
     thread::JoinHandle,
 };
 
 use anyhow::anyhow;
-use crossbeam::{channel::Sender, queue::ArrayQueue};
+use crossbeam::{
+    channel::{Receiver, Sender},
+    queue::ArrayQueue,
+};
 pub use ffmpeg::codec::{packet::Packet, Parameters};
 use ffmpeg::{codec, format::Pixel::RGB24, software::scaling, util::frame::video::Video};
-use image::{codecs::jpeg::JpegEncoder, ColorType::Rgb8};
 use ndarray::ArcArray2;
 use serde::Serialize;
 use tracing::{info_span, instrument};
@@ -137,29 +139,14 @@ impl VideoData {
         let (task_dispatcher, task_listener) =
             crossbeam::channel::bounded(num_decode_frame_workers);
         let decoded_frame_slot = Arc::new(Mutex::new(None));
-        let worker_handles: Box<[_]> = (0..num_decode_frame_workers)
-            .map(|_| {
-                let parameters = parameters.clone();
-                let packets = packets.clone();
-                let task_ring_buffer = task_ring_buffer.clone();
-                let task_listener = task_listener.clone();
-                let decoded_frame_slot = decoded_frame_slot.clone();
-                std::thread::spawn(move || {
-                    let mut decode_converter = DecodeConverter::new(parameters).unwrap();
-                    for _ in task_listener {
-                        if let Some((frame_index, serial_num)) = task_ring_buffer.pop() {
-                            let _span = info_span!("decode_one", frame_index, serial_num).entered();
-                            if let Ok(decoded_frame) =
-                                decode_one(&mut decode_converter, &packets[frame_index])
-                            {
-                                *decoded_frame_slot.lock().unwrap() =
-                                    Some((decoded_frame, serial_num));
-                            }
-                        }
-                    }
-                })
-            })
-            .collect();
+        let worker_handles = spawn_decode_workers(
+            parameters.clone(),
+            packets.clone(),
+            num_decode_frame_workers,
+            task_listener,
+            task_ring_buffer.clone(),
+            decoded_frame_slot.clone(),
+        );
 
         let shape = {
             let decoder = codec::Context::from_parameters(parameters.clone())?
@@ -249,17 +236,38 @@ impl VideoData {
     }
 }
 
-fn decode_one(decode_converter: &mut DecodeConverter, packet: &Packet) -> anyhow::Result<Vec<u8>> {
-    let (w, h) = (
-        decode_converter.decoder.width(),
-        decode_converter.decoder.height(),
-    );
-
-    let mut buf = Vec::new();
-    let mut jpeg_encoder = JpegEncoder::new_with_quality(&mut buf, 100);
-    let img = decode_converter.decode_convert(packet)?.data(0);
-    jpeg_encoder.encode(img, w, h, Rgb8)?; // slowest
-    Ok(buf)
+#[allow(clippy::type_complexity)]
+fn spawn_decode_workers(
+    parameters: Parameters,
+    packets: Arc<[Packet]>,
+    num_decode_frame_workers: usize,
+    task_listener: Receiver<()>,
+    task_ring_buffer: Arc<ArrayQueue<(usize, usize)>>,
+    decoded_frame_slot: Arc<Mutex<Option<(Vec<u8>, usize)>>>,
+) -> Box<[JoinHandle<()>]> {
+    (0..num_decode_frame_workers)
+        .map(|_| {
+            let parameters = parameters.clone();
+            let packets = packets.clone();
+            let task_ring_buffer = task_ring_buffer.clone();
+            let task_listener = task_listener.clone();
+            let decoded_frame_slot = decoded_frame_slot.clone();
+            std::thread::spawn(move || {
+                let mut decode_converter = DecodeConverter::new(parameters).unwrap();
+                for _ in task_listener {
+                    if let Some((frame_index, serial_num)) = task_ring_buffer.pop() {
+                        let _span = info_span!("decode_one", frame_index, serial_num).entered();
+                        if let Ok(decoded_frame) =
+                            decode_converter.decode_convert(&packets[frame_index])
+                        {
+                            *decoded_frame_slot.lock().unwrap() =
+                                Some((decoded_frame.data(0).to_vec(), serial_num));
+                        }
+                    }
+                }
+            })
+        })
+        .collect()
 }
 
 #[cfg(test)]

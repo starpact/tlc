@@ -214,11 +214,10 @@ impl Tlc {
         let Some((_, Promise::Ready(Ok(video_data)))) = &self.video else { return };
 
         if let Some((decoded_frame, serial_num)) = video_data.take_decoded_frame() {
+            let (h, w) = video_data.shape();
             if serial_num > self.frame.1 {
-                self.frame = (
-                    RetainedImage::from_image_bytes("", &decoded_frame).unwrap(),
-                    serial_num,
-                );
+                let img = ColorImage::from_rgb([w as usize, h as usize], &decoded_frame);
+                self.frame = (RetainedImage::from_color_image("", img), serial_num);
             }
         }
 
