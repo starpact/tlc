@@ -16,7 +16,7 @@ use ffmpeg::{codec, format::Pixel::RGB24, software::scaling, util::frame::video:
 use image::{codecs::jpeg::JpegEncoder, ColorType::Rgb8};
 use ndarray::ArcArray2;
 use serde::Serialize;
-use tracing::instrument;
+use tracing::{info_span, instrument};
 
 pub use detect_peak::{filter_detect_peak, filter_point, FilterMethod};
 
@@ -72,6 +72,7 @@ pub struct VideoData {
     /// `task_ring_buffer` is a ring buffer that only stores the most recent tasks.
     task_ring_buffer: Arc<ArrayQueue<(usize, usize)>>,
     task_dispatcher: Sender<()>,
+    #[allow(clippy::type_complexity)]
     decoded_frame_slot: Arc<Mutex<Option<(Vec<u8>, usize)>>>,
     worker_handles: Box<[JoinHandle<()>]>,
 }
@@ -147,8 +148,9 @@ impl VideoData {
                     let mut decode_converter = DecodeConverter::new(parameters).unwrap();
                     for _ in task_listener {
                         if let Some((frame_index, serial_num)) = task_ring_buffer.pop() {
+                            let _span = info_span!("decode_one", frame_index, serial_num).entered();
                             if let Ok(decoded_frame) =
-                                decode_frame(&mut decode_converter, &packets[frame_index])
+                                decode_one(&mut decode_converter, &packets[frame_index])
                             {
                                 *decoded_frame_slot.lock().unwrap() =
                                     Some((decoded_frame, serial_num));
@@ -196,8 +198,8 @@ impl VideoData {
         _ = self.task_dispatcher.try_send(());
     }
 
-    pub fn decoded_frame(&self) -> MutexGuard<Option<(Vec<u8>, usize)>> {
-        self.decoded_frame_slot.lock().unwrap()
+    pub fn take_decoded_frame(&self) -> Option<(Vec<u8>, usize)> {
+        self.decoded_frame_slot.lock().unwrap().take()
     }
 
     #[instrument(skip(self), err)]
@@ -247,11 +249,7 @@ impl VideoData {
     }
 }
 
-#[instrument(skip_all, err)]
-fn decode_frame(
-    decode_converter: &mut DecodeConverter,
-    packet: &Packet,
-) -> anyhow::Result<Vec<u8>> {
+fn decode_one(decode_converter: &mut DecodeConverter, packet: &Packet) -> anyhow::Result<Vec<u8>> {
     let (w, h) = (
         decode_converter.decoder.width(),
         decode_converter.decoder.height(),

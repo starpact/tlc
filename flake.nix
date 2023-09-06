@@ -17,10 +17,10 @@
       devShells = {
         x86_64-linux.default = pkgs.mkShell.override { inherit stdenv; } {
           buildInputs = with pkgs; [
-            (rust-bin.selectLatestNightlyWith (toolchain: toolchain.default.override {
+            (rust-bin.stable.latest.default.override {
               extensions = [ "rust-src" "rust-analyzer" ];
               targets = [ "x86_64-unknown-linux-gnu" "x86_64-pc-windows-gnu" ];
-            }))
+            })
             ffmpeg-full
             webkitgtk
             pkg-config

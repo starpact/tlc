@@ -2,7 +2,6 @@ use std::f64::{consts::PI, NAN};
 
 use libm::erfc;
 use ndarray::Array2;
-use packed_simd::{f64x4, Simd};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
@@ -46,35 +45,9 @@ fn heat_transfer_equation(
     // We use the average of first 4 values to calculate the initial temperature.
     const FIRST_FEW_TO_CAL_T0: usize = 4;
     let t0 = temps[..FIRST_FEW_TO_CAL_T0].iter().sum::<f64>() / FIRST_FEW_TO_CAL_T0 as f64;
-    let (mut sum, mut diff_sum) = (f64x4::default(), f64x4::default());
 
-    let mut frame_index = 0;
-    while frame_index + f64x4::lanes() < gmax_frame_index {
-        let delta_temp = unsafe {
-            f64x4::from_slice_unaligned_unchecked(&temps[frame_index + 1..])
-                - f64x4::from_slice_unaligned_unchecked(&temps[frame_index..])
-        };
-        let at = a
-            * dt
-            * f64x4::new(
-                (gmax_frame_index - frame_index - 1) as f64,
-                (gmax_frame_index - frame_index - 2) as f64,
-                (gmax_frame_index - frame_index - 3) as f64,
-                (gmax_frame_index - frame_index - 4) as f64,
-            );
-        let exp_erfc = (h.powf(2.0) / k.powf(2.0) * at).exp() * erfc_simd(h / k * at.sqrt());
-        let step = (1.0 - exp_erfc) * delta_temp;
-        let diff_step = -delta_temp
-            * (2.0 * at.sqrt() / k / PI.sqrt() - (2.0 * at * h * exp_erfc) / k.powf(2.0));
-
-        frame_index += f64x4::lanes();
-        sum += step;
-        diff_sum += diff_step;
-    }
-
-    let (mut sum, mut diff_sum) = (sum.sum(), diff_sum.sum());
-
-    while frame_index < gmax_frame_index {
+    let (mut sum, mut diff_sum) = (0.0, 0.0);
+    for frame_index in 0..gmax_frame_index {
         let delta_temp =
             unsafe { temps.get_unchecked(frame_index + 1) - temps.get_unchecked(frame_index) };
         let at = a * dt * (gmax_frame_index - frame_index - 1) as f64;
@@ -83,24 +56,11 @@ fn heat_transfer_equation(
         let d_step = -delta_temp
             * (2.0 * at.sqrt() / k / PI.sqrt() - (2.0 * at * h * exp_erfc) / k.powf(2.0));
 
-        frame_index += 1;
         sum += step;
         diff_sum += d_step;
     }
 
     (tw - t0 - sum, diff_sum)
-}
-
-// Scalar version erfc from libm is much faster than SIMD version from sleef.
-fn erfc_simd(arr: Simd<[f64; 4]>) -> Simd<[f64; 4]> {
-    unsafe {
-        f64x4::new(
-            erfc(arr.extract_unchecked(0)),
-            erfc(arr.extract_unchecked(1)),
-            erfc(arr.extract_unchecked(2)),
-            erfc(arr.extract_unchecked(3)),
-        )
-    }
 }
 
 fn newtow_tangent<EQ>(equation: EQ, h0: f64, max_iter_num: usize) -> impl Fn(PointData) -> f64

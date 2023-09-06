@@ -11,14 +11,17 @@ use std::{collections::BTreeMap, path::PathBuf, sync::Arc};
 
 use crossbeam::atomic::AtomicCell;
 use eframe::{
-    egui::{self, FontData, FontDefinitions, TextEdit, Ui},
-    epaint::{Color32, FontFamily},
+    egui::{self, FontData, FontDefinitions, Slider, TextEdit, Ui},
+    epaint::{Color32, ColorImage, FontFamily},
     CreationContext,
 };
 use egui_extras::RetainedImage;
 use ndarray::ArcArray2;
 use state::StartIndex;
 use video::VideoData;
+
+const FRAME_AREA_HEIGHT: usize = 512;
+const FRAME_AREA_WIDTH: usize = 640;
 
 fn main() -> Result<(), eframe::Error> {
     video::init();
@@ -37,13 +40,20 @@ fn main() -> Result<(), eframe::Error> {
     )
 }
 
-#[derive(Default)]
 struct Tlc {
     /// User defined unique name of this experiment setting.
     name: String,
+
     video: Option<(PathBuf, Promise<anyhow::Result<Arc<VideoData>>>)>,
+
     daq: Option<(PathBuf, Promise<anyhow::Result<ArcArray2<f64>>>)>,
+
+    frame: (RetainedImage, usize),
+    frame_index1: usize,
+    serial_num: usize,
+
     _start_index: Option<StartIndex>,
+
     green2: Option<Promise<anyhow::Result<ArcArray2<u8>>>>,
 }
 
@@ -91,7 +101,22 @@ impl Tlc {
             families,
         });
 
-        Self::default()
+        Self {
+            name: String::new(),
+            video: None,
+            daq: None,
+            frame: (
+                RetainedImage::from_color_image(
+                    "",
+                    ColorImage::new([FRAME_AREA_WIDTH, FRAME_AREA_HEIGHT], Color32::GRAY),
+                ),
+                0,
+            ),
+            frame_index1: 0,
+            serial_num: 0,
+            _start_index: None,
+            green2: None,
+        }
     }
 
     fn render_video(&mut self, ui: &mut Ui) {
@@ -116,7 +141,8 @@ impl Tlc {
                 Promise::Pending(output) => match output.take() {
                     Some(ret) => {
                         if let Ok(video_data) = &ret {
-                            video_data.decode_one(0, 0); // Trigger decoding first frame.
+                            video_data.decode_one(0, 1); // Trigger decoding first frame.
+                            self.serial_num = 2;
                             let green2 = Arc::new(AtomicCell::new(None));
                             self.green2 = Some(Promise::Pending(green2.clone()));
                             let video_data = video_data.clone();
@@ -179,6 +205,34 @@ impl Tlc {
         });
     }
 
+    fn render_frame(&mut self, ui: &mut Ui) {
+        self.frame.0.show_size(
+            ui,
+            egui::vec2(FRAME_AREA_WIDTH as f32, FRAME_AREA_HEIGHT as f32),
+        );
+
+        let Some((_, Promise::Ready(Ok(video_data)))) = &self.video else { return };
+
+        if let Some((decoded_frame, serial_num)) = video_data.take_decoded_frame() {
+            if serial_num > self.frame.1 {
+                self.frame = (
+                    RetainedImage::from_image_bytes("", &decoded_frame).unwrap(),
+                    serial_num,
+                );
+            }
+        }
+
+        ui.spacing_mut().slider_width = (video_data.shape().1 / 2 - 100) as f32;
+        let old_frame_index = self.frame_index1;
+        ui.add(Slider::new(&mut self.frame_index1, 1..=video_data.nframes()).clamp_to_range(true));
+        ui.reset_style();
+
+        if old_frame_index != self.frame_index1 {
+            video_data.decode_one(self.frame_index1 - 1, self.serial_num);
+            self.serial_num += 1;
+        }
+    }
+
     fn render_green2(&mut self, ui: &mut Ui) {
         let Some(promise) = &mut self.green2 else { return };
         match promise {
@@ -214,15 +268,7 @@ impl eframe::App for Tlc {
 
             self.render_video(ui);
             self.render_daq(ui);
-
-            if let Some((_, Promise::Ready(Ok(video_data)))) = &self.video {
-                if let Some((decoded_frame, _)) = &*video_data.decoded_frame() {
-                    let image = RetainedImage::from_image_bytes("", decoded_frame).unwrap();
-                    let (h, w) = video_data.shape();
-                    image.show_size(ui, egui::vec2((w / 4) as f32, (h / 4) as f32));
-                }
-            }
-
+            self.render_frame(ui);
             self.render_green2(ui);
         });
     }

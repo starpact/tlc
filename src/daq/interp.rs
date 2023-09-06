@@ -1,5 +1,6 @@
-use ndarray::{parallel::prelude::*, prelude::*, ArcArray2};
-use packed_simd::f64x4;
+#![allow(dead_code)]
+
+use ndarray::{parallel::prelude::*, prelude::*, ArcArray2, Zip};
 use serde::{Deserialize, Serialize};
 
 use crate::daq::Thermocouple;
@@ -54,7 +55,9 @@ impl Interpolator {
 
         let data = match interp_method {
             Bilinear(..) | BilinearExtra(..) => interp2(temp2, interp_method, area, thermocouples),
-            _ => interp1(temp2, interp_method, area, thermocouples),
+            Horizontal | HorizontalExtra | Vertical | VerticalExtra => {
+                interp1(temp2.view(), interp_method, area, thermocouples)
+            }
         };
 
         Interpolator {
@@ -103,16 +106,15 @@ impl Interpolator {
 }
 
 fn interp1(
-    temp2: Array2<f64>,
+    temp2: ArrayView2<f64>,
     interp_method: InterpMethod,
     area: (u32, u32, u32, u32),
     thermocouples: &[Thermocouple],
 ) -> Array2<f64> {
     let (tl_y, tl_x, cal_h, cal_w) = area;
-    let (tl_y, tl_x, cal_h, cal_w) = (tl_y as usize, tl_x as usize, cal_h as usize, cal_w as usize);
     let cal_num = temp2.ncols();
 
-    let (interp_len, tc_pos): (_, Vec<_>) = match interp_method {
+    let (interp_len, tc_x): (_, Vec<_>) = match interp_method {
         Horizontal | HorizontalExtra => (
             cal_w,
             thermocouples
@@ -129,41 +131,26 @@ fn interp1(
         ),
         _ => unreachable!(),
     };
-
-    let do_extra = matches!(interp_method, HorizontalExtra | VerticalExtra);
-    let mut data = Array2::zeros((interp_len, cal_num));
+    let mut data = Array2::zeros((interp_len as usize, cal_num));
 
     data.axis_iter_mut(Axis(0))
         .into_par_iter()
         .enumerate()
-        .for_each(|(pos, mut row)| {
-            let pos = pos as i32;
-            let (mut li, mut ri) = (0, 1);
-            while pos >= tc_pos[ri] && ri < tc_pos.len() - 1 {
-                li += 1;
-                ri += 1;
-            }
-            let (l, r) = (tc_pos[li], tc_pos[ri]);
-            let (l_temps, r_temps) = (temp2.row(li), temp2.row(ri));
-            let l_temps = l_temps.as_slice_memory_order().unwrap();
-            let r_temps = r_temps.as_slice_memory_order().unwrap();
+        .for_each(|(pos, row)| {
+            let mut x = pos as i32;
+            let (i0, i1) = find_range(&tc_x, x);
+            let (x0, x1) = (tc_x[i0], tc_x[i1]);
 
-            let pos = if do_extra { pos } else { pos.clamp(l, r) };
+            if matches!(interp_method, Horizontal | Vertical) {
+                x = x.clamp(x0, x1)
+            };
 
-            let row = row.as_slice_memory_order_mut().unwrap();
-            let mut frame = 0;
-            while frame + f64x4::lanes() < cal_num {
-                let lv = f64x4::from_slice_unaligned(&l_temps[frame..]);
-                let rv = f64x4::from_slice_unaligned(&r_temps[frame..]);
-                let v4 = (lv * (r - pos) as f64 + rv * (pos - l) as f64) / (r - l) as f64;
-                v4.write_to_slice_unaligned(&mut row[frame..]);
-                frame += f64x4::lanes();
-            }
-            while frame < cal_num {
-                let (lv, rv) = (l_temps[frame], r_temps[frame]);
-                row[frame] = (lv * (r - pos) as f64 + rv * (pos - l) as f64) / (r - l) as f64;
-                frame += 1;
-            }
+            Zip::from(row)
+                .and(temp2.row(i0))
+                .and(temp2.row(i1))
+                .for_each(|v, v0, v1| {
+                    *v = (v0 * (x1 - x) as f64 + v1 * (x - x0) as f64) / (x1 - x0) as f64
+                });
         });
 
     data
@@ -175,13 +162,12 @@ fn interp2(
     area: (u32, u32, u32, u32),
     thermocouples: &[Thermocouple],
 ) -> Array2<f64> {
-    let (tc_h, tc_w, do_extra) = match interp_method {
-        Bilinear(tc_h, tc_w) => (tc_h as usize, tc_w as usize, false),
-        BilinearExtra(tc_h, tc_w) => (tc_h as usize, tc_w as usize, true),
+    let (tc_h, tc_w) = match interp_method {
+        Bilinear(tc_h, tc_w) => (tc_h as usize, tc_w as usize),
+        BilinearExtra(tc_h, tc_w) => (tc_h as usize, tc_w as usize),
         _ => unreachable!(),
     };
     let (tl_y, tl_x, cal_h, cal_w) = area;
-    let (tl_y, tl_x, cal_h, cal_w) = (tl_y as usize, tl_x as usize, cal_h as usize, cal_w as usize);
     let tc_x: Vec<_> = thermocouples
         .iter()
         .take(tc_w)
@@ -196,69 +182,51 @@ fn interp2(
 
     let cal_num = temp2.ncols();
     let pix_num = cal_h * cal_w;
-    let mut data = Array2::zeros((pix_num, cal_num));
+    let mut data = Array2::zeros((pix_num as usize, cal_num));
 
     data.axis_iter_mut(Axis(0))
         .into_par_iter()
         .enumerate()
-        .for_each(|(pos, mut row)| {
-            let x = (pos % cal_w) as i32;
-            let y = (pos / cal_w) as i32;
-            let (mut yi0, mut yi1) = (0, 1);
-            while y >= tc_y[yi1] && yi1 < tc_h - 1 {
-                yi0 += 1;
-                yi1 += 1;
-            }
-            let (mut xi0, mut xi1) = (0, 1);
-            while x >= tc_x[xi1] && xi1 < tc_w - 1 {
-                xi0 += 1;
-                xi1 += 1;
-            }
-            let (x0, x1, y0, y1) = (tc_x[xi0], tc_x[xi1], tc_y[yi0], tc_y[yi1]);
-            let t00 = temp2.row(tc_w * yi0 + xi0);
-            let t01 = temp2.row(tc_w * yi0 + xi1);
-            let t10 = temp2.row(tc_w * yi1 + xi0);
-            let t11 = temp2.row(tc_w * yi1 + xi1);
-            let t00 = t00.as_slice_memory_order().unwrap();
-            let t01 = t01.as_slice_memory_order().unwrap();
-            let t10 = t10.as_slice_memory_order().unwrap();
-            let t11 = t11.as_slice_memory_order().unwrap();
+        .for_each(|(pos, row)| {
+            let mut x = pos as i32 % cal_w as i32;
+            let mut y = pos as i32 / cal_w as i32;
 
-            let x = if do_extra { x } else { x.clamp(x0, x1) };
-            let y = if do_extra { y } else { y.clamp(y0, y1) };
+            let (yi0, yi1) = find_range(&tc_y, y);
+            let (y0, y1) = (tc_y[yi0], tc_y[yi1]);
+            let (xi0, xi1) = find_range(&tc_x, x);
+            let (x0, x1) = (tc_x[xi0], tc_x[xi1]);
 
-            let row = row.as_slice_memory_order_mut().unwrap();
-            let mut frame = 0;
-            while frame + f64x4::lanes() < cal_num {
-                let v00 = f64x4::from_slice_unaligned(&t00[frame..]);
-                let v01 = f64x4::from_slice_unaligned(&t01[frame..]);
-                let v10 = f64x4::from_slice_unaligned(&t10[frame..]);
-                let v11 = f64x4::from_slice_unaligned(&t11[frame..]);
-                let v4 = (v00 * (x1 - x) as f64 * (y1 - y) as f64
-                    + v01 * (x - x0) as f64 * (y1 - y) as f64
-                    + v10 * (x1 - x) as f64 * (y - y0) as f64
-                    + v11 * (x - x0) as f64 * (y - y0) as f64)
-                    / (x1 - x0) as f64
-                    / (y1 - y0) as f64;
-                v4.write_to_slice_unaligned(&mut row[frame..]);
-                frame += f64x4::lanes();
+            if matches!(interp_method, Bilinear(..)) {
+                x = x.clamp(x0, x1);
+                y = y.clamp(y0, y1);
             }
-            while frame < cal_num {
-                let v00 = t00[frame];
-                let v01 = t01[frame];
-                let v10 = t10[frame];
-                let v11 = t11[frame];
-                row[frame] = (v00 * (x1 - x) as f64 * (y1 - y) as f64
-                    + v01 * (x - x0) as f64 * (y1 - y) as f64
-                    + v10 * (x1 - x) as f64 * (y - y0) as f64
-                    + v11 * (x - x0) as f64 * (y - y0) as f64)
-                    / (x1 - x0) as f64
-                    / (y1 - y0) as f64;
-                frame += 1;
-            }
+
+            Zip::from(row)
+                .and(temp2.row(tc_w * yi0 + xi0))
+                .and(temp2.row(tc_w * yi0 + xi1))
+                .and(temp2.row(tc_w * yi1 + xi0))
+                .and(temp2.row(tc_w * yi1 + xi1))
+                .for_each(|v, v00, v01, v10, v11| {
+                    *v = (v00 * (x1 - x) as f64 * (y1 - y) as f64
+                        + v01 * (x - x0) as f64 * (y1 - y) as f64
+                        + v10 * (x1 - x) as f64 * (y - y0) as f64
+                        + v11 * (x - x0) as f64 * (y - y0) as f64)
+                        / (x1 - x0) as f64
+                        / (y1 - y0) as f64;
+                });
         });
 
     data
+}
+
+fn find_range(vs: &[i32], x: i32) -> (usize, usize) {
+    assert!(vs.len() > 1);
+    let mut i1 = 1;
+    while i1 < vs.len() - 1 && x >= vs[i1] {
+        i1 += 1;
+    }
+    let i0 = i1 - 1;
+    (i0, i1)
 }
 
 #[cfg(test)]
