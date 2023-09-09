@@ -6,7 +6,6 @@ use std::{
         atomic::{AtomicUsize, Ordering},
         Arc, Mutex,
     },
-    thread::JoinHandle,
 };
 
 use anyhow::anyhow;
@@ -34,8 +33,13 @@ pub struct VideoMeta {
     pub shape: (u32, u32),
 }
 
+#[derive(Debug, Clone)]
+pub struct VideoData {
+    inner: Arc<Inner>,
+}
+
 #[instrument(fields(video_path=?video_path.as_ref()), err)]
-pub fn read_video<P: AsRef<Path>>(video_path: P) -> anyhow::Result<Arc<VideoData>> {
+pub fn read_video<P: AsRef<Path>>(video_path: P) -> anyhow::Result<VideoData> {
     let video_path = video_path.as_ref().to_owned();
     let mut input = ffmpeg::format::input(&video_path)?;
     let video_stream = input
@@ -49,20 +53,20 @@ pub fn read_video<P: AsRef<Path>>(video_path: P) -> anyhow::Result<Arc<VideoData
         let rational = video_stream.avg_frame_rate();
         (rational.0 as f64 / rational.1 as f64).round() as usize
     };
-    let packets: Arc<[_]> = input
+    let packets: Box<[_]> = input
         .packets()
         .filter_map(|(stream, packet)| (stream.index() == video_stream_index).then_some(packet))
         .collect();
     assert_eq!(nframes, packets.len());
-    let video_data = Arc::new(VideoData::new(parameters, frame_rate, packets, 4)?);
+    let video_data = VideoData::new(parameters, frame_rate, packets, 4)?;
     Ok(video_data)
 }
 
-pub struct VideoData {
+struct Inner {
     parameters: Mutex<Parameters>,
     frame_rate: usize,
     shape: (u32, u32),
-    packets: Arc<[Packet]>,
+    packets: Box<[Packet]>,
     /// When user drags the progress bar quickly, the decoding can not keep up and
     /// there will be a significant lag. However, we actually do not have to decode
     /// every frames, and the key is how to give up decoding some frames properly.
@@ -72,14 +76,12 @@ pub struct VideoData {
     /// priority to newer frames, e.g. we should at least guarantee decoding the frame
     /// where the progress bar **stops**.
     /// `task_ring_buffer` is a ring buffer that only stores the most recent tasks.
-    task_ring_buffer: Arc<ArrayQueue<(usize, usize)>>,
+    task_ring_buffer: ArrayQueue<(usize, usize)>,
     task_dispatcher: Sender<()>,
-    #[allow(clippy::type_complexity)]
-    decoded_frame_slot: Arc<Mutex<Option<(Vec<u8>, usize)>>>,
-    worker_handles: Box<[JoinHandle<()>]>,
+    decoded_frame_slot: Mutex<Option<(Vec<u8>, usize)>>,
 }
 
-impl std::fmt::Debug for VideoData {
+impl std::fmt::Debug for Inner {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("VideoData")
             .field("frame_rate", &self.frame_rate)
@@ -130,23 +132,15 @@ impl VideoData {
     pub fn new(
         parameters: Parameters,
         frame_rate: usize,
-        packets: Arc<[Packet]>,
+        packets: Box<[Packet]>,
         num_decode_frame_workers: usize,
     ) -> anyhow::Result<VideoData> {
         assert!(num_decode_frame_workers > 0);
 
-        let task_ring_buffer = Arc::new(ArrayQueue::new(num_decode_frame_workers));
+        let task_ring_buffer = ArrayQueue::new(num_decode_frame_workers);
         let (task_dispatcher, task_listener) =
             crossbeam::channel::bounded(num_decode_frame_workers);
-        let decoded_frame_slot = Arc::new(Mutex::new(None));
-        let worker_handles = spawn_decode_workers(
-            parameters.clone(),
-            packets.clone(),
-            num_decode_frame_workers,
-            task_listener,
-            task_ring_buffer.clone(),
-            decoded_frame_slot.clone(),
-        );
+        let decoded_frame_slot = Mutex::new(None);
 
         let shape = {
             let decoder = codec::Context::from_parameters(parameters.clone())?
@@ -155,42 +149,47 @@ impl VideoData {
             (decoder.height(), decoder.width())
         };
 
-        Ok(VideoData {
-            parameters: Mutex::new(parameters),
-            frame_rate,
-            shape,
-            packets,
-            task_ring_buffer,
-            task_dispatcher,
-            decoded_frame_slot,
-            worker_handles,
-        })
+        let video_data = VideoData {
+            inner: Arc::new(Inner {
+                parameters: Mutex::new(parameters),
+                frame_rate,
+                shape,
+                packets,
+                task_ring_buffer,
+                task_dispatcher,
+                decoded_frame_slot,
+            }),
+        };
+        video_data.spawn_decode_workers(task_listener, num_decode_frame_workers);
+
+        Ok(video_data)
     }
 
     pub fn frame_rate(&self) -> usize {
-        self.frame_rate
+        self.inner.frame_rate
     }
 
     pub fn nframes(&self) -> usize {
-        self.packets.len()
+        self.inner.packets.len()
     }
 
     pub fn shape(&self) -> (u32, u32) {
-        self.shape
+        self.inner.shape
     }
 
     pub fn decode_one(&self, frame_index: usize, serial_num: usize) {
-        assert!(!self.worker_handles.iter().any(|h| h.is_finished()));
-        self.task_ring_buffer.force_push((frame_index, serial_num));
-        _ = self.task_dispatcher.try_send(());
+        self.inner
+            .task_ring_buffer
+            .force_push((frame_index, serial_num));
+        _ = self.inner.task_dispatcher.try_send(());
     }
 
     pub fn take_decoded_frame(&self) -> Option<(Vec<u8>, usize)> {
-        self.decoded_frame_slot.lock().unwrap().take()
+        self.inner.decoded_frame_slot.lock().unwrap().take()
     }
 
     #[instrument(skip(self), err)]
-    pub fn decode_range(
+    pub fn decode_range_area(
         &self,
         start_frame: usize,
         cal_num: usize,
@@ -204,7 +203,7 @@ impl VideoData {
         std::thread::scope(|s| {
             for _ in 0..std::thread::available_parallelism().unwrap().get() {
                 s.spawn(|| {
-                    let parameters = self.parameters.lock().unwrap().clone();
+                    let parameters = self.inner.parameters.lock().unwrap().clone();
                     let mut decode_converter = DecodeConverter::new(parameters).unwrap();
                     let byte_w = decode_converter.decoder.width() as usize * 3;
                     loop {
@@ -213,7 +212,7 @@ impl VideoData {
                             break;
                         }
                         let dst_frame = decode_converter
-                            .decode_convert(&self.packets[start_frame + cal_index])
+                            .decode_convert(&self.inner.packets[start_frame + cal_index])
                             .unwrap();
                         // Each frame is stored in a u8 array:
                         // |r g b r g b...r g b|r g b r g b...r g b|......|r g b r g b...r g b|
@@ -234,40 +233,28 @@ impl VideoData {
         });
         Ok(green2)
     }
-}
 
-#[allow(clippy::type_complexity)]
-fn spawn_decode_workers(
-    parameters: Parameters,
-    packets: Arc<[Packet]>,
-    num_decode_frame_workers: usize,
-    task_listener: Receiver<()>,
-    task_ring_buffer: Arc<ArrayQueue<(usize, usize)>>,
-    decoded_frame_slot: Arc<Mutex<Option<(Vec<u8>, usize)>>>,
-) -> Box<[JoinHandle<()>]> {
-    (0..num_decode_frame_workers)
-        .map(|_| {
-            let parameters = parameters.clone();
-            let packets = packets.clone();
-            let task_ring_buffer = task_ring_buffer.clone();
+    fn spawn_decode_workers(&self, task_listener: Receiver<()>, num_decode_frame_workers: usize) {
+        for _ in 0..num_decode_frame_workers {
+            let video_data = self.inner.clone();
             let task_listener = task_listener.clone();
-            let decoded_frame_slot = decoded_frame_slot.clone();
             std::thread::spawn(move || {
-                let mut decode_converter = DecodeConverter::new(parameters).unwrap();
+                let mut decode_converter =
+                    DecodeConverter::new(video_data.parameters.lock().unwrap().clone()).unwrap();
                 for _ in task_listener {
-                    if let Some((frame_index, serial_num)) = task_ring_buffer.pop() {
+                    if let Some((frame_index, serial_num)) = video_data.task_ring_buffer.pop() {
                         let _span = info_span!("decode_one", frame_index, serial_num).entered();
                         if let Ok(decoded_frame) =
-                            decode_converter.decode_convert(&packets[frame_index])
+                            decode_converter.decode_convert(&video_data.packets[frame_index])
                         {
-                            *decoded_frame_slot.lock().unwrap() =
+                            *video_data.decoded_frame_slot.lock().unwrap() =
                                 Some((decoded_frame.data(0).to_vec(), serial_num));
                         }
                     }
                 }
-            })
-        })
-        .collect()
+            });
+        }
+    }
 }
 
 #[cfg(test)]
@@ -276,20 +263,20 @@ pub mod tests {
 
     #[test]
     fn test_read_video_sample() {
-        _read_video(VIDEO_PATH_SAMPLE, video_meta_sample());
+        read_video1(VIDEO_PATH_SAMPLE, video_meta_sample());
     }
 
     #[ignore]
     #[test]
     fn test_read_video_real() {
-        _read_video(VIDEO_PATH_REAL, video_meta_real());
+        read_video1(VIDEO_PATH_REAL, video_meta_real());
     }
 
-    fn _read_video(video_path: &str, expected_video_meta: VideoMeta) {
+    fn read_video1(video_path: &str, expected_video_meta: VideoMeta) {
         let video_data = super::read_video(video_path).unwrap();
         assert_eq!(video_data.frame_rate(), expected_video_meta.frame_rate);
         let mut cnt = 0;
-        for packet in &*video_data.packets {
+        for packet in &*video_data.inner.packets {
             assert_eq!(packet.dts(), Some(cnt as i64));
             cnt += 1;
         }
@@ -298,26 +285,26 @@ pub mod tests {
 
     #[test]
     fn test_decode_range_sample() {
-        _decode_range(VIDEO_PATH_SAMPLE, 0, video_meta_sample().nframes);
+        decode_range1(VIDEO_PATH_SAMPLE, 0, video_meta_sample().nframes);
     }
 
     #[ignore]
     #[test]
     fn test_decode_range_real() {
-        _decode_range(VIDEO_PATH_REAL, 10, video_meta_real().nframes - 10);
+        decode_range1(VIDEO_PATH_REAL, 10, video_meta_real().nframes - 10);
     }
 
-    fn _decode_range(video_path: &str, start_frame: usize, cal_num: usize) {
+    fn decode_range1(video_path: &str, start_frame: usize, cal_num: usize) {
         let video_data = read_video(video_path).unwrap();
         video_data
-            .decode_range(start_frame, cal_num, (10, 10, 600, 800))
+            .decode_range_area(start_frame, cal_num, (10, 10, 600, 800))
             .unwrap();
     }
 
     pub const VIDEO_PATH_SAMPLE: &str = "./testdata/almost_empty.avi";
     pub const VIDEO_PATH_REAL: &str = "/home/yhj/Downloads/EXP/imp/videos/imp_20000_1_up.avi";
 
-    pub fn video_meta_sample() -> VideoMeta {
+    fn video_meta_sample() -> VideoMeta {
         VideoMeta {
             frame_rate: 25,
             nframes: 3,

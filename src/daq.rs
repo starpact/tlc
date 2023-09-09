@@ -16,6 +16,12 @@ pub struct DaqMeta {
     pub ncols: usize,
 }
 
+#[derive(Debug, Clone)]
+pub struct DaqData {
+    data: ArcArray2<f64>,
+    thermocouples: Box<[Option<(i32, i32)>]>,
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq)]
 pub struct Thermocouple {
     /// Column index of this thermocouple in the DAQ file.
@@ -26,9 +32,9 @@ pub struct Thermocouple {
 }
 
 #[instrument(fields(daq_path = ?daq_path.as_ref()), err)]
-pub fn read_daq<P: AsRef<Path>>(daq_path: P) -> anyhow::Result<ArcArray2<f64>> {
+pub fn read_daq<P: AsRef<Path>>(daq_path: P) -> anyhow::Result<DaqData> {
     let daq_path = daq_path.as_ref();
-    let daq_data = match daq_path
+    let data = match daq_path
         .extension()
         .ok_or_else(|| anyhow!("invalid daq path: {daq_path:?}"))?
         .to_str()
@@ -37,7 +43,13 @@ pub fn read_daq<P: AsRef<Path>>(daq_path: P) -> anyhow::Result<ArcArray2<f64>> {
         Some("xlsx") => read_daq_excel(daq_path),
         _ => bail!("only .lvm and .xlsx are supported"),
     }?;
-    Ok(daq_data.into_shared())
+    let data = data.into_shared();
+    let thermocouples = vec![None; data.ncols()].into_boxed_slice();
+
+    Ok(DaqData {
+        thermocouples,
+        data,
+    })
 }
 
 fn read_daq_lvm(daq_path: &Path) -> anyhow::Result<Array2<f64>> {
@@ -86,6 +98,20 @@ fn read_daq_excel(daq_path: &Path) -> anyhow::Result<Array2<f64>> {
     Ok(daq)
 }
 
+impl DaqData {
+    pub fn data(&self) -> &ArcArray2<f64> {
+        &self.data
+    }
+
+    pub fn thermocouples(&self) -> &[Option<(i32, i32)>] {
+        &self.thermocouples
+    }
+
+    pub fn thermocouples_mut(&mut self) -> &mut [Option<(i32, i32)>] {
+        &mut self.thermocouples
+    }
+}
+
 #[cfg(test)]
 pub mod tests {
     use approx::assert_relative_eq;
@@ -100,8 +126,8 @@ pub mod tests {
     fn test_read_daq_lvm_and_xlsx() {
         log::init();
         assert_relative_eq!(
-            read_daq(DAQ_PATH_LVM).unwrap(),
-            read_daq(DAQ_PATH_XLSX).unwrap()
+            read_daq(DAQ_PATH_LVM).unwrap().data,
+            read_daq(DAQ_PATH_XLSX).unwrap().data
         );
     }
 

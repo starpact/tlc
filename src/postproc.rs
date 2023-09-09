@@ -1,7 +1,6 @@
 use std::{io::Write, path::Path};
 
 use ndarray::prelude::*;
-use plotters::prelude::*;
 use serde::Serialize;
 use tracing::{info, instrument};
 
@@ -89,30 +88,31 @@ pub fn draw_nu_plot_and_save(
 
 #[instrument(skip(area), err)]
 fn draw_area(area: ArrayView2<f64>, trunc: (f64, f64)) -> anyhow::Result<Vec<u8>> {
-    let (h, w) = area.dim();
-    let mut buf = vec![0; h * w * 3];
-    {
-        let root = BitMapBackend::with_buffer(&mut buf, (w as u32, h as u32)).into_drawing_area();
-        let chart = ChartBuilder::on(&root).build_cartesian_2d(0..w, 0..h)?;
-        let pix_plotter = chart.plotting_area();
-        let (min, max) = trunc;
-
-        let mut iter = area.into_iter();
-        for y in 0..h {
-            for x in 0..w {
-                if let Some(nu) = iter.next() {
-                    if nu.is_nan() {
-                        pix_plotter.draw_pixel((x, y), &WHITE)?;
-                        continue;
-                    }
-                    let color_index = ((nu.clamp(min, max) - min) / (max - min) * 255.0) as usize;
-                    let [r, g, b] = JET[color_index].map(|x| (x * 255.0) as u8);
-                    pix_plotter.draw_pixel((x, y), &RGBColor(r, g, b))?;
-                }
-            }
-        }
-    }
-    Ok(buf)
+    // let (h, w) = area.dim();
+    // let mut buf = vec![0; h * w * 3];
+    // {
+    //     let root = BitMapBackend::with_buffer(&mut buf, (w as u32, h as u32)).into_drawing_area();
+    //     let chart = ChartBuilder::on(&root).build_cartesian_2d(0..w, 0..h)?;
+    //     let pix_plotter = chart.plotting_area();
+    //     let (min, max) = trunc;
+    //
+    //     let mut iter = area.into_iter();
+    //     for y in 0..h {
+    //         for x in 0..w {
+    //             if let Some(nu) = iter.next() {
+    //                 if nu.is_nan() {
+    //                     pix_plotter.draw_pixel((x, y), &WHITE)?;
+    //                     continue;
+    //                 }
+    //                 let color_index = ((nu.clamp(min, max) - min) / (max - min) * 255.0) as usize;
+    //                 let [r, g, b] = JET[color_index].map(|x| (x * 255.0) as u8);
+    //                 pix_plotter.draw_pixel((x, y), &RGBColor(r, g, b))?;
+    //             }
+    //         }
+    //     }
+    // }
+    // Ok(buf)
+    todo!()
 }
 
 /// jet colormap from Matlab.

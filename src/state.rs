@@ -122,7 +122,7 @@ impl Database {
     }
 
     fn daq_data(&self) -> anyhow::Result<ArcArray2<f64>> {
-        read_daq(self.daq_path()?)
+        todo!()
     }
 
     #[instrument(level = "trace", skip(self), err)]
@@ -252,7 +252,7 @@ impl Database {
         let start_index = self.start_index()?;
         let cal_num = eval_cal_num(video_data.nframes(), daq_data.nrows(), start_index);
         let area = self.area()?;
-        let green2 = video_data.decode_range(start_index.start_frame, cal_num, area)?;
+        let green2 = video_data.decode_range_area(start_index.start_frame, cal_num, area)?;
         let filter_method = self.filter_method()?;
         filter_point(green2, filter_method, area, point)
     }
@@ -355,7 +355,7 @@ impl Database {
         draw_nu_plot_and_save(self.nu2()?.view(), trunc)
     }
 
-    fn video_data(&self) -> anyhow::Result<Arc<VideoData>> {
+    fn video_data(&self) -> anyhow::Result<VideoData> {
         read_video(self.video_path()?)
     }
 
@@ -409,7 +409,7 @@ impl Database {
         let start_index = self.start_index()?;
         let cal_num = eval_cal_num(video_data.nframes(), daq_data.nrows(), start_index);
         let area = self.area()?;
-        let green2 = video_data.decode_range(start_index.start_frame, cal_num, area)?;
+        let green2 = video_data.decode_range_area(start_index.start_frame, cal_num, area)?;
         let filter_method = self.filter_method()?;
         let gmax_frame_indexes = filter_detect_peak(green2, filter_method);
         let thermocouples = self.thermocouples()?;

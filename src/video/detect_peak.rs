@@ -184,7 +184,7 @@ mod tests {
         log::init();
         let video_data = read_video(VIDEO_PATH_REAL).unwrap();
         let green2 = video_data
-            .decode_range(10, video_meta_real().nframes - 10, (10, 10, 800, 1000))
+            .decode_range_area(10, video_meta_real().nframes - 10, (10, 10, 800, 1000))
             .unwrap()
             .into_shared();
 
