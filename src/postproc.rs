@@ -82,12 +82,10 @@ pub fn draw_nu_plot_and_save(
     let nu_nan_mean = nan_mean(nu2.view());
     let trunc = trunc.unwrap_or((nu_nan_mean * 0.6, nu_nan_mean * 2.0));
     let buf = draw_area(nu2.view(), trunc)?;
-    let (h, w) = nu2.dim();
     Ok(buf)
 }
 
-#[instrument(skip(area), err)]
-fn draw_area(area: ArrayView2<f64>, trunc: (f64, f64)) -> anyhow::Result<Vec<u8>> {
+fn draw_area(_area: ArrayView2<f64>, _trunc: (f64, f64)) -> anyhow::Result<Vec<u8>> {
     // let (h, w) = area.dim();
     // let mut buf = vec![0; h * w * 3];
     // {

@@ -48,15 +48,13 @@ struct Tlc {
     name: String,
 
     /// Video data.
-    video: Option<(PathBuf, Promise<anyhow::Result<VideoData>>)>,
+    video: Option<Video>,
 
     /// DAQ data.
-    daq: Option<(PathBuf, Promise<anyhow::Result<DaqData>>)>,
+    daq: Option<Daq>,
 
     /// Video frame.
-    frame: (RetainedImage, usize),
-    frame_index: usize,
-    serial_num: usize,
+    frame: Frame,
 
     /// DAQ table.
     row_index: usize,
@@ -73,8 +71,7 @@ struct Tlc {
 
     /// Filter and peak detection.
     filter_method: FilterMethod,
-    #[allow(clippy::type_complexity)]
-    point_green_history: Option<((u32, u32), Promise<anyhow::Result<Vec<u8>>>)>,
+    point_green_history: Option<PointGreenHistory>,
     gmax_frame_indexes: Option<Promise<Arc<[usize]>>>,
 }
 
@@ -95,10 +92,36 @@ impl<O: Send + 'static> Promise<O> {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+struct Video {
+    path: PathBuf,
+    promise: Promise<anyhow::Result<VideoData>>,
+}
+
+struct Daq {
+    path: PathBuf,
+    promise: Promise<anyhow::Result<DaqData>>,
+}
+
+struct Frame {
+    /// Frame which is being displayed and its serial number.
+    image: (RetainedImage, usize),
+    /// Current frame index of the progress bar.
+    current_index: usize,
+    /// Monotonically increasing serial number. This is to prevent a frame which is
+    /// requested later but somehow finishes earlier.
+    serial_num: usize,
+}
+
+#[derive(Clone, Copy, PartialEq)]
 struct StartIndex {
-    pub start_frame: usize,
-    pub start_row: usize,
+    start_frame: usize,
+    start_row: usize,
+}
+
+struct PointGreenHistory {
+    /// Position relative to left top of the area.
+    position: (u32, u32),
+    promise: Promise<anyhow::Result<Vec<u8>>>,
 }
 
 impl Tlc {
@@ -130,15 +153,17 @@ impl Tlc {
             name: String::new(),
             video: None,
             daq: None,
-            frame: (
-                RetainedImage::from_color_image(
-                    "",
-                    ColorImage::new([FRAME_AREA_WIDTH, FRAME_AREA_HEIGHT], Color32::GRAY),
+            frame: Frame {
+                image: (
+                    RetainedImage::from_color_image(
+                        "",
+                        ColorImage::new([FRAME_AREA_WIDTH, FRAME_AREA_HEIGHT], Color32::GRAY),
+                    ),
+                    0,
                 ),
-                0,
-            ),
-            frame_index: 0,
-            serial_num: 0,
+                current_index: 0,
+                serial_num: 0,
+            },
             row_index: 0,
             start_index: None,
             area: Some((0, 0, 800, 600)),
@@ -169,24 +194,24 @@ impl Tlc {
                     .add_filter("video", &["avi", "mp4"])
                     .pick_file()
                 {
-                    self.video = Some((
-                        video_path.clone(),
-                        Promise::spawn(move || video::read_video(video_path)),
-                    ));
+                    self.video = Some(Video {
+                        path: video_path.clone(),
+                        promise: Promise::spawn(move || video::read_video(video_path)),
+                    });
                 }
             }
-            if let Some((video_path, _)) = &mut self.video {
-                ui.label(video_path.display().to_string());
+            if let Some(Video { path, .. }) = &mut self.video {
+                ui.label(path.display().to_string());
             }
 
-            let Some((_, promise)) = &mut self.video else { return };
+            let Some(Video { promise, .. }) = &mut self.video else { return };
             match promise {
                 Promise::Pending(output) => match output.take() {
                     Some(ret) => {
                         if let Ok(video_data) = &ret {
-                            self.frame_index = 0;
-                            self.serial_num += 1;
-                            video_data.decode_one(0, self.serial_num); // Trigger decoding first frame.
+                            self.frame.current_index = 0;
+                            self.frame.serial_num += 1;
+                            video_data.decode_one(0, self.frame.serial_num); // Trigger decoding first frame.
                         }
                         *promise = Promise::Ready(ret);
                     }
@@ -218,17 +243,17 @@ impl Tlc {
                     .add_filter("daq", &["lvm", "xlsx"])
                     .pick_file()
                 {
-                    self.daq = Some((
-                        daq_path.clone(),
-                        Promise::spawn(move || daq::read_daq(daq_path)),
-                    ));
+                    self.daq = Some(Daq {
+                        path: daq_path.clone(),
+                        promise: Promise::spawn(move || daq::read_daq(daq_path)),
+                    });
                 }
             }
-            if let Some((daq_path, _)) = &mut self.daq {
-                ui.label(daq_path.display().to_string());
+            if let Some(Daq { path, .. }) = &mut self.daq {
+                ui.label(path.display().to_string());
             }
 
-            let Some((_, promise)) = &mut self.daq else { return };
+            let Some(Daq { promise, .. }) = &mut self.daq else { return };
             match promise {
                 Promise::Pending(output) => match output.take() {
                     Some(ret) => *promise = Promise::Ready(ret),
@@ -250,30 +275,37 @@ impl Tlc {
 
     fn render_video_frame(&mut self, ui: &mut Ui) {
         ui.vertical(|ui| {
-            self.frame.0.show_size(
+            self.frame.image.0.show_size(
                 ui,
                 egui::vec2(FRAME_AREA_WIDTH as f32, FRAME_AREA_HEIGHT as f32),
             );
 
-            let Some((_, Promise::Ready(Ok(video_data)))) = &self.video else { return };
+            let Some(Video {
+                promise: Promise::Ready(Ok(video_data)),
+                ..
+            }) = &self.video
+            else {
+                return;
+            };
 
             if let Some((decoded_frame, serial_num)) = video_data.take_decoded_frame() {
                 let (h, w) = video_data.shape();
-                let current_frame = self.frame.1;
+                let current_frame = self.frame.image.1;
                 tracing::debug!(serial_num, current_frame);
-                if serial_num > self.frame.1 {
+                if serial_num > self.frame.image.1 {
                     let img = ColorImage::from_rgb([w as usize, h as usize], &decoded_frame);
-                    self.frame = (RetainedImage::from_color_image("", img), serial_num);
+                    self.frame.image = (RetainedImage::from_color_image("", img), serial_num);
                 }
             }
 
             ui.scope(|ui| {
                 ui.spacing_mut().slider_width = (video_data.shape().1 / 2 - 50) as f32;
-                let slider = Slider::new(&mut self.frame_index, 0..=video_data.nframes() - 1)
-                    .clamp_to_range(true);
+                let slider =
+                    Slider::new(&mut self.frame.current_index, 0..=video_data.nframes() - 1)
+                        .clamp_to_range(true);
                 if ui.add(slider).changed() {
-                    self.serial_num += 1;
-                    video_data.decode_one(self.frame_index, self.serial_num);
+                    self.frame.serial_num += 1;
+                    video_data.decode_one(self.frame.current_index, self.frame.serial_num);
                 };
             });
         });
@@ -281,7 +313,13 @@ impl Tlc {
 
     fn render_daq_table(&mut self, ui: &mut Ui) {
         const CELL_WIDTH: f32 = 60.0;
-        let Some((_, Promise::Ready(Ok(daq_data)))) = &mut self.daq else { return };
+        let Some(Daq {
+            promise: Promise::Ready(Ok(daq_data)),
+            ..
+        }) = &mut self.daq
+        else {
+            return;
+        };
 
         let mut builder = TableBuilder::new(ui);
         builder = builder.column(Column::auto());
@@ -353,8 +391,20 @@ impl Tlc {
         ui.vertical(|ui| {
             ui.heading("同步");
 
-            let Some((_, Promise::Ready(Ok(video_data)))) = &mut self.video else { return };
-            let Some((_, Promise::Ready(Ok(daq_data)))) = &mut self.daq else { return };
+            let Some(Video {
+                promise: Promise::Ready(Ok(video_data)),
+                ..
+            }) = &mut self.video
+            else {
+                return;
+            };
+            let Some(Daq {
+                promise: Promise::Ready(Ok(daq_data)),
+                ..
+            }) = &mut self.daq
+            else {
+                return;
+            };
 
             let start_index_old = self.start_index;
 
@@ -362,7 +412,7 @@ impl Tlc {
                 Some(start_index) => {
                     if ui.button("重新同步").clicked() {
                         *start_index = StartIndex {
-                            start_frame: self.frame_index,
+                            start_frame: self.frame.current_index,
                             start_row: self.row_index,
                         };
                     }
@@ -414,7 +464,7 @@ impl Tlc {
                 None => {
                     if ui.button("确认同步").clicked() {
                         self.start_index = Some(StartIndex {
-                            start_frame: self.frame_index,
+                            start_frame: self.frame.current_index,
                             start_row: self.row_index,
                         });
                     }
@@ -531,10 +581,12 @@ impl Tlc {
                 {
                     let green2 = green2.clone();
                     let position = (100u32, 300u32);
-                    self.point_green_history = Some((
+                    self.point_green_history = Some(PointGreenHistory {
                         position,
-                        Promise::spawn(move || filter_point(green2, filter_method, area, position)),
-                    ));
+                        promise: Promise::spawn(move || {
+                            filter_point(green2, filter_method, area, position)
+                        }),
+                    });
                 }
 
                 let green2 = green2.clone();
@@ -543,11 +595,14 @@ impl Tlc {
                 }));
             }
 
-            if let Some((position, promise)) = &self.point_green_history {
+            if let Some(PointGreenHistory { position, promise }) = &self.point_green_history {
                 match promise {
                     Promise::Pending(output) => match output.take() {
                         Some(ret) => {
-                            self.point_green_history = Some((*position, Promise::Ready(ret)))
+                            self.point_green_history = Some(PointGreenHistory {
+                                position: *position,
+                                promise: Promise::Ready(ret),
+                            })
                         }
                         None => _ = ui.spinner(),
                     },

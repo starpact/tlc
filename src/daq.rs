@@ -103,10 +103,6 @@ impl DaqData {
         &self.data
     }
 
-    pub fn thermocouples(&self) -> &[Option<(i32, i32)>] {
-        &self.thermocouples
-    }
-
     pub fn thermocouples_mut(&mut self) -> &mut [Option<(i32, i32)>] {
         &mut self.thermocouples
     }
