@@ -49,9 +49,9 @@ pub fn filter_point(
     green2: ArcArray2<u8>,
     filter_method: FilterMethod,
     area: (u32, u32, u32, u32),
-    (y, x): (usize, usize),
+    (y, x): (u32, u32),
 ) -> anyhow::Result<Vec<u8>> {
-    let (h, w) = (area.2 as usize, area.3 as usize);
+    let (h, w) = (area.2, area.3);
     if y >= h {
         bail!("y({y}) out of range({h})");
     }
@@ -59,16 +59,16 @@ pub fn filter_point(
         bail!("x({x}) out of range({w})");
     }
     let position = y * w + x;
-    let green1 = green2.column(position);
+    let green1 = green2.column(position as usize);
 
-    let temp_history = match filter_method {
+    let green_history = match filter_method {
         FilterMethod::No => green1.to_vec(),
         FilterMethod::Median { window_size } => filter_median(green1, window_size),
         FilterMethod::Wavelet { threshold_ratio } => {
             filter_wavelet(green1, &db8_wavelet(), threshold_ratio)
         }
     };
-    Ok(temp_history)
+    Ok(green_history)
 }
 
 fn apply<F>(green2: ArcArray2<u8>, f: F) -> Vec<usize>
